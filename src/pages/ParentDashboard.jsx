@@ -159,6 +159,16 @@ export default function ParentDashboard() {
     }
   }, [profile]);
 
+  // Handle payment success from Stripe redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') === 'success' || params.get('session_id')) {
+      toast.success('🎉 Paiement réussi ! Votre abonnement est maintenant actif.', { duration: 6000 });
+      // Clean query params from URL without reloading
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
   // Sync child forms when children load
   useEffect(() => {
     const forms = {};

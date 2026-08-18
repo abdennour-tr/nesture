@@ -261,6 +261,7 @@ export default function App() {
           <Route path="/forgot-password"  element={<PublicRoute><ForgotPasswordPage /></PublicRoute>} />
           <Route path="/reset-password"   element={<ResetPasswordPage />} />
           <Route path="/pricing"          element={<PricingPage />} />
+          <Route path="/checkout/success" element={<Navigate to="/parent?payment=success" replace />} />
           <Route path="/demo/alex"        element={<AdaptiveDemoPage />} />
 
           {/* Learner routes */}
