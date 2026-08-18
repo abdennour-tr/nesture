@@ -27,15 +27,17 @@ import NestureConnect from '../components/shared/NestureConnect';
 import NestureLearn from '../components/shared/NestureLearn';
 import AssignedExercises from '../components/shared/AssignedExercises';
 import ParentDashboardHeader from '../components/dashboards/ParentDashboardHeader';
+import SubscriptionTab from '../components/dashboards/SubscriptionTab';
 import { supabase, supabaseUrl } from '../services/supabaseClient';
 
 const NAV = [
-  { id: 'atlas',     label: 'Atlas Profile', icon: <Brain size={18} />, end: true },
-  { id: 'sessions',  label: 'Sessions & Progress', icon: <LineChartIcon size={18} /> },
-  { id: 'connect',   label: 'NestureConnect', icon: <Handshake size={18} /> },
-  { id: 'exercises', label: 'Assigned Exercises', icon: <Video size={18} /> },
-  { id: 'learn',     label: 'NestureLearn', icon: <Sparkles size={18} /> },
-  { id: 'settings',  label: 'Settings', icon: <Settings size={18} /> },
+  { id: 'atlas',        label: 'Atlas Profile', icon: <Brain size={18} />, end: true },
+  { id: 'sessions',     label: 'Sessions & Progress', icon: <LineChartIcon size={18} /> },
+  { id: 'connect',      label: 'NestureConnect', icon: <Handshake size={18} /> },
+  { id: 'exercises',    label: 'Assigned Exercises', icon: <Video size={18} /> },
+  { id: 'learn',        label: 'NestureLearn', icon: <Sparkles size={18} /> },
+  { id: 'subscription', label: 'Abonnement & Forfaits', icon: <CreditCard size={18} /> },
+  { id: 'settings',     label: 'Settings', icon: <Settings size={18} /> },
 ];
 
 
@@ -1322,6 +1324,10 @@ export default function ParentDashboard() {
                 childId={activeChildId}
                 childName={children.find(c => c.id === activeChildId)?.name || children.find(c => c.id === activeChildId)?.first_name || 'your child'}
               />
+            </motion.div>
+          ) : activeTab === 'subscription' ? (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+              <SubscriptionTab parentId={userId} />
             </motion.div>
           ) : activeTab === 'settings' ? (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
