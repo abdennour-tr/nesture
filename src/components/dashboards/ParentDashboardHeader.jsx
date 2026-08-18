@@ -101,6 +101,34 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
   const recommendedTier = getRecommendedTier(learnerCount);
   const tierInfo = TIER_DETAILS[recommendedTier] || TIER_DETAILS.premium;
 
+  const handleManageSubscription = async () => {
+    if (!parentId) return;
+    setSubscribing(true);
+    try {
+      toast.loading('Opening customer portal...', { id: 'portal-toast' });
+      const { data, error } = await supabase.functions.invoke('create-portal-session', {
+        body: { parentId },
+      });
+
+      if (data?.url) {
+        toast.dismiss('portal-toast');
+        window.location.href = data.url;
+        return;
+      }
+
+      if (error || data?.error) {
+        toast.dismiss('portal-toast');
+        toast.error(data?.error || error?.message || 'Unable to open portal');
+      }
+    } catch (err) {
+      toast.dismiss('portal-toast');
+      console.error('Portal error:', err);
+      toast.error('Unable to open Stripe customer portal');
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
   const handleSubscribe = async () => {
     if (!parentId) {
       toast.error('Missing Parent ID');
@@ -169,9 +197,9 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
               Parent Account Info
             </span>
             {currentSubscription && (
-              <span style={{ ...styles.activeSubTag, backgroundColor: '#10B981', color: '#fff', fontWeight: 'bold', padding: '6px 12px', borderRadius: '16px', fontSize: '14px', display: 'flex', alignItems: 'center' }}>
+              <span style={{ ...styles.activeSubTag, backgroundColor: currentSubscription.status === 'trialing' ? '#D97706' : '#10B981', color: '#fff', fontWeight: 'bold', padding: '6px 12px', borderRadius: '16px', fontSize: '14px', display: 'flex', alignItems: 'center' }}>
                 <ShieldCheck size={16} style={{ marginRight: 6 }} />
-                Plan Actif ({currentSubscription.tier?.toUpperCase()})
+                {currentSubscription.status === 'trialing' ? 'Essai Gratuit' : 'Plan Actif'} ({currentSubscription.tier?.toUpperCase()})
               </span>
             )}
           </div>
@@ -202,7 +230,7 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
         <div style={styles.rightCol}>
           <div style={styles.card}>
             <div style={styles.cardHeader}>
-              <Sparkles size={18} color={currentSubscription ? "#10B981" : "#F59E0B"} />
+              <Sparkles size={18} color={currentSubscription ? (currentSubscription.status === 'trialing' ? "#D97706" : "#10B981") : "#F59E0B"} />
               <span style={styles.recommendLabel}>
                 {currentSubscription ? "Abonnement Actuel" : "Recommended Plan"}
               </span>
@@ -210,54 +238,59 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
 
             <div style={styles.tierTitleRow}>
               <span style={styles.tierName}>
-                {currentSubscription ? currentSubscription.tier.charAt(0).toUpperCase() + currentSubscription.tier.slice(1) + " Plan" : tierInfo.name}
+                {currentSubscription ? (TIER_DETAILS[currentSubscription.tier]?.name || currentSubscription.tier) + " Plan" : tierInfo.name}
               </span>
-              <span style={{ ...styles.tierBadge, backgroundColor: currentSubscription ? "#10B981" : tierInfo.color }}>
-                {currentSubscription ? "Actif" : tierInfo.badge}
+              <span style={{ ...styles.tierBadge, backgroundColor: currentSubscription ? (currentSubscription.status === 'trialing' ? "#D97706" : "#10B981") : tierInfo.color }}>
+                {currentSubscription ? (currentSubscription.status === 'trialing' ? "Essai" : "Actif") : tierInfo.badge}
               </span>
             </div>
 
             <p style={styles.tierDesc}>
               {currentSubscription 
                 ? (currentSubscription.status === 'trialing' 
-                    ? `You're on a free trial! Your trial ends ${currentSubscription.trial_end ? new Date(currentSubscription.trial_end).toLocaleDateString() : 'soon'}.`
-                    : "Vous avez un abonnement actif. Votre compte est prêt à être utilisé !")
+                    ? `Vous êtes en période d'essai gratuit ! Votre essai se termine le ${currentSubscription.trial_end ? new Date(currentSubscription.trial_end).toLocaleDateString() : 'bientôt'}.`
+                    : "Vous avez un abonnement actif. Vous pouvez modifier ou résilier à tout moment.")
                 : tierInfo.description}
             </p>
 
-            <button
-              onClick={currentSubscription ? () => toast.success('Abonnement déjà actif !') : () => navigate('/pricing')}
-              disabled={subscribing || loadingCount}
-              style={{
-                ...styles.subscribeBtn,
-                backgroundColor: currentSubscription 
-                  ? (currentSubscription.status === 'trialing' ? '#D97706' : '#10B981')
-                  : '#0f172a',
-                opacity: (subscribing || loadingCount) ? 0.75 : 1,
-                cursor: (subscribing || loadingCount) ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {subscribing ? (
-                <>
-                  <Loader2 size={18} className="animate-spin" style={{ marginRight: 8 }} />
-                  Connecting to Stripe...
-                </>
-              ) : currentSubscription ? (
-                <>
-                  {currentSubscription.status === 'trialing' ? (
-                    <Clock size={18} style={{ marginRight: 8 }} />
-                  ) : (
-                    <ShieldCheck size={18} style={{ marginRight: 8 }} />
-                  )}
-                  {currentSubscription.status === 'trialing' ? 'Trial Active' : 'Abonnement Actif'}
-                </>
-              ) : (
-                <>
-                  <CreditCard size={18} style={{ marginRight: 8 }} />
-                  Subscribe to this plan ({tierInfo.name})
-                </>
-              )}
-            </button>
+            {currentSubscription ? (
+              <button
+                onClick={handleManageSubscription}
+                disabled={subscribing || loadingCount}
+                style={{
+                  ...styles.subscribeBtn,
+                  backgroundColor: '#0D5E6B',
+                  opacity: (subscribing || loadingCount) ? 0.75 : 1,
+                  cursor: (subscribing || loadingCount) ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {subscribing ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" style={{ marginRight: 8 }} />
+                    Redirection vers le portail...
+                  </>
+                ) : (
+                  <>
+                    <Settings size={18} style={{ marginRight: 8 }} />
+                    Gérer / Résilier mon abonnement
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={() => navigate('/pricing')}
+                disabled={subscribing || loadingCount}
+                style={{
+                  ...styles.subscribeBtn,
+                  backgroundColor: '#0f172a',
+                  opacity: (subscribing || loadingCount) ? 0.75 : 1,
+                  cursor: (subscribing || loadingCount) ? 'not-allowed' : 'pointer',
+                }}
+              >
+                <CreditCard size={18} style={{ marginRight: 8 }} />
+                Choisir un plan ({tierInfo.name})
+              </button>
+            )}
 
             {/* View All Plans link */}
             <button
@@ -265,7 +298,7 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
               style={styles.viewAllPlansBtn}
             >
               <ExternalLink size={14} style={{ marginRight: 6 }} />
-              View All Plans & Pricing
+              Voir tous les tarifs & options
             </button>
           </div>
         </div>
