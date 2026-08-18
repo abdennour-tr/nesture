@@ -28,6 +28,7 @@ import VerifyEmailPage    from './pages/VerifyEmailPage';
 import AuthCallbackPage       from './pages/AuthCallbackPage';
 import FingerCopyDifficulty   from './pages/FingerCopyDifficulty';
 import FingerCopyGame         from './pages/FingerCopyGame';
+import PricingPage            from './pages/PricingPage';
 
 import ErrorBoundary from './components/shared/ErrorBoundary';
 import './styles/global.css';
@@ -259,6 +260,7 @@ export default function App() {
           <Route path="/auth/callback"    element={<AuthCallbackPage />} />
           <Route path="/forgot-password"  element={<PublicRoute><ForgotPasswordPage /></PublicRoute>} />
           <Route path="/reset-password"   element={<ResetPasswordPage />} />
+          <Route path="/pricing"          element={<PricingPage />} />
           <Route path="/demo/alex"        element={<AdaptiveDemoPage />} />
 
           {/* Learner routes */}

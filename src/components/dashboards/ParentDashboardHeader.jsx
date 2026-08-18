@@ -1,30 +1,57 @@
 import React, { useState, useEffect } from 'react';
-import { Users, CreditCard, Sparkles, ShieldCheck, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Users, CreditCard, Sparkles, ShieldCheck, Loader2, ExternalLink, Clock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../services/supabaseClient';
 
 const TIER_DETAILS = {
+  '7day_pass': {
+    name: '7-Day Pass',
+    badge: '1 Child',
+    description: 'Full access for 7 days. Cancel anytime.',
+    color: '#2563EB',
+  },
+  premium: {
+    name: 'Premium',
+    badge: '1 Child',
+    description: 'Everything you need to support your child.',
+    color: '#0D9488',
+  },
+  family: {
+    name: 'Family',
+    badge: 'Unlimited Children',
+    description: 'One plan for the whole family.',
+    color: '#DB2777',
+  },
+  annual_family: {
+    name: 'Annual Family',
+    badge: 'Unlimited Children',
+    description: 'Best value for families. Save up to 20%.',
+    color: '#7C3AED',
+  },
+  // Backward compatibility
   starter: {
-    name: 'Starter',
-    badge: '1 - 20 Learners',
-    description: 'Ideal for small families and targeted guidance.',
+    name: 'Premium',
+    badge: '1 Child',
+    description: 'Everything you need to support your child.',
     color: '#0EA5E9',
   },
   growth: {
-    name: 'Growth',
-    badge: '21 - 50 Learners',
+    name: 'Family',
+    badge: 'Unlimited Children',
     description: 'Designed for growing learning groups and classes.',
     color: '#8B5CF6',
   },
   enterprise: {
-    name: 'Enterprise',
-    badge: '50+ Learners',
+    name: 'Annual Family',
+    badge: 'Unlimited Children',
     description: 'Tailored plan with unlimited learners and dedicated support.',
     color: '#F59E0B',
   },
 };
 
 export default function ParentDashboardHeader({ parentId, children: childrenList = [] }) {
+  const navigate = useNavigate();
   const [learnerCount, setLearnerCount] = useState(childrenList.length || 0);
   const [loadingCount, setLoadingCount] = useState(false);
   const [subscribing, setSubscribing] = useState(false);
@@ -47,7 +74,7 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
         .from('subscriptions')
         .select('*')
         .eq('parent_id', parentId)
-        .eq('status', 'active')
+        .in('status', ['active', 'trialing'])
         .order('created_at', { ascending: false })
         .limit(1);
 
@@ -67,13 +94,12 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
   };
 
   const getRecommendedTier = (count) => {
-    if (count > 50) return 'enterprise';
-    if (count > 20) return 'growth';
-    return 'starter';
+    if (count > 1) return 'family';
+    return 'premium';
   };
 
   const recommendedTier = getRecommendedTier(learnerCount);
-  const tierInfo = TIER_DETAILS[recommendedTier];
+  const tierInfo = TIER_DETAILS[recommendedTier] || TIER_DETAILS.premium;
 
   const handleSubscribe = async () => {
     if (!parentId) {
@@ -193,18 +219,22 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
 
             <p style={styles.tierDesc}>
               {currentSubscription 
-                ? "Vous avez un abonnement actif. Votre compte est prêt à être utilisé !" 
+                ? (currentSubscription.status === 'trialing' 
+                    ? `You're on a free trial! Your trial ends ${currentSubscription.trial_end ? new Date(currentSubscription.trial_end).toLocaleDateString() : 'soon'}.`
+                    : "Vous avez un abonnement actif. Votre compte est prêt à être utilisé !")
                 : tierInfo.description}
             </p>
 
             <button
-              onClick={currentSubscription ? () => toast.success('Abonnement déjà actif !') : handleSubscribe}
-              disabled={subscribing || loadingCount || currentSubscription}
+              onClick={currentSubscription ? () => toast.success('Abonnement déjà actif !') : () => navigate('/pricing')}
+              disabled={subscribing || loadingCount}
               style={{
                 ...styles.subscribeBtn,
-                backgroundColor: currentSubscription ? "#10B981" : "#0f172a",
+                backgroundColor: currentSubscription 
+                  ? (currentSubscription.status === 'trialing' ? '#D97706' : '#10B981')
+                  : '#0f172a',
                 opacity: (subscribing || loadingCount) ? 0.75 : 1,
-                cursor: (subscribing || loadingCount) ? 'not-allowed' : (currentSubscription ? 'default' : 'pointer'),
+                cursor: (subscribing || loadingCount) ? 'not-allowed' : 'pointer',
               }}
             >
               {subscribing ? (
@@ -214,8 +244,12 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
                 </>
               ) : currentSubscription ? (
                 <>
-                  <ShieldCheck size={18} style={{ marginRight: 8 }} />
-                  Abonnement Actif
+                  {currentSubscription.status === 'trialing' ? (
+                    <Clock size={18} style={{ marginRight: 8 }} />
+                  ) : (
+                    <ShieldCheck size={18} style={{ marginRight: 8 }} />
+                  )}
+                  {currentSubscription.status === 'trialing' ? 'Trial Active' : 'Abonnement Actif'}
                 </>
               ) : (
                 <>
@@ -223,6 +257,15 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
                   Subscribe to this plan ({tierInfo.name})
                 </>
               )}
+            </button>
+
+            {/* View All Plans link */}
+            <button
+              onClick={() => navigate('/pricing')}
+              style={styles.viewAllPlansBtn}
+            >
+              <ExternalLink size={14} style={{ marginRight: 6 }} />
+              View All Plans & Pricing
             </button>
           </div>
         </div>
@@ -389,5 +432,21 @@ const styles = {
     justifyContent: 'center',
     transition: 'all 0.2s ease',
     boxShadow: '0 4px 14px rgba(13, 94, 107, 0.3)',
+  },
+  viewAllPlansBtn: {
+    width: '100%',
+    marginTop: 10,
+    padding: '8px 14px',
+    borderRadius: 10,
+    border: '1.5px solid rgba(13, 94, 107, 0.3)',
+    background: 'transparent',
+    color: '#0D5E6B',
+    fontWeight: 600,
+    fontSize: '0.8rem',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
   },
 };
