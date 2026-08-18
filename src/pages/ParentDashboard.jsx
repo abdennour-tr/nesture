@@ -664,7 +664,7 @@ export default function ParentDashboard() {
         role="parent"
         childId={activeChildId}
       />
-      <Sidebar navItems={children.length > 0 ? NAV : NAV.filter(item => item.id === 'settings')} activeId={activeTab} onNavClick={setActiveTab} />
+      <Sidebar navItems={children.length > 0 ? NAV : NAV.filter(item => item.id === 'settings' || item.id === 'subscription')} activeId={activeTab} onNavClick={setActiveTab} />
       <main className="main-content">
         {/* Header */}
         <motion.div initial={{ opacity:0,y:-12 }} animate={{ opacity:1,y:0 }} style={styles.pageHeader}>
@@ -900,7 +900,7 @@ export default function ParentDashboard() {
 
 
         {/* No children state */}
-        {!loading && children.length === 0 && activeTab !== 'settings' && (
+        {!loading && children.length === 0 && activeTab !== 'settings' && activeTab !== 'subscription' && (
           <div style={{ textAlign:'center', padding:'48px 24px', color:'#6B7280' }}>
             <div style={{ fontSize:'3rem', marginBottom:12 }}><Users size={64} color="#0D5E6B" /></div>
             <h3 style={{ fontFamily:'Inter,sans-serif', color:'#374151', marginBottom: 8 }}>No children added yet</h3>
