@@ -1,0 +1,607 @@
+/* ══════════════════════════════════════════════════════════════════
+   PathTracingGame.css — Dark-themed game styles for PathTracer
+   Purple (#8B5CF6) accent to differentiate from LetterQuest (teal)
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Root layout ────────────────────────────────────────────────── */
+.ptg-root {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background: #0F1E22;
+  font-family: 'Inter', sans-serif;
+  position: relative;
+}
+
+/* ── Left panel (camera) ────────────────────────────────────────── */
+.ptg-left {
+  width: 260px;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 30, 34, 0.95);
+  border-right: 1px solid rgba(139, 92, 246, 0.12);
+  overflow-y: auto;
+  padding: 16px;
+  gap: 12px;
+}
+
+.ptg-camera-box {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4/3;
+  border-radius: 16px;
+  overflow: hidden;
+  background: #0a1518;
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  flex-shrink: 0;
+}
+
+.ptg-camera-box video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.ptg-camera-box canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(-1);
+  pointer-events: none;
+}
+
+.ptg-camera-label {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(139, 92, 246, 0.6);
+  backdrop-filter: blur(8px);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ptg-tracking-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22C55E;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
+  animation: ptg-pulse 2s ease-in-out infinite;
+}
+
+.ptg-tracking-dot.inactive {
+  background: #EF4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+}
+
+/* ── Center panel (game area) ───────────────────────────────────── */
+.ptg-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 24px;
+  overflow: hidden;
+}
+
+.ptg-game-canvas-wrap {
+  position: relative;
+  width: min(80vw, 500px);
+  height: min(80vw, 500px);
+  max-width: 500px;
+  max-height: 500px;
+  border-radius: 24px;
+  background: radial-gradient(ellipse at center, rgba(139, 92, 246, 0.06) 0%, transparent 70%);
+  border: 1px solid rgba(139, 92, 246, 0.1);
+}
+
+.ptg-game-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: 24px;
+}
+
+/* ── Path info bar (above canvas) ───────────────────────────────── */
+.ptg-path-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 20px;
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.15);
+  border-radius: 14px;
+}
+
+.ptg-path-emoji {
+  font-size: 1.6rem;
+}
+
+.ptg-path-name {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #E2E8F0;
+}
+
+.ptg-path-counter {
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: rgba(139, 92, 246, 0.7);
+  letter-spacing: 0.05em;
+}
+
+/* ── Right panel (metrics) ──────────────────────────────────────── */
+.ptg-right {
+  width: 240px;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(15, 30, 34, 0.95);
+  border-left: 1px solid rgba(139, 92, 246, 0.12);
+  padding: 16px;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.ptg-score-card {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.12) 0%, rgba(88, 28, 135, 0.08) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 16px;
+  padding: 16px;
+  text-align: center;
+}
+
+.ptg-score-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: rgba(139, 92, 246, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 4px;
+}
+
+.ptg-score-value {
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 2rem;
+  color: #C4B5FD;
+  line-height: 1;
+}
+
+.ptg-score-unit {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(139, 92, 246, 0.4);
+}
+
+/* ── Metric card ────────────────────────────────────────────────── */
+.ptg-metric {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.ptg-metric-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.ptg-metric-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #94A3B8;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ptg-metric-value {
+  font-weight: 800;
+  font-size: 0.9rem;
+  color: #E2E8F0;
+}
+
+.ptg-metric-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.ptg-metric-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease-out;
+}
+
+/* ── Paw cursor ─────────────────────────────────────────────────── */
+.ptg-paw-cursor {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%, -50%);
+  transition: left 0.05s linear, top 0.05s linear;
+  font-size: 2rem;
+  filter: drop-shadow(0 0 12px rgba(139, 92, 246, 0.5));
+}
+
+.ptg-paw-cursor.on-path {
+  filter: drop-shadow(0 0 16px rgba(34, 197, 94, 0.7));
+}
+
+.ptg-paw-cursor.off-path {
+  filter: drop-shadow(0 0 16px rgba(239, 68, 68, 0.6));
+}
+
+/* ── Progress bar ───────────────────────────────────────────────── */
+.ptg-progress-bar {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.ptg-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8B5CF6, #A78BFA, #C4B5FD);
+  border-radius: 6px;
+  transition: width 0.3s ease-out;
+}
+
+/* ── Countdown overlay ──────────────────────────────────────────── */
+.ptg-countdown-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 30, 34, 0.92);
+  backdrop-filter: blur(12px);
+  z-index: 100;
+  border-radius: 24px;
+}
+
+.ptg-countdown-number {
+  font-family: 'Inter', sans-serif;
+  font-weight: 900;
+  font-size: 8rem;
+  color: #C4B5FD;
+  text-shadow: 0 0 60px rgba(139, 92, 246, 0.5);
+  line-height: 1;
+}
+
+.ptg-countdown-text {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #94A3B8;
+  margin-top: 8px;
+}
+
+/* ── Celebration overlay ────────────────────────────────────────── */
+.ptg-celebration {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 30, 34, 0.88);
+  backdrop-filter: blur(16px);
+  z-index: 500;
+}
+
+.ptg-celebration-content {
+  text-align: center;
+  z-index: 501;
+}
+
+.ptg-celebration-emoji {
+  font-size: 5rem;
+  filter: drop-shadow(0 0 30px rgba(255, 215, 0, 0.8));
+}
+
+.ptg-celebration-text {
+  font-family: 'Inter', sans-serif;
+  font-weight: 900;
+  font-size: 2.2rem;
+  background: linear-gradient(135deg, #C4B5FD, #8B5CF6, #A78BFA);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-top: 12px;
+}
+
+/* ── Timer badge ────────────────────────────────────────────────── */
+.ptg-timer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.ptg-timer-value {
+  font-family: 'Inter', monospace;
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #E2E8F0;
+}
+
+/* ── Sound toggle ───────────────────────────────────────────────── */
+.ptg-sound-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 10px;
+  color: #A78BFA;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.ptg-sound-btn:hover {
+  background: rgba(139, 92, 246, 0.2);
+}
+
+.ptg-sound-btn.muted {
+  color: #475569;
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Top bar ────────────────────────────────────────────────────── */
+.ptg-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  z-index: 50;
+  background: linear-gradient(180deg, rgba(15, 30, 34, 0.8) 0%, transparent 100%);
+}
+
+.ptg-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ptg-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ptg-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: #94A3B8;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.ptg-back-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #E2E8F0;
+}
+
+.ptg-game-title {
+  font-family: 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 1rem;
+  color: #E2E8F0;
+  letter-spacing: -0.01em;
+}
+
+.ptg-game-title span {
+  color: #8B5CF6;
+}
+
+/* ── Start point pulse ──────────────────────────────────────────── */
+@keyframes ptg-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.15); }
+}
+
+@keyframes ptg-glow-pulse {
+  0%, 100% { box-shadow: 0 0 12px rgba(139, 92, 246, 0.4); }
+  50% { box-shadow: 0 0 28px rgba(139, 92, 246, 0.8); }
+}
+
+@keyframes ptg-dash-march {
+  to { stroke-dashoffset: -20; }
+}
+
+@keyframes ptg-particle-float {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(-30px) scale(0); opacity: 0; }
+}
+
+@keyframes ptg-draw-path {
+  from { stroke-dashoffset: var(--path-length); }
+  to { stroke-dashoffset: 0; }
+}
+
+/* ── Difficulty badge ───────────────────────────────────────────── */
+.ptg-diff-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+/* Helper classes for layout responsiveness */
+.ptg-desktop-only {
+  display: flex !important;
+}
+.ptg-mobile-only {
+  display: none !important;
+}
+
+@media (max-width: 1100px) {
+  .ptg-desktop-only {
+    display: none !important;
+  }
+  .ptg-mobile-only {
+    display: flex !important;
+  }
+
+  .ptg-root {
+    flex-direction: column !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: auto !important;
+    min-height: 100vh;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .ptg-left, .ptg-right {
+    width: 100% !important;
+    min-width: unset !important;
+    border: none !important;
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 12px !important;
+  }
+  .ptg-left { order: 2; border-top: 1px solid rgba(139, 92, 246, 0.1) !important; }
+  .ptg-center { order: 1; min-height: 450px; padding-top: 70px !important; }
+  .ptg-right { order: 3; border-top: 1px solid rgba(139, 92, 246, 0.1) !important; }
+  .ptg-camera-box { width: 200px !important; height: 150px !important; aspect-ratio: auto; }
+  .ptg-game-canvas-wrap {
+    width: min(90vw, 400px) !important;
+    height: min(90vw, 400px) !important;
+  }
+
+  /* Hamburger Menu Toggle Button */
+  .ptg-menu-toggle-btn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    color: #94A3B8;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .ptg-menu-toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #E2E8F0;
+  }
+
+  /* Dropdown container */
+  .ptg-mobile-dropdown {
+    position: absolute;
+    top: 60px;
+    left: 20px;
+    right: 20px;
+    background: rgba(15, 30, 34, 0.96);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(139, 92, 246, 0.25);
+    border-radius: 16px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    z-index: 120;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 20px rgba(139, 92, 246, 0.15);
+  }
+
+  .ptg-dropdown-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    padding-bottom: 10px;
+  }
+
+  .ptg-dropdown-path-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(139, 92, 246, 0.08);
+    border: 1px solid rgba(139, 92, 246, 0.15);
+    border-radius: 10px;
+    padding: 8px 12px;
+  }
+
+  .ptg-dropdown-path-emoji {
+    font-size: 1.3rem;
+  }
+
+  .ptg-dropdown-path-name {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: #E2E8F0;
+  }
+
+  .ptg-dropdown-path-counter {
+    margin-left: auto;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #A78BFA;
+  }
+
+  .ptg-dropdown-controls {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .ptg-center { padding: 12px !important; }
+  .ptg-game-canvas-wrap {
+    width: min(95vw, 350px) !important;
+    height: min(95vw, 350px) !important;
+  }
+  .ptg-path-info { padding: 8px 14px; }
+  .ptg-topbar { padding: 10px 14px; }
+  .ptg-score-value { font-size: 1.5rem; }
+}

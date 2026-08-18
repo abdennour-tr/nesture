@@ -1,0 +1,9 @@
+node_modules
+.env
+.env.local
+.env.*.local
+build/
+scratch.js
+test-results/
+playwright-report/
+scratch/
