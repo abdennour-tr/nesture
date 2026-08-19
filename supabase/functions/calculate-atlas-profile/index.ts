@@ -229,7 +229,7 @@ serve(async (req) => {
     }
 
     // 4. Generate narrative support plan (single LLM call to Anthropic Claude)
-    let d12SupportPlan = "A warm, strengths-based support plan will be compiled once API access completes.";
+    let d12SupportPlan: string | null = null;
 
     if (anthropicApiKey) {
       try {

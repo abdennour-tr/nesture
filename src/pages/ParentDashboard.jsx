@@ -4,7 +4,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid
 } from 'recharts';
-import { Download, Mail, Play, Trash2, ChevronLeft, ChevronRight, UserCheck, User, Lock, Calendar, Activity, X, Shield, Settings, Save, AlertTriangle, Edit3, Brain, LineChart as LineChartIcon, Users, Sparkles, Construction, Camera, Handshake, Eye, EyeOff, Video } from 'lucide-react';
+import { Download, Mail, Play, Trash2, ChevronLeft, ChevronRight, UserCheck, User, Lock, Calendar, Activity, X, Shield, Settings, Save, AlertTriangle, Edit3, Brain, LineChart as LineChartIcon, Users, Sparkles, Construction, Camera, Handshake, Eye, EyeOff, Video, CreditCard } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import Sidebar from '../components/shared/Sidebar';
@@ -128,6 +128,7 @@ export default function ParentDashboard() {
   const [pendingRequests, setPendingRequests] = useState([]);
   const [atlasRefresh, setAtlasRefresh] = useState(0);
   const [inProgressQuestionnaires, setInProgressQuestionnaires] = useState({});
+  const [currentSubscription, setCurrentSubscription] = useState(null);
 
   // Settings state
   const [parentForm, setParentForm] = useState({ first_name: '', last_name: '' });
@@ -154,6 +155,40 @@ export default function ParentDashboard() {
   const [resetPwdShowNew, setResetPwdShowNew] = useState(false);
   const [resetPwdShowConfirm, setResetPwdShowConfirm] = useState(false);
 
+  const navigate = useNavigate();
+
+  // ── Subscription Limit Logic ──────────────────────────────────────────
+  const getChildLimit = (sub) => {
+    if (!sub) return 0; // No subscription = no children allowed
+    const tier = sub.tier?.toLowerCase();
+    if (tier === 'family' || tier === 'annual_family' || tier === 'growth' || tier === 'enterprise') {
+      return Infinity; // Unlimited children
+    }
+    // 7day_pass, premium, starter = 1 child
+    return 1;
+  };
+
+  const childLimit = getChildLimit(currentSubscription);
+
+  const openAddChildWithCheck = () => {
+    if (!currentSubscription) {
+      toast.error(
+        "Vous devez d'abord souscrire à un abonnement pour ajouter un enfant.",
+        { duration: 5000, icon: '🔒' }
+      );
+      navigate('/pricing');
+      return;
+    }
+    if (children.length >= childLimit) {
+      toast.error(
+        `Limite atteinte (${childLimit} enfant${childLimit > 1 ? 's' : ''}). Passez au plan Family pour ajouter plus d'enfants.`,
+        { duration: 5000, icon: '⚠️' }
+      );
+      return;
+    }
+    setShowAddChildModal(true);
+  };
+
   // Sync parent form when profile loads
   useEffect(() => {
     if (profile) {
@@ -168,6 +203,21 @@ export default function ParentDashboard() {
       toast.success('🎉 Paiement réussi ! Votre abonnement est maintenant actif.', { duration: 6000 });
       // Clean query params from URL without reloading
       window.history.replaceState({}, document.title, window.location.pathname);
+      
+      // Polling: Webhook might take a few seconds to update DB. Refetch a few times.
+      let attempts = 0;
+      const interval = setInterval(() => {
+        attempts++;
+        if (typeof fetchAll === 'function') {
+          fetchAll();
+        }
+        // Stop polling after 4 attempts (8 seconds)
+        if (attempts >= 4) {
+          clearInterval(interval);
+        }
+      }, 2000);
+
+      return () => clearInterval(interval);
     }
   }, []);
 
@@ -272,13 +322,27 @@ export default function ParentDashboard() {
       console.log(`[ParentDashboard Fetch] Fetching children for parentId: ${userId} | Impersonating: ${!!originalProfile}`);
     }
     try {
-      const [learnersRes, profRes] = await Promise.all([
+      const [learnersRes, profRes, subRes] = await Promise.all([
         api.get(`/learners/by-parent/${userId}`),
-        api.get('/users/professionals').catch(() => ({ data: [] }))
+        api.get('/users/professionals').catch(() => ({ data: [] })),
+        supabase
+          .from('subscriptions')
+          .select('*')
+          .eq('parent_id', userId)
+          .in('status', ['active', 'trialing'])
+          .order('created_at', { ascending: false })
+          .limit(1)
       ]);
       const kids = learnersRes.data;
       setChildren(kids);
       setProfessionalsList(profRes.data || []);
+
+      // Set subscription state
+      if (subRes.data && subRes.data.length > 0) {
+        setCurrentSubscription(subRes.data[0]);
+      } else {
+        setCurrentSubscription(null);
+      }
 
       // Fetch in-progress questionnaires for all children
       if (kids.length > 0) {
@@ -686,7 +750,7 @@ export default function ParentDashboard() {
         </motion.div>
 
         {/* Parent Subscription Header with Payment Button */}
-        <ParentDashboardHeader parentId={userId} children={children} />
+        <ParentDashboardHeader parentId={userId} children={children} currentSubscription={currentSubscription} />
 
         {/* ── Child Selector ── */}
         {children.length > 0 && (
@@ -771,7 +835,7 @@ export default function ParentDashboard() {
               </motion.button>
             )}
             <motion.button
-              onClick={() => setShowAddChildModal(true)}
+              onClick={openAddChildWithCheck}
               whileHover={{ y:-2 }} whileTap={{ scale:0.97 }}
               style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
@@ -903,18 +967,39 @@ export default function ParentDashboard() {
         {!loading && children.length === 0 && activeTab !== 'settings' && activeTab !== 'subscription' && (
           <div style={{ textAlign:'center', padding:'48px 24px', color:'#6B7280' }}>
             <div style={{ fontSize:'3rem', marginBottom:12 }}><Users size={64} color="#0D5E6B" /></div>
-            <h3 style={{ fontFamily:'Inter,sans-serif', color:'#374151', marginBottom: 8 }}>No children added yet</h3>
-            <p style={{ fontSize:'0.875rem', marginBottom: 24 }}>Add your child's profile to start tracking their progress.</p>
-            <button
-              onClick={() => setShowAddChildModal(true)}
-              style={{
-                padding: '12px 24px', background: 'linear-gradient(135deg, #0D5E6B, #1A8FA0)',
-                color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700,
-                fontSize: '0.95rem', cursor: 'pointer', fontFamily: 'Inter, sans-serif'
-              }}
-            >
-              Add your first child
-            </button>
+            {currentSubscription ? (
+              <>
+                <h3 style={{ fontFamily:'Inter,sans-serif', color:'#374151', marginBottom: 8 }}>No children added yet</h3>
+                <p style={{ fontSize:'0.875rem', marginBottom: 24 }}>Add your child's profile to start tracking their progress.</p>
+                <button
+                  onClick={openAddChildWithCheck}
+                  style={{
+                    padding: '12px 24px', background: 'linear-gradient(135deg, #0D5E6B, #1A8FA0)',
+                    color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700,
+                    fontSize: '0.95rem', cursor: 'pointer', fontFamily: 'Inter, sans-serif'
+                  }}
+                >
+                  Add your first child
+                </button>
+              </>
+            ) : (
+              <>
+                <h3 style={{ fontFamily:'Inter,sans-serif', color:'#374151', marginBottom: 8 }}>Choisissez un abonnement</h3>
+                <p style={{ fontSize:'0.875rem', marginBottom: 24 }}>Vous devez souscrire à un abonnement pour ajouter un enfant et accéder à toutes les fonctionnalités.</p>
+                <button
+                  onClick={() => navigate('/pricing')}
+                  style={{
+                    padding: '14px 28px', background: 'linear-gradient(135deg, #F59E0B, #D97706)',
+                    color: '#fff', border: 'none', borderRadius: 12, fontWeight: 700,
+                    fontSize: '1rem', cursor: 'pointer', fontFamily: 'Inter, sans-serif',
+                    boxShadow: '0 4px 14px rgba(245, 158, 11, 0.35)',
+                    display: 'inline-flex', alignItems: 'center', gap: 8
+                  }}
+                >
+                  🔒 Voir les abonnements
+                </button>
+              </>
+            )}
           </div>
         )}
 
@@ -1327,7 +1412,7 @@ export default function ParentDashboard() {
             </motion.div>
           ) : activeTab === 'subscription' ? (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-              <SubscriptionTab parentId={userId} />
+              <SubscriptionTab parentId={userId} currentSubscription={currentSubscription} />
             </motion.div>
           ) : activeTab === 'settings' ? (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>

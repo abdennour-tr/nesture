@@ -72,6 +72,9 @@ export default function SmartNotifications({ notifications: propNotifs = [] }) {
   });
 
   const handleToggle = () => {
+    if (!isOpen && unreadCount > 0) {
+      handleMarkAllRead();
+    }
     setIsOpen(!isOpen);
   };
 

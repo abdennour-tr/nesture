@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, CreditCard, Sparkles, ShieldCheck, Loader2, ExternalLink, Clock } from 'lucide-react';
+import { Users, CreditCard, Sparkles, ShieldCheck, Loader2, ExternalLink, Clock, Settings } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../services/supabaseClient';
 
@@ -50,48 +50,16 @@ const TIER_DETAILS = {
   },
 };
 
-export default function ParentDashboardHeader({ parentId, children: childrenList = [] }) {
+export default function ParentDashboardHeader({ parentId, children: childrenList = [], currentSubscription = null }) {
   const navigate = useNavigate();
   const [learnerCount, setLearnerCount] = useState(childrenList.length || 0);
-  const [loadingCount, setLoadingCount] = useState(false);
   const [subscribing, setSubscribing] = useState(false);
-  const [currentSubscription, setCurrentSubscription] = useState(null);
 
   useEffect(() => {
     if (childrenList && Array.isArray(childrenList)) {
       setLearnerCount(childrenList.length);
     }
-    
-    if (parentId) {
-      fetchLearnerCountAndSubscription();
-    }
-  }, [parentId, childrenList]);
-
-  const fetchLearnerCountAndSubscription = async () => {
-    setLoadingCount(true);
-    try {
-      const { data: subDataArray, error: subError } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('parent_id', parentId)
-        .in('status', ['active', 'trialing'])
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      const subData = subDataArray && subDataArray.length > 0 ? subDataArray[0] : null;
-
-      console.log('DEBUG: subData fetched:', subData);
-      if (subError) console.error('DEBUG: subError:', subError);
-
-      if (subData) {
-        setCurrentSubscription(subData);
-      }
-    } catch (err) {
-      console.error('Error loading subscription:', err);
-    } finally {
-      setLoadingCount(false);
-    }
-  };
+  }, [childrenList]);
 
   const getRecommendedTier = (count) => {
     if (count > 1) return 'family';
@@ -219,7 +187,7 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
                 id="learner-count-readonly"
                 type="text"
                 readOnly
-                value={loadingCount ? 'Loading...' : `${learnerCount} active learner${learnerCount !== 1 ? 's' : ''}`}
+                value={`${learnerCount} active learner${learnerCount !== 1 ? 's' : ''}`}
                 style={styles.readOnlyInput}
               />
             </div>
@@ -238,10 +206,21 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
 
             <div style={styles.tierTitleRow}>
               <span style={styles.tierName}>
-                {currentSubscription ? (TIER_DETAILS[currentSubscription.tier]?.name || currentSubscription.tier) + " Plan" : tierInfo.name}
+                {currentSubscription ? (TIER_DETAILS[currentSubscription.tier]?.name || currentSubscription.tier) : tierInfo.name}
               </span>
-              <span style={{ ...styles.tierBadge, backgroundColor: currentSubscription ? (currentSubscription.status === 'trialing' ? "#D97706" : "#10B981") : tierInfo.color }}>
-                {currentSubscription ? (currentSubscription.status === 'trialing' ? "Essai" : "Actif") : tierInfo.badge}
+              <span style={{ 
+                ...styles.tierBadge, 
+                backgroundColor: currentSubscription 
+                  ? (currentSubscription.status === 'trialing' 
+                      ? "#D97706" 
+                      : (currentSubscription.cancel_at_period_end ? "#EF4444" : "#10B981")) 
+                  : tierInfo.color 
+              }}>
+                {currentSubscription 
+                  ? (currentSubscription.status === 'trialing' 
+                      ? "Essai" 
+                      : (currentSubscription.cancel_at_period_end ? "S'arrête bientôt" : "Actif")) 
+                  : tierInfo.badge}
               </span>
             </div>
 
@@ -249,19 +228,21 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
               {currentSubscription 
                 ? (currentSubscription.status === 'trialing' 
                     ? `Vous êtes en période d'essai gratuit ! Votre essai se termine le ${currentSubscription.trial_end ? new Date(currentSubscription.trial_end).toLocaleDateString() : 'bientôt'}.`
-                    : "Vous avez un abonnement actif. Vous pouvez modifier ou résilier à tout moment.")
+                    : (currentSubscription.cancel_at_period_end
+                        ? `Vous avez annulé votre abonnement. Il restera actif jusqu'au ${currentSubscription.current_period_end ? new Date(currentSubscription.current_period_end).toLocaleDateString() : 'à la fin de la période'}.`
+                        : "Vous avez un abonnement actif. Vous pouvez modifier ou résilier à tout moment."))
                 : tierInfo.description}
             </p>
 
             {currentSubscription ? (
               <button
                 onClick={handleManageSubscription}
-                disabled={subscribing || loadingCount}
+                disabled={subscribing}
                 style={{
                   ...styles.subscribeBtn,
                   backgroundColor: '#0D5E6B',
-                  opacity: (subscribing || loadingCount) ? 0.75 : 1,
-                  cursor: (subscribing || loadingCount) ? 'not-allowed' : 'pointer',
+                  opacity: subscribing ? 0.75 : 1,
+                  cursor: subscribing ? 'not-allowed' : 'pointer',
                 }}
               >
                 {subscribing ? (
@@ -279,12 +260,12 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
             ) : (
               <button
                 onClick={() => navigate('/pricing')}
-                disabled={subscribing || loadingCount}
+                disabled={subscribing}
                 style={{
                   ...styles.subscribeBtn,
                   backgroundColor: '#0f172a',
-                  opacity: (subscribing || loadingCount) ? 0.75 : 1,
-                  cursor: (subscribing || loadingCount) ? 'not-allowed' : 'pointer',
+                  opacity: subscribing ? 0.75 : 1,
+                  cursor: subscribing ? 'not-allowed' : 'pointer',
                 }}
               >
                 <CreditCard size={18} style={{ marginRight: 8 }} />

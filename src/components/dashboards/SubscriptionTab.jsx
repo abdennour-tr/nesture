@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuthStore } from '../../store';
 import { supabase } from '../../services/supabaseClient';
 import toast from 'react-hot-toast';
@@ -210,37 +210,16 @@ const COMPARISON_FEATURES = [
   { name: 'Cancel Anytime', icon: <RefreshCcw size={16} />, '7day_pass': true, premium: true, family: true, annual_family: true },
 ];
 
-export default function SubscriptionTab({ parentId }) {
+export default function SubscriptionTab({ parentId, currentSubscription = null }) {
   const { user, profile } = useAuthStore();
   const [billingPeriod, setBillingPeriod] = useState('monthly');
   const [subscribingPlan, setSubscribingPlan] = useState(null);
-  const [currentSub, setCurrentSub] = useState(null);
   const [loadingPortal, setLoadingPortal] = useState(false);
 
+  // Use the centralized subscription from ParentDashboard
+  const currentSub = currentSubscription;
+
   const currentPlans = PLANS[billingPeriod];
-
-  useEffect(() => {
-    if (parentId) {
-      fetchSubscription();
-    }
-  }, [parentId]);
-
-  const fetchSubscription = async () => {
-    try {
-      const { data } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('parent_id', parentId)
-        .in('status', ['active', 'trialing'])
-        .order('created_at', { ascending: false })
-        .limit(1);
-      if (data && data.length > 0) {
-        setCurrentSub(data[0]);
-      }
-    } catch (e) {
-      console.error('Error fetching subscription:', e);
-    }
-  };
 
   const handleOpenPortal = async () => {
     setLoadingPortal(true);
@@ -316,7 +295,9 @@ export default function SubscriptionTab({ parentId }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
               <span style={{
-                background: currentSub.status === 'trialing' ? '#D97706' : '#10B981',
+                background: currentSub.status === 'trialing' 
+                  ? '#D97706' 
+                  : (currentSub.cancel_at_period_end ? '#EF4444' : '#10B981'),
                 color: '#fff',
                 fontWeight: 700,
                 fontSize: '0.75rem',
@@ -324,7 +305,9 @@ export default function SubscriptionTab({ parentId }) {
                 borderRadius: 20,
                 textTransform: 'uppercase'
               }}>
-                {currentSub.status === 'trialing' ? 'Essai Gratuit Actif' : 'Abonnement Actif'}
+                {currentSub.status === 'trialing' 
+                  ? 'Essai Gratuit Actif' 
+                  : (currentSub.cancel_at_period_end ? "S'arrête Bientôt" : 'Abonnement Actif')}
               </span>
               <span style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0F172A' }}>
                 Plan {currentSub.tier?.toUpperCase()}

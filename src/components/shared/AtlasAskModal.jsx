@@ -247,14 +247,17 @@ Rules:
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: 'llama-3.1-8b-instant',
+          model: 'openai/gpt-oss-20b',
           messages: apiMessages,
           temperature: 0.0, // strict deterministic responses
           max_tokens: 500,
         })
       });
 
-      if (!response.ok) throw new Error('API Error');
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API Error: ${response.status} - ${errorText}`);
+      }
       
       const data = await response.json();
       const aiText = data.choices[0].message.content;

@@ -96,6 +96,23 @@ serve(async (req) => {
       return "monthly";
     };
 
+    // ── Helper: Determine tier from price ID ─────────────────────────────
+    const getTierFromPrice = (subscription: Stripe.Subscription): string | null => {
+      const priceId = subscription.items?.data?.[0]?.price?.id;
+      if (!priceId) return null;
+
+      const envKeys = Deno.env.toObject();
+      for (const [key, value] of Object.entries(envKeys)) {
+        if (value === priceId) {
+          if (key.includes("7DAY_PASS")) return "7day_pass";
+          if (key.includes("PREMIUM")) return "premium";
+          if (key.includes("ANNUAL_FAMILY") || key.includes("ENTERPRISE")) return "annual_family";
+          if (key.includes("FAMILY") || key.includes("GROWTH")) return "family";
+        }
+      }
+      return null;
+    };
+
     // ── Handler: checkout.session.completed ──────────────────────────────
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
@@ -128,6 +145,7 @@ serve(async (req) => {
             billing_period: billingPeriod,
             status: trialEnd ? "trialing" : "active",
             current_period_end: currentPeriodEnd,
+            cancel_at_period_end: stripeSub ? stripeSub.cancel_at_period_end : false,
             trial_end: trialEnd,
             updated_at: new Date().toISOString(),
           },
@@ -172,7 +190,7 @@ serve(async (req) => {
       }
 
       const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
-      const tier = subscription.metadata?.tier || "premium";
+      const tier = getTierFromPrice(subscription) || subscription.metadata?.tier || "premium";
       const billingPeriod = getBillingPeriod(subscription);
       const currentPeriodEnd = extractPeriodEnd(subscription);
       const trialEnd = extractTrialEnd(subscription);
@@ -208,6 +226,7 @@ serve(async (req) => {
           learner_count: currentLearnerCount,
           status: subscription.status,
           current_period_end: currentPeriodEnd,
+          cancel_at_period_end: subscription.cancel_at_period_end,
           trial_end: trialEnd,
           updated_at: new Date().toISOString(),
         },

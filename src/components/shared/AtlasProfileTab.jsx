@@ -639,7 +639,10 @@ export default function AtlasProfileTab({ childId, childName = 'your child', rea
     ? t('atlas.profileFromQuestionnaire', 'Profile built from Atlas 360° questionnaire')
     : `${t('atlas.synthesizedFrom', 'AI-synthesized profile from')} ${validDocuments.length} ${t('atlas.docs', 'uploaded document')}${validDocuments.length !== 1 ? 's' : ''}`;
   const homePlan = hasValidatedDocs ? (profile?.home_plan || {}) : {};
-  const supportPlanText = domainScores?.d12_support_plan || homePlan?.support_plan || '';
+  let supportPlanText = domainScores?.d12_support_plan || homePlan?.support_plan || '';
+  if (supportPlanText === 'A warm, strengths-based support plan will be compiled once API access completes.') {
+    supportPlanText = '';
+  }
 
   const strengthsListRaw = hasValidatedDocs && Array.isArray(profile?.strengths) ? profile.strengths : [];
   const challengesListRaw = hasValidatedDocs && Array.isArray(profile?.challenges) ? profile.challenges : [];
@@ -750,7 +753,13 @@ export default function AtlasProfileTab({ childId, childName = 'your child', rea
 
   // ── Home plan helper ─────────────────────────────────────────────────────────
   const routineItems = Array.isArray(homePlan.daily_routine)
-    ? homePlan.daily_routine.filter(item => item && (item.activity || item.time))
+    ? homePlan.daily_routine.filter(item => {
+        if (!item) return false;
+        if (!item.activity && !item.time) return false;
+        // Filter out the backend dummy routine placeholder
+        if (item.time === 'Morning' && (item.activity === 'School/Home' || item.activity === 'Home')) return false;
+        return true;
+      })
     : [];
 
   // ── Functional wellness helper ───────────────────────────────────────────────
