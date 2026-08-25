@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Brain, Loader2 } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
@@ -81,6 +81,13 @@ export default function Atlas360Questionnaire({ isOpen, onClose, childId, childN
   const [currentStep, setCurrentStep] = useState(initialStep || 1);
   const [loadingInitial, setLoadingInitial] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
+    }
+  }, [currentStep]);
 
   // Core state matching DB columns
   const [responses, setResponses] = useState({
@@ -388,7 +395,7 @@ export default function Atlas360Questionnaire({ isOpen, onClose, childId, childN
           <span style={styles.stepIndicatorRight}>Step {currentStep} of 11</span>
         </div>
 
-        <div style={styles.contentScroll}>
+        <div ref={scrollRef} style={styles.contentScroll}>
           {loadingInitial ? (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 60 }}>
               <Loader2 size={32} className="animate-spin" color="#2D7D6F" />

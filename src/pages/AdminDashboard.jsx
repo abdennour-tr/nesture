@@ -4,7 +4,7 @@ import {
   Shield, FileSpreadsheet, Users, BookOpen, LogOut, Menu, X,
   Search, ChevronLeft, ChevronRight, Download, Trash2, Plus,
   UserPlus, Star, MapPin, Globe, Clock, Play, Headphones, BookOpenText, AlertTriangle,
-  Edit, Key, Eye, ScrollText, Video, Edit3
+  Edit, Key, Eye, ScrollText, Video, Edit3, Send
 } from 'lucide-react';
 import api from '../services/api';
 import toast from 'react-hot-toast';
@@ -25,6 +25,8 @@ const AVAILABLE_TAGS = [
 ];
 
 const TYPE_ICONS = { video: Play, podcast: Headphones, article: BookOpenText };
+
+const DEFAULT_AVATAR = "data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%23e2e8f0' d='M512 0C229.23 0 0 229.23 0 512s229.23 512 512 512 512-229.23 512-512S794.77 0 512 0z'/%3E%3Cpath fill='%2394a3b8' d='M512 256c-88.37 0-160 71.63-160 160 0 88.37 71.63 160 160 160s160-71.63 160-160c0-88.37-71.63-160-160-160zm0 384c-176.73 0-320 89.54-320 200v32c0 17.67 14.33 32 32 32h576c17.67 0 32-14.33 32-32v-32c0-110.46-143.27-200-320-200z'/%3E%3C/svg%3E";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function AdminDashboard() {
@@ -64,7 +66,7 @@ export default function AdminDashboard() {
   const [specialists, setSpecialists]     = useState([]);
   const [showSpecForm, setShowSpecForm]   = useState(false);
   const [specForm, setSpecForm]           = useState({
-    email: '', password: '', first_name: '', last_name: '',
+    email: '', first_name: '', last_name: '',
     specialty: '', location: '', bio: '', avatar_url: '', is_featured: false,
   });
   const [specAvatarFile, setSpecAvatarFile] = useState(null);
@@ -484,12 +486,8 @@ export default function AdminDashboard() {
   // ── Specialist CRUD ──────────────────────────────────────────────────────
   const handleSpecSubmit = async (e) => {
     e.preventDefault();
-    if (!specForm.email || !specForm.password || !specForm.first_name) {
-      toast.error('Email, password, and first name are required');
-      return;
-    }
-    if (specForm.password.length < 6) {
-      toast.error('Password must be at least 6 characters');
+    if (!specForm.email || !specForm.first_name) {
+      toast.error('Email and first name are required');
       return;
     }
     setSpecSaving(true);
@@ -502,8 +500,8 @@ export default function AdminDashboard() {
       }
 
       await api.post('/admin/specialists', { ...specForm, avatar_url: finalAvatarUrl });
-      toast.success('Specialist added successfully!');
-      setSpecForm({ email: '', password: '', first_name: '', last_name: '', specialty: '', location: '', bio: '', is_featured: false });
+      toast.success('Specialist invited successfully!');
+      setSpecForm({ email: '', first_name: '', last_name: '', specialty: '', location: '', bio: '', is_featured: false });
       setSpecAvatarFile(null);
       setShowSpecForm(false);
       fetchSpecialists();
@@ -539,6 +537,27 @@ export default function AdminDashboard() {
     } catch (err) {
       toast.error(err?.response?.data?.detail || 'Failed to toggle status');
     }
+  };
+
+  const handleResendInvitation = async (specialist) => {
+    setConfirmDialog({
+      title: 'Resend Invitation',
+      text: `Are you sure you want to resend the invitation to ${specialist.first_name || ''} ${specialist.last_name || ''}? This will extend the expiry by 15 days.`,
+      confirmLabel: 'Resend',
+      type: 'primary',
+      onConfirm: async () => {
+        const tId = toast.loading(`Sending invitation to ${specialist.email}...`);
+        try {
+          await api.post(`/admin/specialists/${specialist.id}/resend-invitation`, { adminId });
+          toast.success(`Invitation sent to ${specialist.email}`, { id: tId });
+          fetchSpecialists();
+          fetchAuditLogs();
+        } catch (err) {
+          toast.error(err?.response?.data?.detail || err?.message || 'Failed to send invitation', { id: tId });
+        }
+        setConfirmDialog(null);
+      }
+    });
   };
 
   const handleResetPassword = async (specialist) => {
@@ -1187,11 +1206,6 @@ export default function AdminDashboard() {
                         value={specForm.email} onChange={e => setSpecForm(f => ({ ...f, email: e.target.value }))} />
                     </div>
                     <div className="admin-form-group">
-                      <label className="admin-form-label">Password *</label>
-                      <input className="admin-form-input" type="password" placeholder="Min 6 characters" required
-                        value={specForm.password} onChange={e => setSpecForm(f => ({ ...f, password: e.target.value }))} />
-                    </div>
-                    <div className="admin-form-group">
                       <label className="admin-form-label">First Name *</label>
                       <input className="admin-form-input" placeholder="Emily" required
                         value={specForm.first_name} onChange={e => setSpecForm(f => ({ ...f, first_name: e.target.value }))} />
@@ -1229,10 +1243,13 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                   </div>
+                  <div style={{ padding: '0 20px', color: '#94A3B8', fontSize: '0.8rem', marginTop: 10 }}>
+                    * An invitation email will be sent automatically with a link to set their password.
+                  </div>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
                     <button type="button" className="admin-btn admin-btn-secondary" onClick={() => setShowSpecForm(false)}>Cancel</button>
                     <button type="submit" className="admin-btn admin-btn-primary" disabled={specSaving}>
-                      {specSaving ? 'Creating...' : <><Plus size={14} /> Create Specialist</>}
+                      {specSaving ? 'Creating...' : <><Plus size={14} /> Invite Specialist</>}
                     </button>
                   </div>
                 </form>
@@ -1328,7 +1345,7 @@ export default function AdminDashboard() {
                       {/* Avatar and top level details */}
                       <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                         <img className="admin-spec-avatar"
-                          src={spec.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${spec.first_name}`}
+                          src={spec.avatar_url || DEFAULT_AVATAR}
                           alt={spec.name}
                           style={{ width: 50, height: 50, borderRadius: '50%', objectFit: 'cover' }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1338,6 +1355,11 @@ export default function AdminDashboard() {
                             <span className={`admin-badge ${spec.is_active !== false ? 'admin-badge-green' : 'admin-badge-red'}`} style={{ fontSize: '0.62rem', padding: '1px 6px', lineHeight: 1.2 }}>
                               {spec.is_active !== false ? 'Active' : 'Deactivated'}
                             </span>
+                            {spec.must_reset_password && (
+                              <span className={`admin-badge ${spec.invitation_expires_at && new Date(spec.invitation_expires_at) < new Date() ? 'admin-badge-red' : 'admin-badge-orange'}`} style={{ fontSize: '0.62rem', padding: '1px 6px', lineHeight: 1.2 }}>
+                                {spec.invitation_expires_at && new Date(spec.invitation_expires_at) < new Date() ? 'Invite Expired' : 'Invite Pending'}
+                              </span>
+                            )}
                           </div>
                           <div style={{ fontSize: '0.8rem', color: '#67E8F9', fontWeight: 500, marginTop: 1 }}>{spec.specialty || 'Specialist'}</div>
                           {spec.location && (
@@ -1375,6 +1397,12 @@ export default function AdminDashboard() {
                           onClick={() => handleResetPassword(spec)} title="Reset Password via Email">
                           <Key size={12} /> <span style={{ fontSize: '0.7rem' }}>Reset</span>
                         </button>
+                        {spec.must_reset_password && spec.invitation_expires_at && new Date(spec.invitation_expires_at) < new Date() && (
+                          <button className="admin-btn" style={{ padding: '6px 8px', flex: 1, minWidth: 65, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4, background: 'rgba(59, 130, 246, 0.08)', color: '#60A5FA', border: '1px solid rgba(59, 130, 246, 0.15)', borderRadius: 6 }}
+                            onClick={() => handleResendInvitation(spec)} title="Resend Expired Invitation">
+                            <Send size={12} /> <span style={{ fontSize: '0.7rem' }}>Resend Invite</span>
+                          </button>
+                        )}
                         <button className="admin-btn" style={{ 
                           padding: '6px 8px', 
                           flex: 1, 
@@ -1759,7 +1787,7 @@ export default function AdminDashboard() {
             </div>
             
             <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 20 }}>
-              <img src={selectedSpecialist.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedSpecialist.first_name}`}
+              <img src={selectedSpecialist.avatar_url || DEFAULT_AVATAR}
                 alt={selectedSpecialist.name}
                 style={{ width: 70, height: 70, borderRadius: '50%', border: '2px solid rgba(103, 232, 249, 0.2)', objectFit: 'cover' }} />
               <div>

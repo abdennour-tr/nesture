@@ -124,8 +124,9 @@ export default function LoginPage() {
     try {
       setIsSubmitting(true);
       const profile = await login({ email: cleanEmail, password: cleanPassword, expectedRole: activeRole });
-      toast.success(`Welcome back, ${profile.first_name}!`);
-      navigate(getRouteForRole(profile.role));
+      
+      // Rediriger vers le dashboard approprié
+      navigate(getRouteForRole(activeRole));
     } catch (err) {
       // Error is set in the store and rendered in UI error box
       if (err.message === 'Please verify your email before continuing.') {

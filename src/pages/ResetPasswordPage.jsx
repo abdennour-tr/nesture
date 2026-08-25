@@ -4,12 +4,15 @@ import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useAuthStore } from '../store';
 import { supabase } from '../services/supabaseClient';
 import { getRouteForRole } from '../services/authService';
+import api from '../services/api';
 import { validatePassword } from '../utils/security';
 import BetaFooter from '../components/shared/BetaFooter';
 
 export default function ResetPasswordPage() {
+  const { user, profile, updateProfile } = useAuthStore();
   const { t } = useTranslation();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -21,7 +24,9 @@ export default function ResetPasswordPage() {
   const [confirmError, setConfirmError] = useState('');
   const [isLearner, setIsLearner] = useState(false);
   const [userRole, setUserRole] = useState('');
+  const [userId, setUserId] = useState(null);
   const [isValidLink, setIsValidLink] = useState(null);
+  const [isForced, setIsForced] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -40,6 +45,8 @@ export default function ResetPasswordPage() {
           const email = user.email || '';
           setIsLearner(role === 'learner' || email.endsWith('@learner.nestureai.com'));
           setUserRole(role);
+          setUserId(user.id);
+          setIsForced(query.get('forced') === 'true' || query.get('type') === 'invitation');
           setIsValidLink(true);
         } else {
           setIsValidLink(false);
@@ -137,12 +144,23 @@ export default function ResetPasswordPage() {
 
       if (resetErr) throw resetErr;
 
-      toast.success(t('auth.passwordResetSuccess', 'Password updated successfully.'));
-      
-      // Redirect to login page
-      setTimeout(() => {
-        navigate('/login');
-      }, 1000);
+      if (isForced && userId) {
+        try {
+          await api.put('/users/accept-invitation', { userId });
+          updateProfile({ must_reset_password: false });
+        } catch (acceptErr) {
+          console.warn('Failed to accept invitation formally:', acceptErr);
+        }
+        toast.success(t('auth.passwordSetSuccess', 'Password set successfully. Welcome!'));
+        setTimeout(() => {
+          navigate(getRouteForRole(userRole));
+        }, 1000);
+      } else {
+        toast.success(t('auth.passwordResetSuccess', 'Password updated successfully.'));
+        setTimeout(() => {
+          navigate('/login');
+        }, 1000);
+      }
     } catch (err) {
       setError(err?.message || t('auth.passwordResetFailed', 'Failed to reset password. Please request a new reset link.'));
     } finally {
@@ -185,8 +203,8 @@ export default function ResetPasswordPage() {
           ) : (
             <>
               <div style={s.formHeader}>
-                <h2 style={s.title}>{t('auth.chooseNewPassword', 'Choose New Password')}</h2>
-                <p style={s.sub}>{t('auth.typeSecurePassword', 'Type a secure password for your NestureAI account.')}</p>
+                <h2 style={s.title}>{isForced ? t('auth.welcomeSetPassword', 'Welcome! Set Your Password') : t('auth.chooseNewPassword', 'Choose New Password')}</h2>
+                <p style={s.sub}>{isForced ? t('auth.firstLoginPrompt', 'Please set a secure password to complete your account registration.') : t('auth.typeSecurePassword', 'Type a secure password for your NestureAI account.')}</p>
               </div>
 
               <form onSubmit={handleResetPassword} style={s.form}>

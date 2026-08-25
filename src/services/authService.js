@@ -249,7 +249,12 @@ export async function signIn({ email, password, expectedRole }) {
       }
     }
 
-    return { user: data.user, profile };
+    // 6. Return standard auth data plus the must_reset_password flag for frontend redirection
+    return { 
+      user: data.user, 
+      profile, 
+      mustResetPassword: profile.must_reset_password === true 
+    };
   } catch (err) {
     // Required fields errors (UX level checks) propagate directly
     const isRequiredErr =

@@ -15,19 +15,50 @@ export default function AuthCallbackPage() {
     async function handleCallback() {
       try {
         const query = new URLSearchParams(window.location.search);
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
         const code = query.get('code');
         const next = query.get('next') || '';
+        const type = query.get('type') || hashParams.get('type');
 
         // 1. Exchanger le code si présent dans l'URL (flux PKCE)
+        let exchangeFailed = false;
         if (code) {
           const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-          if (exchangeError) throw exchangeError;
+          if (exchangeError) {
+            console.warn('[AuthCallback] exchangeCodeForSession failed (likely due to Strict Mode double-render):', exchangeError.message);
+            exchangeFailed = true;
+          }
         }
 
         // 2. Restaurer la session et récupérer le profil utilisateur
-        const session = await restoreSession();
+        let session = await restoreSession();
+        
+        // Fallback if restoreSession() returns null due to strict local token checks
+        if (!session) {
+          const { data: { session: currentSession } } = await supabase.auth.getSession();
+          if (currentSession?.user) {
+            const { data: profile } = await supabase.from('users').select('*').eq('id', currentSession.user.id).single();
+            if (profile) {
+              currentSession.profile = profile;
+              session = currentSession;
+            }
+          }
+        }
+
+        // If exchange failed AND we still don't have a session, THEN we throw
+        if (exchangeFailed && !session) {
+          throw new Error('Verification link is invalid or already used.');
+        }
+
         if (session) {
           setAuth({ user: session.user, profile: session.profile });
+          
+          if (type === 'invitation') {
+            toast.success(`Welcome ${session.profile.first_name || 'User'}! Please set your password.`);
+            navigate('/reset-password?forced=true', { replace: true });
+            return;
+          }
+
           toast.success(`Welcome, ${session.profile.first_name || 'User'}! Account activated.`);
           
           // Rediriger vers la page demandée ou le dashboard correspondant au rôle

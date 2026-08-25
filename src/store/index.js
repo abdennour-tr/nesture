@@ -41,9 +41,9 @@ export const useAuthStore = create(
       login: async ({ email, password, expectedRole }) => {
         set({ error: null, isLoading: true });
         try {
-          const { user, profile } = await signIn({ email, password, expectedRole });
+          const { user, profile, mustResetPassword } = await signIn({ email, password, expectedRole });
           set({ user, profile, isLoading: false });
-          return profile;
+          return { ...profile, mustResetPassword };
         } catch (err) {
           set({ error: err.message, isLoading: false });
           throw err;

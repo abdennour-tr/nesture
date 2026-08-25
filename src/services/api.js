@@ -225,6 +225,12 @@ async function handleGet(url) {
     return localDB.getConnectionRequestsByChild(reqsByChild[1]);
   }
 
+  // GET /admin/specialists/:id/invitation-status
+  const specInvStatus = path.match(/^\/admin\/specialists\/([^/]+)\/invitation-status$/);
+  if (specInvStatus) {
+    return localDB.checkInvitationStatus(specInvStatus[1]);
+  }
+
   console.warn('[api shim] Unhandled GET:', url);
   return null;
 }
@@ -360,6 +366,12 @@ async function handlePost(url, body) {
     return localDB.resetSpecialistPassword(specResetPassword[1], body.adminId);
   }
 
+  // POST /admin/specialists/:id/resend-invitation
+  const specResendInv = url.match(/^\/admin\/specialists\/([^/]+)\/resend-invitation$/);
+  if (specResendInv) {
+    return localDB.resendInvitation(specResendInv[1], body.adminId);
+  }
+
   console.warn('[api shim] Unhandled POST:', url);
   return null;
 }
@@ -387,6 +399,11 @@ async function handlePut(url, body) {
   const specPut = url.match(/^\/admin\/specialists\/([^/]+)$/);
   if (specPut) {
     return localDB.updateSpecialistProfile(specPut[1], body.updates, body.adminId);
+  }
+
+  // PUT /users/accept-invitation
+  if (url === '/users/accept-invitation') {
+    return localDB.acceptInvitation(body.userId);
   }
 
   console.warn('[api shim] Unhandled PUT:', url);

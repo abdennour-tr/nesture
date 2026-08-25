@@ -290,7 +290,7 @@ export async function getProfessionals() {
 export async function getSpecialists() {
   const { data, error } = await supabase
     .from('users')
-    .select('id, first_name, last_name, specialty, location, avatar_url, bio, is_featured, connection_code, practice_name, email, is_active')
+    .select('*, children:practitioner_children(count), must_reset_password, invitation_expires_at, invitation_accepted_at, first_name, last_name, specialty, location, avatar_url, bio, is_featured, connection_code, practice_name, email, is_active')
     .eq('role', 'practitioner')
     .not('specialty', 'is', null)
     .order('is_featured', { ascending: false })
@@ -677,9 +677,9 @@ export async function getExercises(reflexFilter = null, specialistId = null) {
     query = query.eq('target_reflex', reflexFilter);
   }
   
-  // Isolate by specialist if provided. Allow seeing their own + global (null) exercises.
+  // Isolate by specialist if provided.
   if (specialistId) {
-    query = query.or(`specialist_id.eq.${specialistId},specialist_id.is.null`);
+    query = query.eq('specialist_id', specialistId);
   }
   
   const { data, error } = await query;
@@ -1287,12 +1287,17 @@ export async function getParents() {
 }
 
 /** Add a new specialist (practitioner) — creates auth account + public.users row */
-export async function addSpecialist(specialistData) {
-  const { email, password, first_name, last_name, specialty, location, bio, avatar_url, is_featured } = specialistData;
+export async function addSpecialist(specialistData, adminId) {
+  const { email, first_name, last_name, specialty, location, bio, avatar_url, is_featured } = specialistData;
 
   // Validate inputs
   const cleanEmail = validateEmail(email);
-  const cleanPassword = validatePassword(password);
+  
+  // Generate a secure random temporary password (32 chars)
+  const array = new Uint32Array(8);
+  window.crypto.getRandomValues(array);
+  const tempPassword = Array.from(array, dec => ('0' + dec.toString(16)).substr(-2)).join('') + '!aA1';
+
   const cleanFirstName = sanitizeInput(first_name, 50);
   validateName(cleanFirstName, 'First name');
 
@@ -1320,13 +1325,14 @@ export async function addSpecialist(specialistData) {
 
   const { data: authData, error: authErr } = await altSupabase.auth.signUp({
     email: cleanEmail,
-    password: cleanPassword,
+    password: tempPassword,
     options: {
       data: {
         role: 'practitioner',
         first_name: cleanFirstName,
         last_name: cleanLastName,
       },
+      emailRedirectTo: `${window.location.origin}/auth/callback?type=invitation`
     },
   });
 
@@ -1349,6 +1355,10 @@ export async function addSpecialist(specialistData) {
   // 2. Upsert into public.users with full specialist profile
   const code = 'OT-' + Math.random().toString(36).substring(2, 7).toUpperCase();
 
+  // Set invitation expiry to 15 days from now
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 15);
+
   const { data, error } = await supabase
     .from('users')
     .upsert([{
@@ -1360,16 +1370,22 @@ export async function addSpecialist(specialistData) {
       specialty: cleanSpecialty,
       location: cleanLocation,
       bio: cleanBio,
-      avatar_url: avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanFirstName || 'Specialist'}&backgroundColor=b6e3f4`,
+      avatar_url: avatar_url || "data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%23e2e8f0' d='M512 0C229.23 0 0 229.23 0 512s229.23 512 512 512 512-229.23 512-512S794.77 0 512 0z'/%3E%3Cpath fill='%2394a3b8' d='M512 256c-88.37 0-160 71.63-160 160 0 88.37 71.63 160 160 160s160-71.63 160-160c0-88.37-71.63-160-160-160zm0 384c-176.73 0-320 89.54-320 200v32c0 17.67 14.33 32 32 32h576c17.67 0 32-14.33 32-32v-32c0-110.46-143.27-200-320-200z'/%3E%3C/svg%3E",
       is_featured: is_featured || false,
       is_demo: false,
       beta_participant: false,
       connection_code: code,
+      must_reset_password: true,
+      invitation_expires_at: expiresAt.toISOString(),
+      invitation_accepted_at: null,
     }])
     .select()
     .single();
 
-  if (error) throw error;
+  // Log the action
+  const details = `Created and invited specialist: ${cleanFirstName} ${cleanLastName} (${cleanEmail})`;
+  await logAdminAction(adminId || authUserId, 'create', authUserId, details);
+
   return data;
 }
 
@@ -1582,6 +1598,66 @@ export async function resetSpecialistPassword(specialistId, adminId) {
   await logAdminAction(adminId, 'reset_password', specialistId, details);
 
   return { status: 'ok' };
+}
+
+/** Resend an invitation email to a specialist and extend expiry */
+export async function resendInvitation(specialistId, adminId) {
+  const { data: user, error: fetchError } = await supabase
+    .from('users')
+    .select('email, first_name, last_name, invitation_accepted_at')
+    .eq('id', specialistId)
+    .single();
+
+  if (fetchError) throw fetchError;
+  if (!user?.email) throw new Error('User email not found.');
+  if (user.invitation_accepted_at) throw new Error('User has already accepted their invitation.');
+
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 15);
+
+  const { error: updateError } = await supabase
+    .from('users')
+    .update({ 
+      invitation_expires_at: expiresAt.toISOString(),
+      must_reset_password: true 
+    })
+    .eq('id', specialistId);
+
+  if (updateError) throw updateError;
+
+  const { error: resetError } = await supabase.auth.resetPasswordForEmail(user.email, {
+    redirectTo: `${window.location.origin}/auth/callback?type=invitation`,
+  });
+
+  if (resetError) throw resetError;
+
+  const details = `Resent invitation to: ${user.first_name || ''} ${user.last_name || ''} (${user.email})`;
+  await logAdminAction(adminId, 'resend_invitation', specialistId, details);
+
+  return { status: 'ok' };
+}
+
+/** Accept an invitation (called after first password reset) */
+export async function acceptInvitation(userId) {
+  const { data, error } = await supabase.rpc('accept_invitation', { user_id: userId });
+
+  if (error) throw error;
+  return { status: 'ok', data };
+}
+
+/** Check if a specialist's invitation is pending, expired, or accepted */
+export async function checkInvitationStatus(specialistId) {
+  const { data: user, error } = await supabase
+    .from('users')
+    .select('invitation_accepted_at, invitation_expires_at, must_reset_password')
+    .eq('id', specialistId)
+    .single();
+
+  if (error) throw error;
+
+  if (user.invitation_accepted_at || !user.must_reset_password) return 'accepted';
+  if (user.invitation_expires_at && new Date(user.invitation_expires_at) < new Date()) return 'expired';
+  return 'pending';
 }
 
 
