@@ -74,6 +74,34 @@ export async function getLearnersByParent(parentId) {
       unique.push(c);
     }
   }
+
+  // Fetch emails from users table
+  const authUserIds = unique.map(c => c.auth_user_id).filter(Boolean);
+  if (authUserIds.length > 0) {
+    const { data: usersData } = await supabase
+      .from('users')
+      .select('*')
+      .in('id', authUserIds);
+    if (usersData) {
+      unique.forEach(c => {
+        const u = usersData.find(u => u.id === c.auth_user_id);
+        if (u && u.email) {
+          c.email = u.email;
+        } else {
+          // Fallback if email is not in users table
+          const fallbackName = (c.first_name || 'learner').toLowerCase().replace(/[^a-z0-9]/g, '');
+          c.email = `${fallbackName}@learner.nestureai.com`;
+        }
+      });
+    }
+  } else {
+    // If no auth_user_id exists, just provide fallback
+    unique.forEach(c => {
+      const fallbackName = (c.first_name || 'learner').toLowerCase().replace(/[^a-z0-9]/g, '');
+      c.email = `${fallbackName}@learner.nestureai.com`;
+    });
+  }
+
   return unique.map(normaliseChild);
 }
 

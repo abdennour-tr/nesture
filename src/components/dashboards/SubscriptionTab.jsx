@@ -306,8 +306,8 @@ export default function SubscriptionTab({ parentId, currentSubscription = null }
                 textTransform: 'uppercase'
               }}>
                 {currentSub.status === 'trialing' 
-                  ? 'Essai Gratuit Actif' 
-                  : (currentSub.cancel_at_period_end ? "S'arrête Bientôt" : 'Abonnement Actif')}
+                  ? 'Active Free Trial' 
+                  : (currentSub.cancel_at_period_end ? 'Ending Soon' : 'Active Subscription')}
               </span>
               <span style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0F172A' }}>
                 Plan {currentSub.tier?.toUpperCase()}
@@ -315,8 +315,8 @@ export default function SubscriptionTab({ parentId, currentSubscription = null }
             </div>
             <p style={{ fontSize: '0.85rem', color: '#475569', margin: 0 }}>
               {currentSub.status === 'trialing'
-                ? `Période d'essai en cours jusqu'au ${currentSub.trial_end ? new Date(currentSub.trial_end).toLocaleDateString() : 'bientôt'}. Vous pouvez annuler à tout moment.`
-                : `Votre abonnement est actif et se renouvelle automatiquement. Gérer ou résilier en 1 clic ci-dessous.`}
+                ? `Trial period active until ${currentSub.trial_end ? new Date(currentSub.trial_end).toLocaleDateString() : 'soon'}. You can cancel anytime.`
+                : `Your subscription is active and renews automatically. Manage or cancel with 1 click below.`}
             </p>
           </div>
 
@@ -340,7 +340,7 @@ export default function SubscriptionTab({ parentId, currentSubscription = null }
             }}
           >
             {loadingPortal ? <Loader2 size={16} className="animate-spin" /> : <Settings size={16} />}
-            Gérer / Résilier mon abonnement
+            Manage / Cancel my subscription
           </button>
         </div>
       )}
@@ -356,10 +356,10 @@ export default function SubscriptionTab({ parentId, currentSubscription = null }
         boxShadow: '0 10px 30px rgba(13,94,107,0.2)'
       }}>
         <h2 style={{ fontSize: '1.9rem', fontWeight: 800, margin: '0 0 8px 0', color: '#fff' }}>
-          Choisissez le forfait adapté à votre famille
+          Choose the right plan for your family
         </h2>
         <p style={{ fontSize: '0.95rem', color: '#94a3b8', margin: '0 0 24px 0' }}>
-          Des forfaits flexibles pour chaque foyer. Résiliable à tout moment en 1 clic.
+          Flexible plans for every household. Cancel anytime with 1 click.
         </p>
 
         {/* Toggle */}
@@ -412,7 +412,7 @@ export default function SubscriptionTab({ parentId, currentSubscription = null }
               {isCurrentPlan ? (
                 <div className="popular-badge" style={{ background: '#10B981' }}>
                   <ShieldCheck size={12} />
-                  Plan Actuel
+                  Current Plan
                 </div>
               ) : plan.popular && (
                 <div className="popular-badge">
@@ -459,7 +459,7 @@ export default function SubscriptionTab({ parentId, currentSubscription = null }
                   style={{ borderColor: '#10B981', color: '#10B981' }}
                 >
                   <Settings size={16} />
-                  Gérer ce plan
+                  Manage this plan
                 </button>
               ) : (
                 <button
@@ -470,7 +470,7 @@ export default function SubscriptionTab({ parentId, currentSubscription = null }
                   {subscribingPlan === plan.id ? (
                     <>
                       <Loader2 size={16} className="animate-spin" />
-                      Connexion...
+                      Connecting...
                     </>
                   ) : (
                     plan.ctaText

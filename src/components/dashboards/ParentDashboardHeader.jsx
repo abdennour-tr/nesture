@@ -167,7 +167,7 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
             {currentSubscription && (
               <span style={{ ...styles.activeSubTag, backgroundColor: currentSubscription.status === 'trialing' ? '#D97706' : '#10B981', color: '#fff', fontWeight: 'bold', padding: '6px 12px', borderRadius: '16px', fontSize: '14px', display: 'flex', alignItems: 'center' }}>
                 <ShieldCheck size={16} style={{ marginRight: 6 }} />
-                {currentSubscription.status === 'trialing' ? 'Essai Gratuit' : 'Plan Actif'} ({currentSubscription.tier?.toUpperCase()})
+                {currentSubscription.status === 'trialing' ? 'Free Trial' : 'Active Plan'} ({currentSubscription.tier?.toUpperCase()})
               </span>
             )}
           </div>
@@ -200,7 +200,7 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
             <div style={styles.cardHeader}>
               <Sparkles size={18} color={currentSubscription ? (currentSubscription.status === 'trialing' ? "#D97706" : "#10B981") : "#F59E0B"} />
               <span style={styles.recommendLabel}>
-                {currentSubscription ? "Abonnement Actuel" : "Recommended Plan"}
+                {currentSubscription ? "Current Plan" : "Recommended Plan"}
               </span>
             </div>
 
@@ -218,8 +218,8 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
               }}>
                 {currentSubscription 
                   ? (currentSubscription.status === 'trialing' 
-                      ? "Essai" 
-                      : (currentSubscription.cancel_at_period_end ? "S'arrête bientôt" : "Actif")) 
+                      ? "Trial" 
+                      : (currentSubscription.cancel_at_period_end ? "Ending soon" : "Active")) 
                   : tierInfo.badge}
               </span>
             </div>
@@ -227,10 +227,10 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
             <p style={styles.tierDesc}>
               {currentSubscription 
                 ? (currentSubscription.status === 'trialing' 
-                    ? `Vous êtes en période d'essai gratuit ! Votre essai se termine le ${currentSubscription.trial_end ? new Date(currentSubscription.trial_end).toLocaleDateString() : 'bientôt'}.`
+                    ? `You are on a free trial! Your trial ends on ${currentSubscription.trial_end ? new Date(currentSubscription.trial_end).toLocaleDateString() : 'soon'}.`
                     : (currentSubscription.cancel_at_period_end
-                        ? `Vous avez annulé votre abonnement. Il restera actif jusqu'au ${currentSubscription.current_period_end ? new Date(currentSubscription.current_period_end).toLocaleDateString() : 'à la fin de la période'}.`
-                        : "Vous avez un abonnement actif. Vous pouvez modifier ou résilier à tout moment."))
+                        ? `You have canceled your subscription. It will remain active until ${currentSubscription.current_period_end ? new Date(currentSubscription.current_period_end).toLocaleDateString() : 'the end of the period'}.`
+                        : "You have an active subscription. You can manage or cancel it at any time."))
                 : tierInfo.description}
             </p>
 
@@ -248,12 +248,12 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
                 {subscribing ? (
                   <>
                     <Loader2 size={18} className="animate-spin" style={{ marginRight: 8 }} />
-                    Redirection vers le portail...
+                    Redirecting to portal...
                   </>
                 ) : (
                   <>
                     <Settings size={18} style={{ marginRight: 8 }} />
-                    Gérer / Résilier mon abonnement
+                    Manage / Cancel my subscription
                   </>
                 )}
               </button>
@@ -269,7 +269,7 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
                 }}
               >
                 <CreditCard size={18} style={{ marginRight: 8 }} />
-                Choisir un plan ({tierInfo.name})
+                Choose a plan ({tierInfo.name})
               </button>
             )}
 
@@ -279,7 +279,7 @@ export default function ParentDashboardHeader({ parentId, children: childrenList
               style={styles.viewAllPlansBtn}
             >
               <ExternalLink size={14} style={{ marginRight: 6 }} />
-              Voir tous les tarifs & options
+              View all pricing & options
             </button>
           </div>
         </div>

@@ -36,7 +36,7 @@ const NAV = [
   { id: 'connect',      label: 'NestureConnect', icon: <Handshake size={18} /> },
   { id: 'exercises',    label: 'Assigned Exercises', icon: <Video size={18} /> },
   { id: 'learn',        label: 'NestureLearn', icon: <Sparkles size={18} /> },
-  { id: 'subscription', label: 'Abonnement & Forfaits', icon: <CreditCard size={18} /> },
+  { id: 'subscription', label: 'Subscription & Plans', icon: <CreditCard size={18} /> },
   { id: 'settings',     label: 'Settings', icon: <Settings size={18} /> },
 ];
 
@@ -173,7 +173,7 @@ export default function ParentDashboard() {
   const openAddChildWithCheck = () => {
     if (!currentSubscription) {
       toast.error(
-        "Vous devez d'abord souscrire à un abonnement pour ajouter un enfant.",
+        "You must first subscribe to a plan to add a child.",
         { duration: 5000, icon: '🔒' }
       );
       navigate('/pricing');
@@ -181,7 +181,7 @@ export default function ParentDashboard() {
     }
     if (children.length >= childLimit) {
       toast.error(
-        `Limite atteinte (${childLimit} enfant${childLimit > 1 ? 's' : ''}). Passez au plan Family pour ajouter plus d'enfants.`,
+        `Limit reached (${childLimit} child${childLimit > 1 ? 'ren' : ''}). Upgrade to the Family plan to add more children.`,
         { duration: 5000, icon: '⚠️' }
       );
       return;
@@ -200,7 +200,7 @@ export default function ParentDashboard() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('payment') === 'success' || params.get('session_id')) {
-      toast.success('🎉 Paiement réussi ! Votre abonnement est maintenant actif.', { duration: 6000 });
+      toast.success('🎉 Payment successful! Your subscription is now active.', { duration: 6000 });
       // Clean query params from URL without reloading
       window.history.replaceState({}, document.title, window.location.pathname);
       
@@ -1643,6 +1643,11 @@ export default function ParentDashboard() {
                                 <div style={{ fontSize: '0.73rem', color: '#6B7280' }}>
                                   {child.age ? `Age ${child.age}` : ''}{child.diagnosis ? ` · ${child.diagnosis}` : ''}
                                 </div>
+                                {child.email && (
+                                  <div style={{ fontSize: '0.73rem', color: '#6B7280', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
+                                    <Mail size={12} /> {child.email.split('@')[0]}
+                                  </div>
+                                )}
                               </div>
                             </div>
                             <div style={{ display: 'flex', gap: 8 }}>
