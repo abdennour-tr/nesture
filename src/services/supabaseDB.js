@@ -1449,6 +1449,47 @@ export async function deleteParent(parentId) {
   return { status: 'deleted' };
 }
 
+/** Grant complimentary family subscription to a parent */
+export async function grantFreeAccess(parentId, adminId) {
+  // Check if they already have an active subscription
+  const { data: existing } = await supabase
+    .from('subscriptions')
+    .select('id, status')
+    .eq('parent_id', parentId)
+    .in('status', ['active', 'trialing'])
+    .maybeSingle();
+
+  if (existing) {
+    throw new Error('Parent already has an active subscription.');
+  }
+
+  const oneYearFromNow = new Date();
+  oneYearFromNow.setFullYear(oneYearFromNow.getFullYear() + 1);
+
+  const { data, error } = await supabase
+    .from('subscriptions')
+    .insert([{
+      parent_id: parentId,
+      stripe_subscription_id: 'comp_' + Math.random().toString(36).substring(2, 10),
+      stripe_customer_id: 'comp_user',
+      tier: 'family',
+      learner_count: 1,
+      status: 'active',
+      billing_period: 'yearly',
+      current_period_end: oneYearFromNow.toISOString(),
+      cancel_at_period_end: false
+    }])
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  // Log the action
+  await logAdminAction(adminId, 'grant_free_access', parentId, 'Granted 1-year complimentary Family subscription');
+
+  return data;
+}
+
 /** Add a new learn content resource */
 export async function uploadResourceThumbnail(file) {
   const fileExt = file.name.split('.').pop();

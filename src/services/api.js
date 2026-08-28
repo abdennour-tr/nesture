@@ -372,6 +372,11 @@ async function handlePost(url, body) {
     return localDB.resendInvitation(specResendInv[1], body.adminId);
   }
 
+  // POST /admin/parents/grant-free-access
+  if (url === '/admin/parents/grant-free-access') {
+    return localDB.grantFreeAccess(body.parentId, body.adminId);
+  }
+
   console.warn('[api shim] Unhandled POST:', url);
   return null;
 }

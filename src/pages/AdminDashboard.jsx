@@ -4,7 +4,7 @@ import {
   Shield, FileSpreadsheet, Users, BookOpen, LogOut, Menu, X,
   Search, ChevronLeft, ChevronRight, Download, Trash2, Plus,
   UserPlus, Star, MapPin, Globe, Clock, Play, Headphones, BookOpenText, AlertTriangle,
-  Edit, Key, Eye, ScrollText, Video, Edit3, Send
+  Edit, Key, Eye, ScrollText, Video, Edit3, Send, Gift
 } from 'lucide-react';
 import api from '../services/api';
 import toast from 'react-hot-toast';
@@ -747,6 +747,29 @@ export default function AdminDashboard() {
   };
 
   // ── Parent & Child Deletion ──────────────────────────────────────────────
+  const handleGrantFreeAccess = async (e, parent) => {
+    e.stopPropagation();
+    setConfirmDialog({
+      title: 'Grant Free Access',
+      text: `Are you sure you want to grant a 1-year complimentary Family subscription to ${parent.name}?`,
+      confirmLabel: 'Grant Access',
+      type: 'primary',
+      onConfirm: async () => {
+        const tId = toast.loading(`Granting access to ${parent.name}...`);
+        try {
+          await api.post('/admin/parents/grant-free-access', {
+            parentId: parent.id,
+            adminId: adminId
+          });
+          toast.success(`Granted complimentary access to ${parent.name}`, { id: tId });
+          fetchAuditLogs();
+        } catch (err) {
+          toast.error(err?.response?.data?.detail || err?.message || 'Failed to grant access', { id: tId });
+        }
+        setConfirmDialog(null);
+      }
+    });
+  };
   const confirmDeleteParent = (e, parent) => {
     e.stopPropagation(); // Prevent row click
     setConfirmDialog({
@@ -1018,6 +1041,10 @@ export default function AdminDashboard() {
                             <td data-label="Registered">{p.created_at?.slice(0, 10) || '—'}</td>
                             <td data-label="ID" style={{ fontSize: '0.72rem', color: '#475569' }}>{p.id?.slice(0, 8)}...</td>
                             <td data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
+                              <button className="admin-btn" style={{ padding: '6px 10px', marginRight: 6, display: 'inline-flex', alignItems: 'center', background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.4)', borderRadius: '6px' }}
+                                onClick={(e) => handleGrantFreeAccess(e, p)} title="Grant Free Access">
+                                <Gift size={14} style={{ marginRight: 4 }} /> Grant Access
+                              </button>
                               <button className="admin-btn" style={{ padding: '6px 10px', marginRight: 6, display: 'inline-flex', alignItems: 'center', background: 'rgba(79, 70, 229, 0.2)', color: '#a5b4fc', border: '1px solid rgba(79, 70, 229, 0.4)', borderRadius: '6px' }}
                                 onClick={(e) => { e.stopPropagation(); handleImpersonateUser(p, 'parent'); }} title="Impersonate Parent">
                                 <Eye size={14} style={{ marginRight: 4 }} /> Impersonate
