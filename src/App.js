@@ -28,6 +28,8 @@ import VerifyEmailPage    from './pages/VerifyEmailPage';
 import AuthCallbackPage       from './pages/AuthCallbackPage';
 import FingerCopyDifficulty   from './pages/FingerCopyDifficulty';
 import FingerCopyGame         from './pages/FingerCopyGame';
+import TraceTypeDifficulty    from './pages/TraceTypeDifficulty';
+import TraceTypeGame          from './pages/TraceTypeGame';
 import PricingPage            from './pages/PricingPage';
 
 import ErrorBoundary from './components/shared/ErrorBoundary';
@@ -285,6 +287,12 @@ export default function App() {
           } />
           <Route path="/play/finger-copy-game" element={
             <ProtectedRoute allowedRoles={['learner']}><FingerCopyGame /></ProtectedRoute>
+          } />
+          <Route path="/play/trace-type-difficulty" element={
+            <ProtectedRoute allowedRoles={['learner']}><TraceTypeDifficulty /></ProtectedRoute>
+          } />
+          <Route path="/play/trace-type-game" element={
+            <ProtectedRoute allowedRoles={['learner']}><TraceTypeGame /></ProtectedRoute>
           } />
           <Route path="/play/results/:sessionId" element={
             <ProtectedRoute allowedRoles={['learner']}><SessionResults /></ProtectedRoute>

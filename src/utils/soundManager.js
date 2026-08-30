@@ -32,6 +32,8 @@ const NOTE = {
   E3: 164.81,
   G3: 196.0,
   B3: 246.94,
+  B5: 987.77,
+  C6: 1046.50,
 };
 
 class SoundManager {
@@ -297,29 +299,38 @@ class SoundManager {
   }
 
   /**
-   * Quick ascending ping when the user reaches a checkpoint / progress marker.
+   * Magical, sparkly chord when the user successfully connects two points.
    */
   playProgress() {
     if (!this._ensureCtx()) return;
 
-    // Two-note ascending ping (perfect fifth: C → G)
-    this._playTone(NOTE.E4, {
-      attack: 0.015,
-      decay: 0.06,
-      sustain: 0.3,
-      release: 0.12,
-      duration: 0.06,
-      volume: 0.55,
+    // A bright, magical arpeggio (C major 7th: C - E - G - B)
+    const notes = [NOTE.C5, NOTE.E5, NOTE.G5, NOTE.B5];
+    const spacing = 0.04; // Very fast arpeggio
+
+    notes.forEach((freq, i) => {
+      this._playTone(freq, {
+        delay: i * spacing,
+        attack: 0.01,
+        decay: 0.1,
+        sustain: 0.1,
+        release: 0.2,
+        duration: 0.05,
+        volume: 0.45,
+        type: 'sine',
+      });
     });
 
-    this._playTone(NOTE.B4, {
-      delay: 0.08,
-      attack: 0.015,
-      decay: 0.06,
-      sustain: 0.35,
-      release: 0.18,
-      duration: 0.08,
-      volume: 0.55,
+    // Add a tiny 'sparkle' high note on top
+    this._playTone(NOTE.C6, {
+      delay: notes.length * spacing,
+      attack: 0.01,
+      decay: 0.1,
+      sustain: 0.1,
+      release: 0.3,
+      duration: 0.05,
+      volume: 0.2,
+      type: 'triangle',
     });
   }
 

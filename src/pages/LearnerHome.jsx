@@ -54,6 +54,17 @@ const GAMES = [
     badge: 'NEW',
   },
   {
+    id: 'tracetype',
+    title: 'Trace → Find → Type',
+    desc: 'Learn letters by tracing, finding & typing them',
+    emoji: '✏️',
+    accent: '#6366F1',
+    bg: 'linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%)',
+    enabled: true,
+    route: '/play/trace-type-difficulty',
+    badge: 'NEW',
+  },
+  {
     id: 'math',
     title: 'Number / Math',
     desc: 'Count and solve simple equations',

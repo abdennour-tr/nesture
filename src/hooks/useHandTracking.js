@@ -127,11 +127,17 @@ export function detectMidlineCrossing(startX, endX) {
 }
 
 // ── Main hook ─────────────────────────────────────────────────────────────────
-export default function useHandTracking(videoRef, canvasRef, enabled = true) {
+export default function useHandTracking(videoRef, canvasRef, enabled = true, pauseProcessing = false) {
   const [landmarks,      setLandmarks]      = useState(null);  // main détectée (1re)
   const [multiHandData,  setMultiHandData]  = useState(null);  // { left, right, all }
   const [isTracking,     setIsTracking]     = useState(false);
   const [error,          setError]          = useState(null);
+  
+  // Ref to hold the latest pauseProcessing value for the async callback
+  const pauseProcessingRef = useRef(pauseProcessing);
+  useEffect(() => {
+    pauseProcessingRef.current = pauseProcessing;
+  }, [pauseProcessing]);
 
   const handsRef   = useRef(null);
   const cameraRef  = useRef(null);
@@ -247,8 +253,20 @@ export default function useHandTracking(videoRef, canvasRef, enabled = true) {
 
         const camera = new Camera(videoRef.current, {
           onFrame: async () => {
-            if (!cancelled && handsRef.current && videoRef.current) {
-              await handsRef.current.send({ image: videoRef.current });
+            if (pauseProcessingRef.current) return; // Skip CPU processing if paused
+            if (
+              !cancelled &&
+              handsRef.current &&
+              videoRef.current &&
+              videoRef.current.readyState >= 2 &&
+              videoRef.current.videoWidth > 0 &&
+              videoRef.current.videoHeight > 0
+            ) {
+              try {
+                await handsRef.current.send({ image: videoRef.current });
+              } catch (e) {
+                console.warn('MediaPipe send error:', e);
+              }
             }
           },
           width: 640,
