@@ -13,6 +13,17 @@ import ConnectionModal from '../components/shared/ConnectionModal';
 import VideoModal from '../components/shared/VideoModal';
 import { supabase } from '../services/supabaseClient';
 
+/* accuracy_score is written by five different games and is NOT stored in one
+   unit: some rows hold a 0-1 fraction, others a 0-100 percentage. Multiplying
+   blindly by 100 is what produced values like "6900%" in the tables. Anything
+   above 1 is already a percentage; anything at or below 1 is a fraction (a
+   genuine 1 means 100% either way, so the ambiguity is harmless). */
+function toPercent(raw) {
+  const v = parseFloat(raw);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return Math.min(100, Math.round(v > 1 ? v : v * 100));
+}
+
 const NAV = [
   { id: 'overview',  label: 'Learner Overview', icon: <Users size={18} />, end: true },
   { id: 'exercises', label: 'Exercises',        icon: <Activity size={18} /> },
@@ -349,7 +360,7 @@ export default function SpecialistDashboard() {
 
         // avgAccuracy
         const avgAccuracy = childSess.length 
-          ? (childSess.reduce((acc, s) => acc + parseFloat(s.accuracy_score || 0), 0) / childSess.length * 100)
+          ? (childSess.reduce((acc, s) => acc + toPercent(s.accuracy_score), 0) / childSess.length)
           : null;
         
         // retainedReflexScore > 40
@@ -379,9 +390,9 @@ export default function SpecialistDashboard() {
         const sessionsCount = childSess.length;
         const lastSession = childSess[0] || null;
         
-        const accuracy = lastSession ? parseFloat(lastSession.accuracy_score ?? 0) : 0;
+        const accuracy = lastSession ? toPercent(lastSession.accuracy_score) : 0;
         const avgAccuracy = sessionsCount 
-          ? (childSess.reduce((acc, s) => acc + parseFloat(s.accuracy_score || 0), 0) / sessionsCount) 
+          ? (childSess.reduce((acc, s) => acc + toPercent(s.accuracy_score), 0) / sessionsCount) 
           : 0;
         const LPI = lastSession ? parseInt(lastSession.lpi_score || 0) : 0;
         
@@ -433,7 +444,7 @@ export default function SpecialistDashboard() {
 
     // 1. avgAccuracy < 70
     const avgAccuracy = childSess.length 
-      ? (childSess.reduce((acc, s) => acc + parseFloat(s.accuracy_score || 0), 0) / childSess.length * 100)
+      ? (childSess.reduce((acc, s) => acc + toPercent(s.accuracy_score), 0) / childSess.length)
       : null;
     const accuracyFlag = (avgAccuracy !== null && avgAccuracy < 70);
 
@@ -469,7 +480,7 @@ export default function SpecialistDashboard() {
   const activeLearnersCount = learners.filter(l => l && !l.is_deleted && !l.is_archived).length;
 
   const avgAccuracyPercent = allSessionsList.length
-    ? Math.round(allSessionsList.reduce((sum, s) => sum + parseFloat(s.accuracy_score || 0), 0) / allSessionsList.length * 100) + '%'
+    ? Math.round(allSessionsList.reduce((sum, s) => sum + toPercent(s.accuracy_score), 0) / allSessionsList.length) + '%'
     : '—';
 
   const avgLpiValue = allSessionsList.length
@@ -864,7 +875,7 @@ export default function SpecialistDashboard() {
                 <tbody>
                   {learners.map(l => {
                     const s = learnerStats[l.id] || {};
-                    const acc = s.latestSession ? Math.round(parseFloat(s.latestSession.accuracy_score||0)*100) : null;
+                    const acc = s.latestSession ? toPercent(s.latestSession.accuracy_score) : null;
                     const status = s.needsAttention ? 'attention' : (acc !== null && acc >= 70 ? 'on-track' : 'monitor');
                     return (
                       <tr key={l.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/ot/learner/${l.id}`)}>
@@ -1100,8 +1111,7 @@ export default function SpecialistDashboard() {
             </div>
             {paginatedLearners.map((l) => {
               const s = learnerStats[l.id] || {};
-              const acc = s.latestSession
-                ? Math.round(parseFloat(s.latestSession.accuracy_score || 0) * 100) : null;
+              const acc = s.latestSession ? toPercent(s.latestSession.accuracy_score) : null;
               const status = s.needsAttention ? 'attention' : (acc !== null && acc >= 70 ? 'on-track' : 'monitor');
               return (
                 <motion.div
@@ -1250,7 +1260,7 @@ export default function SpecialistDashboard() {
           
           // Determine reasons for attention alert
           const avgAccuracy = childSess.length 
-            ? (childSess.reduce((acc, s) => acc + parseFloat(s.accuracy_score || 0), 0) / childSess.length * 100)
+            ? (childSess.reduce((acc, s) => acc + toPercent(s.accuracy_score), 0) / childSess.length)
             : null;
           const accuracyFlag = (avgAccuracy !== null && avgAccuracy < 70);
           
@@ -1558,9 +1568,7 @@ export default function SpecialistDashboard() {
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14, padding: 20 }}>
                   {learners.map(l => {
                     const s = learnerStats[l.id] || {};
-                    const acc = s.latestSession
-                      ? Math.round(parseFloat(s.latestSession.accuracy_score || 0) * 100)
-                      : null;
+                    const acc = s.latestSession ? toPercent(s.latestSession.accuracy_score) : null;
                     const status = s.needsAttention ? 'attention' : (acc !== null && acc >= 70 ? 'on-track' : 'monitor');
                     return (
                       <div
@@ -1636,9 +1644,11 @@ function LearnerSessionCard({ learner: l, stats: s, onDeleteSession }) {
   const filteredSessions = sessions.filter(sess => {
     if (diffFilter !== 'all' && sess.difficulty !== diffFilter) return false;
     
-    const acc = parseFloat(sess.accuracy_score || 0);
-    if (accFilter === '70' && acc < 0.7) return false;
-    if (accFilter === '90' && acc < 0.9) return false;
+    /* Compared on the same scale as it is displayed; a row stored as 84 used
+       to sail through a ">= 90%" filter because 84 > 0.9. */
+    const acc = toPercent(sess.accuracy_score);
+    if (accFilter === '70' && acc < 70) return false;
+    if (accFilter === '90' && acc < 90) return false;
     
     if (dateRange === '7') {
       const limit = new Date(); limit.setDate(limit.getDate() - 7);
@@ -1788,20 +1798,34 @@ function LearnerSessionCard({ learner: l, stats: s, onDeleteSession }) {
           <div style={{ overflowX: 'auto' }}>
             <table className="data-table">
               <thead>
-                <tr><th>#</th><th>Date</th><th>Duration</th><th>Success Rate</th><th>LPI</th><th>Report</th><th>Actions</th></tr>
+                <tr><th>#</th><th>Date</th><th>Duration</th>
+                  <th title="Composite occupational-therapy score, comparable across every game">OT Score</th>
+                  <th title="Average time to respond during the session">Avg Response</th>
+                  <th>LPI</th><th>Report</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 {paged.map((sess, i) => (
                   <tr key={sess.id}>
                     <td data-label="Resource Index">{filteredSessions.length - ((activePage-1)*itemsPerPage + i)}</td>
                     <td data-label="Date">{sess.start_time?.slice(0, 10)}</td>
-                    <td data-label="Duration">{Math.round(parseInt(sess.duration_seconds||0)/60)} min</td>
-                    <td data-label="Success Rate">
-                      <span style={{ fontWeight: 700, color: parseFloat(sess.accuracy_score) > 0.7 ? '#10B981' : '#F59E0B' }}>
-                        {Math.round(parseFloat(sess.accuracy_score||0)*100)}%
-                      </span>
-                    </td>
-                    <td data-label="LPI" style={{ fontWeight: 700, color: '#0D5E6B' }}>{sess.lpi_score}</td>
+                    <td data-label="Duration">{(() => {
+                      /* Sessions under a minute all rendered as "0 min". */
+                      const sec = parseInt(sess.duration_seconds || 0, 10);
+                      return sec < 60 ? `${sec}s` : `${Math.round(sec / 60)} min`;
+                    })()}</td>
+                    <td data-label="OT Score">{(() => {
+                      const pct = toPercent(sess.accuracy_score);
+                      const color = pct >= 80 ? '#10B981' : pct >= 60 ? '#F59E0B' : '#EF4444';
+                      return <span style={{ fontWeight: 700, color }}>{pct}%</span>;
+                    })()}</td>
+                    <td data-label="Avg Response">{(() => {
+                      const ms = parseFloat(sess.avg_response_time_ms || 0);
+                      return ms > 0 ? `${(ms / 1000).toFixed(1)}s` : '—';
+                    })()}</td>
+                    <td data-label="LPI" style={{ fontWeight: 700, color: '#0D5E6B' }}>{(() => {
+                      const lpi = parseInt(sess.lpi_score || 0, 10);
+                      return lpi > 0 ? lpi : '—';
+                    })()}</td>
                     <td data-label="Report">
                       <button
                         onClick={async () => {

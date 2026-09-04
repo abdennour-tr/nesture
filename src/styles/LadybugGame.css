@@ -1005,3 +1005,104 @@
   .lb-path { stroke-dasharray: 22 26; }
   .lb-field.lb-off-path { animation: none !important; }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OVERLAY CARDS THAT OUTGROW THE WINDOW
+   The rules / pause / results cards were centred in their overlay with
+   justify-content (or align-items) : center. When a flex item is larger than
+   the container it is centred in, it overflows at BOTH ends — and the half
+   above the container's edge cannot be scrolled to at all. That is why the
+   buttons at the bottom of the results card were unreachable on a short
+   window.
+
+   The fix is the standard one: the overlay stops centring and scrolls, and the
+   card centres itself with `margin: auto`, which centres while it fits and
+   gives up cleanly when it does not. The card is also capped to the window and
+   scrolls internally, so it can never grow past the screen again.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lb-overlay {
+  /* Centring on the block axis is what clipped the card — see above. */
+  justify-content: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.lb-rules-card, .lb-pause-card, .lb-results-card {
+  /* Centres in the free space, never clips when there is none. */
+  margin: auto;
+  max-height: calc(100dvh - 40px);
+  /* overflow-x stays hidden: the decorative confetti and glows are meant to be
+     clipped. Only the vertical axis becomes scrollable. */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESULTS CARD — SHRINKS INSTEAD OF SCROLLING
+   Scrolling was only the safety net. What the card really has to do is get
+   smaller: at 150% browser zoom the window is barely 600 CSS pixels tall, and
+   a card built from fixed pixel sizes cannot fit whatever the overflow rules
+   say. Every size below is therefore clamped against vh — the ring, the tiles,
+   the type and the padding all lose height together, so the card keeps its
+   proportions and stays whole on screen. The min() floors keep it readable.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lb-results-card {
+  padding: clamp(14px, 2.6vh, 30px) clamp(16px, 2.2vw, 30px);
+}
+
+.lb-results-title {
+  font-size: clamp(1.15rem, 3.2vh, 1.75rem);
+}
+
+.lb-results-sub {
+  font-size: clamp(0.76rem, 1.7vh, 1rem);
+}
+
+/* The ring is the single biggest block of height, so it gives up the most. */
+.lb-perf-ring {
+  width: clamp(88px, 16vh, 156px);
+  height: clamp(88px, 16vh, 156px);
+  margin: 0 auto clamp(10px, 2.2vh, 26px);
+}
+
+.lb-perf-inner {
+  width: 79%;
+  height: 79%;
+}
+
+.lb-perf-val { font-size: clamp(1.3rem, 4vh, 2.4rem); }
+.lb-perf-lbl { font-size: clamp(0.58rem, 1.3vh, 0.75rem); }
+
+.lb-metrics {
+  gap: clamp(5px, 1vh, 10px);
+  margin-bottom: clamp(10px, 2.2vh, 26px);
+}
+
+.lb-metric {
+  padding: clamp(6px, 1.3vh, 13px) clamp(8px, 1vw, 12px);
+  gap: clamp(6px, 1vw, 10px);
+  border-radius: clamp(10px, 1.6vh, 15px);
+}
+
+.lb-metric-ico {
+  width: clamp(24px, 3.6vh, 36px);
+  height: clamp(24px, 3.6vh, 36px);
+  flex: none;
+}
+
+.lb-metric-label { font-size: clamp(0.56rem, 1.25vh, 0.72rem); }
+.lb-metric-value { font-size: clamp(0.82rem, 1.9vh, 1.1rem); }
+
+.lb-results-card .lb-btn {
+  padding: clamp(8px, 1.6vh, 13px) clamp(14px, 1.8vw, 24px);
+  font-size: clamp(0.8rem, 1.8vh, 1rem);
+  border-radius: clamp(11px, 1.8vh, 16px);
+}
+
+/* Under ~700px of usable height the four-column grid stops being readable at
+   this scale; two wider columns keep the labels on one line. */
+@media (max-height: 700px) {
+  .lb-metrics { grid-template-columns: repeat(2, 1fr); }
+}

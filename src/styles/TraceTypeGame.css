@@ -1617,9 +1617,14 @@
   inset: 0;
   z-index: 210;
   display: flex;
-  align-items: center;
+  /* NOT align-items:center. A flex item centred in a container it overflows is
+     clipped at BOTH ends, and the top half becomes unreachable — that is why
+     the title disappeared under the edge. flex-start plus `margin:auto` on the
+     card centres it while it fits and simply starts at the top when it does
+     not. */
+  align-items: flex-start;
   justify-content: center;
-  padding: 24px;
+  padding: var(--tt-rules-pad, clamp(12px, 3vh, 24px));
   background: rgba(8, 10, 22, 0.78);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -1627,20 +1632,34 @@
 }
 
 .tt-rules-card {
+  --tt-rules-pad: clamp(12px, 3vh, 24px);
   width: min(560px, 100%);
+  margin: auto;
+  /* The card never exceeds the window; the list inside it scrolls instead, so
+     the heading and the start button are always on screen. */
+  max-height: calc(100dvh - 2 * var(--tt-rules-pad));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: linear-gradient(160deg, rgba(19, 37, 41, 0.96), rgba(9, 11, 20, 0.96));
   border: 1px solid var(--tt-border);
   border-radius: 24px;
-  padding: 28px;
+  padding: clamp(16px, 2.6vh, 28px);
   box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.6);
   color: var(--tt-text);
+}
+
+.tt-rules-head,
+.tt-rules-ot,
+.tt-rules-start {
+  flex: 0 0 auto;
 }
 
 .tt-rules-head {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-bottom: 22px;
+  margin-bottom: clamp(12px, 2.2vh, 22px);
 }
 
 .tt-rules-badge {
@@ -1670,11 +1689,16 @@
 
 .tt-rules-list {
   list-style: none;
-  margin: 0 0 20px;
-  padding: 0;
+  margin: 0 0 clamp(12px, 2vh, 20px);
+  padding: 0 4px 0 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: clamp(8px, 1.4vh, 12px);
+  /* The one element that gives up height when the window is short. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .tt-rules-list li {
@@ -1835,6 +1859,14 @@
   background: conic-gradient(var(--tt-accent) calc(var(--pct) * 1%), rgba(0, 0, 0, 0.08) 0);
 }
 .tt-light-mode .tt-ot-bar-track { background: rgba(0, 0, 0, 0.08); }
+
+/* Short windows: the rules stay readable, the chrome around them shrinks. */
+@media (max-height: 720px) {
+  .tt-rules-badge { width: 46px; height: 46px; font-size: 1.5rem; }
+  .tt-rules-title { font-size: 1.25rem; }
+  .tt-rules-ot { padding: 9px 12px; margin-bottom: 12px; }
+  .tt-rules-start { padding: 11px 20px; font-size: 1rem; }
+}
 
 @media (max-width: 640px) {
   .tt-ot-block { gap: 18px; }
@@ -2127,4 +2159,64 @@
   .tt-step-pill,
   .tt-sound-btn { transition: none; }
   .tt-key.highlighted { animation: none; }
+}
+
+/* ── Results overlay: same centring trap as the rules modal ─────────────────
+   The overlay is a centred flex column written inline in the JSX, so a card
+   taller than the window overflowed at both ends and the buttons at the bottom
+   could not be reached. !important is required to beat the inline rule. */
+.tt-results-overlay {
+  justify-content: flex-start !important;
+  overscroll-behavior: contain;
+}
+
+.tt-results-card {
+  margin: auto;
+  max-height: calc(100dvh - 80px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESULTS CARD — SHRINKS INSTEAD OF SCROLLING
+   Same reasoning as the play screen: at 150% zoom the window is barely 600 CSS
+   pixels tall, so the card has to lose height rather than rely on the overflow
+   rules above. The OT ring, the weighted bars and the metric tiles are all
+   clamped against vh and shrink together.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.tt-results-card {
+  padding: clamp(16px, 2.8vh, 34px) clamp(16px, 2.4vw, 32px);
+}
+
+.tt-results-emoji { font-size: clamp(1.8rem, 5vh, 3.2rem); }
+.tt-results-title { font-size: clamp(1.15rem, 3.2vh, 1.8rem); }
+.tt-results-subtitle { font-size: clamp(0.76rem, 1.7vh, 1rem); }
+.tt-results-stars { font-size: clamp(1.3rem, 3.6vh, 2.2rem); }
+
+.tt-ot-block {
+  gap: clamp(14px, 2.4vw, 26px);
+  margin: clamp(10px, 2vh, 22px) 0 clamp(12px, 2.2vh, 26px);
+}
+
+.tt-perf-ring {
+  width: clamp(88px, 15vh, 134px);
+  height: clamp(88px, 15vh, 134px);
+}
+
+.tt-perf-inner { width: 79%; height: 79%; }
+.tt-perf-val { font-size: clamp(1.3rem, 3.8vh, 2.1rem); }
+
+.tt-ot-bars { gap: clamp(5px, 1vh, 10px); }
+.tt-ot-bar-head { font-size: clamp(0.68rem, 1.5vh, 0.85rem); }
+
+.tt-results-stats { gap: clamp(6px, 1.1vh, 12px); }
+
+.tt-results-stat { padding: clamp(7px, 1.4vh, 14px) clamp(8px, 1vw, 12px); }
+.tt-results-stat-icon { font-size: clamp(0.95rem, 2.2vh, 1.4rem); }
+.tt-results-stat-value { font-size: clamp(0.88rem, 2vh, 1.2rem); }
+.tt-results-stat-label { font-size: clamp(0.56rem, 1.25vh, 0.72rem); }
+
+.tt-results-btn {
+  padding: clamp(9px, 1.7vh, 14px) clamp(14px, 1.8vw, 24px);
+  font-size: clamp(0.8rem, 1.8vh, 0.95rem);
 }

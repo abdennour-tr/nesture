@@ -88,6 +88,13 @@ const RETURN_MS          = 450;   // duration of the fly-back animation
    child to travel the curve continuously. Generous enough that a fast but
    legitimate traversal (whole path in half a second) is never penalised. */
 const MAX_T_RATE         = 2.0;
+/* How long the child may outrun MAX_T_RATE before the ladybug slips away.
+   Progress used to just freeze silently when they raced ahead: the bug still
+   followed the finger to the leaf, but the level could never complete and
+   nothing said why. Now racing has the same visible consequence as leaving the
+   path -- the ladybug escapes back to the last point actually traced. Long
+   enough that a single fast flick or a tracking spike is forgiven. */
+const OVERSPEED_GRACE_MS = 220;
 const COUNTDOWN_SECONDS  = 3;
 const RULES_FLAG         = 'ladybug_rules_seen';
 
@@ -374,6 +381,9 @@ export default function LadybugGame() {
   /* Discrete events — set on transition only, so these are cheap. */
   const [uiGrabbed, setUiGrabbed] = useState(false);
   const [uiEverGrabbed, setUiEverGrabbed] = useState(false);
+  /* Why the ladybug last escaped, so the hint can say something useful
+     instead of the same generic line for both causes. */
+  const [escapeReason, setEscapeReason] = useState(null);
   const [results, setResults] = useState(null);
 
   /* ── DOM refs used by the loop ── */
@@ -402,6 +412,9 @@ export default function LadybugGame() {
   /* ── Off-path grace + fly-back ── */
   const offSinceRef    = useRef(null);   // ts when the bug left the band
   const returningRef   = useRef(false);
+  /* Sustained over-speed: when it started, and how often it cost the bug. */
+  const overSinceRef   = useRef(null);
+  const overspeedsRef  = useRef(0);
   const returnFromRef  = useRef(null);
   const returnToRef    = useRef(null);
   const returnStartRef = useRef(0);
@@ -552,6 +565,7 @@ export default function LadybugGame() {
       speedScore: Math.round(speedScore),
       grip: Math.round(grip),
       drops: dropsRef.current,
+      overspeeds: overspeedsRef.current,
       composite,
       reactionMs: reactionMs == null ? null : Math.round(reactionMs),
       movementMs: Math.round(carryMs),
@@ -573,6 +587,26 @@ export default function LadybugGame() {
 
     let lastUiPush = 0;
     let lastProgressBeep = 0;
+
+    /* The ladybug slips out of the child's hands and flies home to the last
+       point they legitimately traced. Shared by the two ways of losing it:
+       straying off the path, and racing ahead of it. */
+    const releaseBug = (ts, reason) => {
+      returningRef.current = true;
+      returnFromRef.current = { ...bugPosRef.current };
+      returnToRef.current = pathPointAt(tMaxRef.current, cfg);
+      returnStartRef.current = ts;
+      grabbedRef.current = false;
+      dropsRef.current += 1;
+      offSinceRef.current = null;
+      overSinceRef.current = null;
+      lastMoveRef.current = null;
+      headingRef.current = null;
+      if (bugRef.current) bugRef.current.classList.add('lb-bug-returning');
+      setUiGrabbed(false);
+      setEscapeReason(reason);
+      if (soundEnabled) soundManager.playClick();
+    };
 
     const step = (ts) => {
       rafRef.current = requestAnimationFrame(step);
@@ -622,6 +656,8 @@ export default function LadybugGame() {
             lastMoveRef.current = null;
             headingRef.current = null;
             offSinceRef.current = null;
+            overSinceRef.current = null;
+            setEscapeReason(null);   // picked it up again; the hint has done its job
             setUiGrabbed(true);
             if (soundEnabled) soundManager.playClick();
           }
@@ -674,20 +710,8 @@ export default function LadybugGame() {
         if (offSinceRef.current == null) offSinceRef.current = ts;
         if (ts - offSinceRef.current >= cfg.graceMs) {
           // Time's up: the ladybug escapes back to the furthest point reached.
-          const home = pathPointAt(tMaxRef.current, cfg);
-          returningRef.current = true;
-          returnFromRef.current = { ...bugPosRef.current };
-          returnToRef.current = home;
-          returnStartRef.current = ts;
-          grabbedRef.current = false;
-          dropsRef.current += 1;
-          offSinceRef.current = null;
+          releaseBug(ts, 'offpath');
           onPath = true;                 // field calms down during the flight
-          lastMoveRef.current = null;
-          headingRef.current = null;
-          if (bugRef.current) bugRef.current.classList.add('lb-bug-returning');
-          setUiGrabbed(false);
-          if (soundEnabled) soundManager.playClick();
         }
       } else if (onPath) {
         offSinceRef.current = null;
@@ -695,10 +719,29 @@ export default function LadybugGame() {
 
       /* Progress only advances while the bug is on the path, and only at a
          bounded rate, so neither a shortcut across the field nor a jump between
-         two distant points of the curve can complete the level. */
+         two distant points of the curve can complete the level.
+
+         Outrunning that rate is now an event, not a silent freeze: hold the
+         pace for OVERSPEED_GRACE_MS and the ladybug escapes back to the last
+         point genuinely traced, exactly as it does when the child strays off
+         the path. Before this, racing to the leaf left `tMax` behind, the
+         finish condition never fired, and the game simply stopped responding
+         with no explanation. */
       if (grabbedRef.current && onPath && proj.t > tMaxRef.current) {
         const maxAdvance = MAX_T_RATE * dt;
-        if (proj.t - tMaxRef.current <= maxAdvance) tMaxRef.current = proj.t;
+        if (proj.t - tMaxRef.current <= maxAdvance) {
+          tMaxRef.current = proj.t;
+          overSinceRef.current = null;
+        } else {
+          if (overSinceRef.current == null) overSinceRef.current = ts;
+          if (ts - overSinceRef.current >= OVERSPEED_GRACE_MS) {
+            overspeedsRef.current += 1;
+            releaseBug(ts, 'overspeed');
+            onPath = true;               // field calms down during the flight
+          }
+        }
+      } else {
+        overSinceRef.current = null;
       }
 
       /* ── Kinematics on the bug's own trajectory ────────────────────────── */
@@ -874,6 +917,8 @@ export default function LadybugGame() {
         totalMsRef.current = 0;
         firstGrabAtRef.current = null;
         dropsRef.current = 0;
+        overspeedsRef.current = 0;
+        overSinceRef.current = null;
         lastMoveRef.current = null;
         headingRef.current = null;
         dirChangesRef.current = 0;
@@ -949,6 +994,7 @@ export default function LadybugGame() {
         speedScore: results.speedScore,
         gripScore: results.grip,
         drops: results.drops,
+        overspeeds: results.overspeeds,
         performanceScore: results.composite,
         reactionTimeMs: results.reactionMs,
         carryTimeMs: results.movementMs,
@@ -1007,10 +1053,13 @@ export default function LadybugGame() {
     setResults(null);
     setUiScore(0); setUiElapsed(0); setUiProgress(0); setUiOnPath(true);
     setUiGrabbed(false); setUiEverGrabbed(false);
+    setEscapeReason(null);
     pointerRef.current = null;
     grabbedRef.current = false;
     tMaxRef.current = 0;
     offSinceRef.current = null;
+    overSinceRef.current = null;
+    overspeedsRef.current = 0;
     returningRef.current = false;
     bugPosRef.current = pathPointAt(0, cfg);
     bugAngleRef.current = 0;
@@ -1124,9 +1173,11 @@ export default function LadybugGame() {
                 exit={{ opacity: 0, y: 8 }}
                 transition={{ duration: 0.25 }}
               >
-                {uiEverGrabbed
-                  ? 'Oops! Point at the ladybug again 🐞'
-                  : 'Point at the ladybug to pick it up! ☝️'}
+                {escapeReason === 'overspeed'
+                  ? 'Too fast! The ladybug flew back — go slowly 🐞'
+                  : uiEverGrabbed
+                    ? 'Oops! Point at the ladybug again 🐞'
+                    : 'Point at the ladybug to pick it up! ☝️'}
               </motion.div>
             )}
           </AnimatePresence>

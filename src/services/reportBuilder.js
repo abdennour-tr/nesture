@@ -40,130 +40,366 @@ function statusText(value, goodThreshold, warnThreshold) {
 }
 
 
+/* ---------------------------------------------------------------------------
+   Metric dictionary
+   The five summary games each measure different things and store them under
+   their own key names, in `notes` (older games, a JSON string) or `metrics`
+   (newer ones). This table is the single place that knows how to present any
+   of them: a human label, a unit, and where "good" and "fair" start.
+
+   `higherIsBetter: false` marks the counters where a low number is the good
+   result (drops, wrong keys, deviation in pixels). Keys absent from a given
+   game's payload are simply not rendered, so every game gets a report made of
+   its own measurements instead of a fixed grid of mostly-empty rows.
+   --------------------------------------------------------------------------- */
+const PCT = { unit: '%', good: 80, warn: 60 };
+
+const METRIC_DEFS = {
+  // Accuracy family -- what the child produced versus what was asked
+  traceAccuracy:   { label: 'Trace accuracy',            ...PCT },
+  pathAccuracy:    { label: 'Path accuracy',             ...PCT },
+  touchAccuracy:   { label: 'Touch accuracy',            ...PCT },
+  matchAccuracy:   { label: 'Gesture match accuracy',    ...PCT },
+  typingAccuracy:  { label: 'Typing accuracy',           unit: '%', good: 85, warn: 70 },
+  releaseAccuracy: { label: 'Release accuracy',          ...PCT },
+  findEfficiency:  { label: 'Letter search efficiency',  ...PCT },
+  successRate:     { label: 'Success rate',              ...PCT },
+
+  // Movement quality
+  smoothness:           { label: 'Movement smoothness', unit: '%', good: 65, warn: 50 },
+  trajectorySmoothness: { label: 'Movement smoothness', unit: '%', good: 65, warn: 50 },
+  pathEfficiency:       { label: 'Path efficiency',     unit: '%', good: 75, warn: 55 },
+  dragTrajectoryEfficiency: { label: 'Drag efficiency', unit: '%', good: 75, warn: 55 },
+
+  // Motor control / grip
+  gripScore:      { label: 'Grip retention',    ...PCT },
+  grip:           { label: 'Grip retention',    ...PCT },
+  stability:      { label: 'Hold stability',    ...PCT },
+  pinchStability: { label: 'Pinch stability',   ...PCT },
+  consistency:    { label: 'Consistency',       unit: '%', good: 75, warn: 55 },
+  pinchAperture:  { label: 'Pinch aperture',    unit: '',  raw: true },
+
+  // Timing
+  speedScore:    { label: 'Speed vs reference', unit: '%', good: 75, warn: 55 },
+  reactionMs:     { label: 'Reaction time',  unit: 's', ms: true, good: 1.5, warn: 3, higherIsBetter: false },
+  reactionTimeMs: { label: 'Reaction time',  unit: 's', ms: true, good: 1.5, warn: 3, higherIsBetter: false },
+  pinchOnsetMs:   { label: 'Pinch onset',    unit: 's', ms: true, good: 1.5, warn: 3, higherIsBetter: false },
+  movementTimeMs: { label: 'Movement time',  unit: 's', ms: true, raw: true },
+  carryTimeMs:    { label: 'Carry time',     unit: 's', ms: true, raw: true },
+  pauseDurationMs:{ label: 'Time paused',    unit: 's', ms: true, raw: true },
+
+  // Counters -- context, not scores
+  drops:            { label: 'Drops',              count: true, good: 0, warn: 2, higherIsBetter: false },
+  overspeeds:       { label: 'Too-fast releases',  count: true, good: 0, warn: 2, higherIsBetter: false },
+  holdBreaks:       { label: 'Holds broken',       count: true, good: 1, warn: 4, higherIsBetter: false },
+  wrongKeys:        { label: 'Wrong keys pressed', count: true, good: 2, warn: 6, higherIsBetter: false },
+  corrections:      { label: 'Course corrections', count: true, raw: true },
+  directionChanges: { label: 'Direction changes',  count: true, raw: true },
+  pauses:           { label: 'Pauses',             count: true, raw: true },
+  meanDeviation:    { label: 'Mean deviation from path', unit: 'px', good: 12, warn: 25, higherIsBetter: false },
+  bubblesPopped:    { label: 'Bubbles popped',     count: true, raw: true },
+  bubblesSpawned:   { label: 'Bubbles shown',      count: true, raw: true },
+  bubblesMissed:    { label: 'Bubbles missed',     count: true, raw: true },
+  coinsCollected:   { label: 'Coins collected',    count: true, raw: true },
+  attempts:         { label: 'Attempts',           count: true, raw: true },
+  score:            { label: 'Points scored',      count: true, raw: true },
+  starsEarned:      { label: 'Stars earned',       count: true, raw: true },
+  fittsThroughputBitsPerSec: { label: 'Fitts throughput', unit: 'bit/s', raw: true, decimals: 2 },
+  fittsMeanIndexOfDifficulty: { label: 'Fitts index of difficulty', unit: '', raw: true, decimals: 2 },
+};
+
+/* Keys that describe the setup rather than the performance. */
+const METRIC_SKIP = new Set([
+  'game', 'mechanic', 'level', 'mode', 'otScore', 'performanceScore', 'composite',
+]);
+
+/* accuracy_score is not stored in one unit across games: some rows hold a 0-1
+   fraction, others a 0-100 percentage. Anything above 1 is already a
+   percentage. Same rule as the dashboards. */
+function toPercent(raw) {
+  const v = parseFloat(raw);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return Math.min(100, Math.round(v > 1 ? v : v * 100));
+}
+
+/** Pull the per-game detail out of whichever field the game used. */
+function readGameMetrics(session) {
+  if (session.metrics && typeof session.metrics === 'object') return session.metrics;
+  if (typeof session.notes === 'string' && session.notes.trim().startsWith('{')) {
+    try { return JSON.parse(session.notes) || {}; } catch { return {}; }
+  }
+  if (session.notes && typeof session.notes === 'object') return session.notes;
+  return {};
+}
+
+/** camelCase -> "Camel case", for a metric no dictionary entry covers yet. */
+function humanise(key) {
+  const spaced = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
+}
+
+/** One dictionary entry + one raw value -> the row the table will print. */
+function formatMetric(key, rawValue) {
+  const def = METRIC_DEFS[key];
+  const num = typeof rawValue === 'string' ? parseFloat(rawValue) : rawValue;
+  if (!Number.isFinite(num)) return null;
+
+  if (!def) {
+    // Unknown but numeric: show it rather than silently dropping data.
+    return { label: humanise(key), value: String(Math.round(num * 100) / 100), status: '-' };
+  }
+
+  let display;
+  let comparable = num;
+
+  if (def.ms) {
+    comparable = num / 1000;
+    display = `${comparable.toFixed(2)}s`;
+  } else if (def.count) {
+    display = String(Math.round(num));
+  } else if (def.unit === '%') {
+    // Percent metrics also arrive as 0-1 in some games.
+    comparable = num > 1 ? num : num * 100;
+    display = `${Math.round(comparable)}%`;
+  } else {
+    display = `${num.toFixed(def.decimals ?? 1)}${def.unit ? ' ' + def.unit : ''}`;
+  }
+
+  let status = '-';
+  if (!def.raw && def.good !== undefined) {
+    const better = def.higherIsBetter !== false;
+    const good = better ? comparable >= def.good : comparable <= def.good;
+    const fair = better ? comparable >= def.warn : comparable <= def.warn;
+    status = good ? 'Good' : fair ? 'Fair' : 'Needs Focus';
+  }
+
+  return { label: def.label, value: display, status };
+}
+
+/* ---------------------------------------------------------------------------
+   Layout primitives
+   --------------------------------------------------------------------------- */
+const PAGE_W = 210;
+const PAGE_H = 297;
+const MARGIN = 16;
+const CONTENT_W = PAGE_W - MARGIN * 2;
+const FOOTER_Y = PAGE_H - 14;
+
+/** Start a new page when `needed` mm no longer fit above the footer. */
+function ensureSpace(doc, y, needed) {
+  if (y + needed < FOOTER_Y - 4) return y;
+  doc.addPage();
+  return MARGIN;
+}
+
+/** A labelled KPI tile. */
+function drawKpi(doc, x, y, w, h, label, value, accent) {
+  setFillHex(doc, CREAM);
+  doc.roundedRect(x, y, w, h, 2, 2, 'F');
+  setFillHex(doc, accent);
+  doc.rect(x, y, 1.4, h, 'F');           // accent spine
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  setTextHex(doc, GRAY);
+  doc.text(label.toUpperCase(), x + 5, y + 6);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(15);
+  setTextHex(doc, DARK);
+  doc.text(String(value), x + 5, y + 15);
+}
+
+/** Score donut for the header band: a light full ring with the achieved arc
+    over it, on a white disc so the figure stays legible against the teal. The
+    caption is left to the KPI tile underneath rather than crammed inside. */
+function drawScoreRing(doc, cx, cy, r, pct, colour) {
+  setFillHex(doc, WHITE);
+  doc.circle(cx, cy, r + 0.6, 'F');
+  drawArc(doc, cx, cy, r, 0, 360, '#D9E6EA', 2.6);
+  if (pct > 0) drawArc(doc, cx, cy, r, -90, -90 + (360 * pct) / 100, colour, 2.6);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  setTextHex(doc, DARK);
+  doc.text(`${pct}`, cx, cy + 1.4, { align: 'center' });
+}
+
+/** Disclaimer + page numbers, stamped on every page once the body is done. */
+function stampFooters(doc) {
+  const pages = doc.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    setDrawHex(doc, '#D9E6EA');
+    doc.setLineWidth(0.3);
+    doc.line(MARGIN, FOOTER_Y - 4, PAGE_W - MARGIN, FOOTER_Y - 4);
+
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(6.5);
+    setTextHex(doc, GRAY);
+    doc.text(
+      'Nesture AI - NesturePlay. Educational screening support, not a medical record. Consult a licensed specialist for clinical decisions.',
+      MARGIN, FOOTER_Y
+    );
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Page ${i} / ${pages}`, PAGE_W - MARGIN, FOOTER_Y, { align: 'right' });
+  }
+}
+
 /** Build the jsPDF document object (shared by both export functions). */
 function _buildDoc({ learner, session, reflexScores, recommendations, exercises, narrative, lpiScore }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const W = 210;
-  const margin = 20;
-  const contentW = W - margin * 2;
-  let y = 15;
+  let y = MARGIN;
 
-  // â”€â”€ Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Background rect
-  setFillHex(doc, CREAM);
-  doc.roundedRect(margin, y, contentW, 28, 3, 3, 'F');
+  const detail    = readGameMetrics(session);
+  const gameName  = session.game_name || 'NesturePlay';
+  const otScore   = toPercent(session.accuracy_score);
+  /* The session's own LPI is the real one now; the caller's value is only a
+     fallback for old rows. A zero means "never computed", so it shows as a
+     dash rather than pretending to be a score of 0. */
+  const lpiRaw    = safeInt(session.lpi_score, 0) || safeInt(lpiScore, 0);
+  const lpi       = lpiRaw > 0 ? String(lpiRaw) : '-';
+  const durationS = safeInt(session.duration_seconds, 0);
+  const duration  = durationS < 60 ? `${durationS}s` : `${Math.round(durationS / 60)} min`;
+  const otColour  = otScore >= 80 ? '#16A34A' : otScore >= 60 ? ORANGE : '#DC2626';
 
-  // Title
+  // -- Header band ----------------------------------------------------------
+  setFillHex(doc, TEAL);
+  doc.roundedRect(MARGIN, y, CONTENT_W, 26, 3, 3, 'F');
+
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  setTextHex(doc, TEAL);
-  doc.text('NesturePlay Session Report', margin + 4, y + 8);
+  doc.setFontSize(15);
+  setTextHex(doc, WHITE);
+  doc.text('NesturePlay Session Report', MARGIN + 6, y + 10);
 
-  // Subtitle
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text(`${learner?.name || 'Learner'}  |  ${gameName}`, MARGIN + 6, y + 17);
+
   const startDate = (session.start_time || '').slice(0, 10);
-  const durationMin = Math.round(safeInt(session.duration_seconds, 0) / 60);
-  const generatedAt = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  setTextHex(doc, GRAY);
-  doc.text(`${learner?.name || 'Learner'} · ${startDate} · ${durationMin} min`, margin + 4, y + 15);
-  doc.text(`Report ID: ${(session.id || 'N/A').slice(0, 20)} · Generated ${generatedAt}`, margin + 4, y + 20);
+  const generated = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  doc.setFontSize(6.5);
+  doc.text(
+    `${startDate}   Report ${(session.id || 'N/A').slice(0, 8)}   Generated ${generated}`,
+    MARGIN + 6, y + 22
+  );
 
-  // LPI badge (right side)
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(26);
-  setTextHex(doc, ORANGE);
-  doc.text(String(lpiScore || 0), W - margin - 4, y + 18, { align: 'right' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  setTextHex(doc, GRAY);
-  doc.text('LPI', W - margin - 4, y + 8, { align: 'right' });
-  doc.text('Learner Progress Index', W - margin - 4, y + 24, { align: 'right' });
+  drawScoreRing(doc, PAGE_W - MARGIN - 18, y + 13, 9, otScore, otColour);
+  y += 32;
 
-  y += 35;
-
-  // â”€â”€ Section: Session Performance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  y = _sectionTitle(doc, 'Session Performance', margin, y, contentW);
-
-  const acc      = (safeFloat(session.accuracy_score, 0) * 100).toFixed(1);
-  const rt       = (safeFloat(session.avg_response_time_ms, 0) / 1000).toFixed(1);
-  const smooth   = (safeFloat(session.trajectory_smoothness, 0) * 100).toFixed(1);
-  const fatigue  = (safeFloat(session.fatigue_index, 0) * 100).toFixed(1);
-  const total    = session.total_attempts || '—';
-  const perfect  = session.perfect_grabs || '—';
-
-  const metricsData = [
-    ['Metric', 'Value', 'Status'],
-    ['Accuracy Score',        `${acc}%`,   statusText(parseFloat(acc), 75, 60)],
-    ['Avg Response Time',     `${rt}s`,    statusText(10 - parseFloat(rt), 4, 2)],
-    ['Total Attempts',        String(total), '—'],
-    ['Perfect Grabs',         String(perfect), '—'],
-    ['Trajectory Smoothness', `${smooth}%`, statusText(parseFloat(smooth), 65, 50)],
-    ['Fatigue Index',         `${fatigue}%`, statusText(100 - parseFloat(fatigue), 60, 40)],
+  // -- KPI strip ------------------------------------------------------------
+  const kpiW = (CONTENT_W - 9) / 4;
+  const kpis = [
+    ['OT Score',   `${otScore}%`,                       otColour],
+    ['LPI',        lpi,                                 '#8B5CF6'],
+    ['Duration',   duration,                            TEAL],
+    ['Difficulty', session.difficulty || 'n/a',         ORANGE],
   ];
-  y = _drawTable(doc, metricsData, margin, y, [70, 40, 60], contentW);
-  y += 6;
-
-  // â”€â”€ Section: Primitive Reflex Assessment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  y = _sectionTitle(doc, 'Primitive Reflex Integration Assessment', margin, y, contentW);
-
-  const reflexHeader = ['Reflex', 'Score', 'Confidence', 'Status'];
-  const reflexRows = reflexScores.map(r => {
-    const score = safeInt(r.score || r.score, 50);
-    const filled = Math.floor(score / 10);
-    const bar = '[' + '='.repeat(filled) + '-'.repeat(10 - filled) + ']';
-    const conf = r.confidence_level || r.confidence || 'Low';
-    const status = conf === 'High' ? '! Action Recommended' : (conf === 'Medium' ? 'Monitor' : 'On Track');
-    return [r.reflex_name || r.reflex || '', `${bar} ${score}`, conf, status];
+  kpis.forEach(([label, value, accent], i) => {
+    drawKpi(doc, MARGIN + i * (kpiW + 3), y, kpiW, 20, label, value, accent);
   });
-  y = _drawTable(doc, [reflexHeader, ...reflexRows], margin, y, [40, 50, 35, 45], contentW);
-  y += 6;
+  y += 27;
 
-  // â”€â”€ Section: Session Summary (narrative) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  y = _sectionTitle(doc, 'Session Summary', margin, y, contentW);
+  // -- Performance, built from what THIS game measured -----------------------
+  y = ensureSpace(doc, y, 40);
+  y = _sectionTitle(doc, `Performance - ${gameName}`, MARGIN, y, CONTENT_W);
 
-  setFillHex(doc, CREAM);
-  setDrawHex(doc, TEAL);
-  doc.setLineWidth(0.3);
-  const lines = doc.splitTextToSize(narrative || '', contentW - 12);
-  const narrativeH = lines.length * 5 + 10;
-  doc.roundedRect(margin, y, contentW, narrativeH, 2, 2, 'FD');
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  setTextHex(doc, DARK);
-  doc.text(lines, margin + 6, y + 7);
-  y += narrativeH + 6;
-
-  // â”€â”€ Section: OT Exercise Recommendations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const actionable = recommendations.filter(r => r.exercise_id);
-  if (actionable.length > 0) {
-    y = _sectionTitle(doc, 'Recommended OT Exercises', margin, y, contentW);
-    const exMap = Object.fromEntries(exercises.map(e => [e.id, e]));
-    const exHeader = ['Exercise', 'Target Reflex', 'Duration', 'Instructions'];
-    const exRows = actionable.map(rec => {
-      const ex = exMap[rec.exercise_id] || {};
-      const desc = (ex.description || '').slice(0, 80) + ((ex.description || '').length > 80 ? '...' : '');
-      return [ex.name || '—', rec.target_reflex || '—', `${ex.duration_minutes || '—'} min`, desc];
+  const rows = [['Measure', 'Value', 'Status']];
+  Object.keys(detail)
+    .filter((k) => !METRIC_SKIP.has(k))
+    .forEach((key) => {
+      const row = formatMetric(key, detail[key]);
+      if (row) rows.push([row.label, row.value, row.status]);
     });
-    y = _drawTable(doc, [exHeader, ...exRows], margin, y, [35, 35, 20, 80], contentW, ORANGE);
+
+  /* Nothing game-specific stored (an old session, or Letter Quest): fall back
+     to the columns every session row carries. */
+  if (rows.length === 1) {
+    const rt     = safeFloat(session.avg_response_time_ms, 0) / 1000;
+    const smooth = toPercent(session.trajectory_smoothness);
+    const fatigue= toPercent(session.fatigue_index);
+    rows.push(['Accuracy', `${otScore}%`, statusText(otScore, 75, 60)]);
+    if (rt > 0)      rows.push(['Avg response time', `${rt.toFixed(2)}s`, statusText(10 - rt, 4, 2)]);
+    if (smooth > 0)  rows.push(['Movement smoothness', `${smooth}%`, statusText(smooth, 65, 50)]);
+    if (fatigue > 0) rows.push(['Fatigue index', `${fatigue}%`, statusText(100 - fatigue, 60, 40)]);
+    if (session.total_attempts) rows.push(['Total attempts', String(session.total_attempts), '-']);
+    if (session.perfect_grabs)  rows.push(['Perfect actions', String(session.perfect_grabs), '-']);
+  }
+
+  y = _drawTable(doc, rows, MARGIN, y, [88, 40, 50], CONTENT_W);
+  y += 5;
+
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(6.5);
+  setTextHex(doc, GRAY);
+  doc.text(
+    'Good / Fair / Needs Focus are screening bands, not clinical cut-offs. Read them alongside the notes below.',
+    MARGIN, y
+  );
+  y += 7;
+
+  // -- Reflexes, only when the session actually produced them ---------------
+  if (Array.isArray(reflexScores) && reflexScores.length) {
+    y = ensureSpace(doc, y, 40);
+    y = _sectionTitle(doc, 'Primitive Reflex Integration', MARGIN, y, CONTENT_W);
+
+    const reflexRows = [['Reflex', 'Score', 'Confidence', 'Status']];
+    reflexScores.forEach((r) => {
+      const score  = safeInt(r.score, 50);
+      const filled = Math.max(0, Math.min(10, Math.floor(score / 10)));
+      const bar    = '[' + '='.repeat(filled) + '-'.repeat(10 - filled) + ']';
+      const conf   = r.confidence_level || r.confidence || 'Low';
+      const status = conf === 'High' ? 'Action recommended' : conf === 'Medium' ? 'Monitor' : 'On track';
+      reflexRows.push([r.reflex_name || r.reflex || '', `${bar} ${score}`, conf, status]);
+    });
+    y = _drawTable(doc, reflexRows, MARGIN, y, [45, 52, 32, 49], CONTENT_W);
     y += 6;
   }
 
-  // â”€â”€ Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  // Dashed line
-  setDrawHex(doc, GRAY);
-  doc.setLineWidth(0.3);
-  doc.line(margin, y + 4, W - margin, y + 4);
-  doc.setFont('helvetica', 'italic');
-  doc.setFontSize(7);
-  setTextHex(doc, GRAY);
-  doc.text(
-    'Nesture AI · NesturePlay · EdTech Platform — Not a medical record. Consult a licensed specialist for professional decisions.',
-    W / 2,
-    y + 10,
-    { align: 'center' }
-  );
+  // -- Narrative -------------------------------------------------------------
+  if (narrative) {
+    /* splitTextToSize measures against the font size that is active when it is
+       called, so the size has to be set BEFORE wrapping -- otherwise the text
+       is wrapped for one size and drawn at another, and runs off the page. */
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    const lines = doc.splitTextToSize(String(narrative), CONTENT_W - 12);
 
+    y = ensureSpace(doc, y, lines.length * 4.6 + 22);
+    y = _sectionTitle(doc, 'Session Summary', MARGIN, y, CONTENT_W);
+
+    setFillHex(doc, CREAM);
+    setDrawHex(doc, TEAL);
+    doc.setLineWidth(0.3);
+    const boxH = lines.length * 4.6 + 9;
+    doc.roundedRect(MARGIN, y, CONTENT_W, boxH, 2, 2, 'FD');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    setTextHex(doc, DARK);
+    doc.text(lines, MARGIN + 6, y + 6.5);
+    y += boxH + 6;
+  }
+
+  // -- Recommendations -------------------------------------------------------
+  const actionable = (recommendations || []).filter((r) => r.exercise_id);
+  if (actionable.length) {
+    y = ensureSpace(doc, y, 34);
+    y = _sectionTitle(doc, 'Recommended OT Exercises', MARGIN, y, CONTENT_W);
+    const exMap = Object.fromEntries((exercises || []).map((e) => [e.id, e]));
+    const exRows = [['Exercise', 'Target reflex', 'Duration', 'Instructions']];
+    actionable.forEach((rec) => {
+      const ex = exMap[rec.exercise_id] || {};
+      const desc = (ex.description || '');
+      exRows.push([
+        ex.name || '-',
+        rec.target_reflex || '-',
+        `${ex.duration_minutes || '-'} min`,
+        desc.length > 78 ? desc.slice(0, 78) + '...' : desc,
+      ]);
+    });
+    y = _drawTable(doc, exRows, MARGIN, y, [34, 34, 20, 90], CONTENT_W, ORANGE);
+  }
+
+  stampFooters(doc);
   return doc;
 }
 
@@ -192,10 +428,11 @@ function _drawTable(doc, rows, x, y, colWidths, totalW, headerBg = TEAL) {
   const rowH = 7;
   const cellPadX = 3;
   const cellPadY = 5;
+  const header = rows[0];
 
   rows.forEach((row, rowIdx) => {
     let cx = x;
-    const isHeader = rowIdx === 0;
+    let isHeader = rowIdx === 0;
     const isEven = rowIdx % 2 === 0;
 
     // Row background
@@ -213,6 +450,15 @@ function _drawTable(doc, rows, x, y, colWidths, totalW, headerBg = TEAL) {
       if (wrapped.length > maxLines) maxLines = wrapped.length;
     });
     const actualH = Math.max(rowH, maxLines * 4.5 + 3);
+
+    /* A long table now continues on the next page instead of running off the
+       bottom, and the header is repeated so the columns stay readable. */
+    if (!isHeader && y + actualH > FOOTER_Y - 6) {
+      doc.addPage();
+      y = MARGIN;
+      y = _drawTable(doc, [header], x, y, colWidths, totalW, headerBg);
+      setFillHex(doc, isEven ? WHITE : CREAM);
+    }
 
     doc.rect(x, y, totalW, actualH, 'F');
 

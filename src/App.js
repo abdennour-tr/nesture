@@ -30,8 +30,11 @@ import FingerCopyDifficulty   from './pages/FingerCopyDifficulty';
 import FingerCopyGame         from './pages/FingerCopyGame';
 import TraceTypeDifficulty    from './pages/TraceTypeDifficulty';
 import TraceTypeGame          from './pages/TraceTypeGame';
-import FingerPianoDifficulty  from './pages/FingerPianoDifficulty';
-import FingerPianoGame        from './pages/FingerPianoGame';
+/* Finger Piano is under construction; its routes redirect to the game picker.
+   The imports stay commented rather than deleted so re-enabling the game is a
+   two-line change, and so the build does not warn about unused imports. */
+// import FingerPianoDifficulty  from './pages/FingerPianoDifficulty';
+// import FingerPianoGame        from './pages/FingerPianoGame';
 import PinchCoinDifficulty    from './pages/PinchCoinDifficulty';
 import PinchCoinGame          from './pages/PinchCoinGame';
 import LadybugDifficulty      from './pages/LadybugDifficulty';
@@ -302,11 +305,16 @@ export default function App() {
           <Route path="/play/trace-type-game" element={
             <ProtectedRoute allowedRoles={['learner']}><TraceTypeGame /></ProtectedRoute>
           } />
+          {/* Finger Piano is still being built. The card in the game picker
+              opens a notice instead of launching it, and these two routes are
+              sealed as well so a bookmark or a typed URL cannot slip past the
+              picker into an unfinished game. The redirect carries ?locked so
+              the learner home shows the same explanation. */}
           <Route path="/play/finger-piano-difficulty" element={
-            <ProtectedRoute allowedRoles={['learner']}><FingerPianoDifficulty /></ProtectedRoute>
+            <Navigate to="/play?locked=fingerpiano" replace />
           } />
           <Route path="/play/finger-piano-game" element={
-            <ProtectedRoute allowedRoles={['learner']}><FingerPianoGame /></ProtectedRoute>
+            <Navigate to="/play?locked=fingerpiano" replace />
           } />
           <Route path="/play/pinch-coin-difficulty" element={
             <ProtectedRoute allowedRoles={['learner']}><PinchCoinDifficulty /></ProtectedRoute>

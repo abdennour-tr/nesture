@@ -9,6 +9,7 @@ import useMediaPipeTracking, { LANDMARKS, calculateSmoothness } from '../hooks/u
 import { useReflexEngine } from '../hooks/useReflexEngine';
 import api from '../services/api';
 import { supabase } from '../services/supabaseClient';
+import '../styles/GamePage.css';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const DWELL_MS = 2500;               // 2.5 s dwell to confirm
@@ -341,7 +342,7 @@ export default function GamePage() {
     return saved !== null ? saved === 'true' : true;
   });
 
-  const { isSpeaking, speak: ttsSpeak, cancel: ttsCancel, voices } = useTextToSpeech(ttsEnabled);
+  const { isSpeaking, speak: ttsSpeak, cancel: ttsCancel } = useTextToSpeech(ttsEnabled);
 
   // ── Cursor UI state ────────────────────────────────────────────────────
   const [cursorPos, setCursorPos] = useState({ x: -300, y: -300 });
@@ -830,60 +831,6 @@ export default function GamePage() {
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div style={styles.root} className="gp-root">
-      <style>{`
-        @media (max-width: 1100px) {
-          .gp-root { flex-direction: column !important; overflow-y: auto !important; height: auto !important; min-height: 100vh; }
-          .gp-left, .gp-right { width: 100% !important; border: none !important; }
-          .gp-left { order: 2; border-top: 1px solid rgba(255,255,255,0.1) !important; }
-          .gp-center { order: 1; min-height: 400px; padding-top: 70px !important; position: relative !important; }
-          .gp-right { order: 3; border-top: 1px solid rgba(255,255,255,0.1) !important; padding-bottom: 60px !important; }
-          .camera-box { height: 300px !important; flex: none !important; }
-
-          .gp-control-bar { flex-wrap: wrap !important; gap: 12px !important; justify-content: center !important; padding: 15px !important; height: auto !important; }
-          .gp-control-bar > div { flex: 1 1 auto !important; justify-content: center !important; }
-          .gp-control-bar > div:last-child { border-left: none !important; }
-          .gp-control-bar .divider { display: none !important; }
-          
-          /* Settings Toggle - Visible on all devices < 1100px (Tablets & Phones) */
-          .mobile-settings-btn { 
-            display: flex !important; align-items: center; gap: 8px; 
-            position: fixed !important; top: 15px; left: 15px; 
-            z-index: 5000 !important; 
-            background: rgba(13, 94, 107, 0.5); color: white; 
-            border: 1px solid rgba(255,255,255,0.3); 
-            padding: 10px 16px; border-radius: 14px; 
-            font-weight: 800; font-size: 0.85rem; 
-            cursor: pointer; box-shadow: 0 6px 16px rgba(0,0,0,0.4); 
-            transition: all 0.2s;
-          }
-          .mobile-settings-btn:active { transform: scale(0.95); }
-          
-          .gp-control-bar.mobile-hidden { display: none !important; }
-          .gp-control-bar.mobile-visible { 
-            display: flex !important; 
-            position: absolute !important; 
-            top: 70px; left: 10px; right: 10px; 
-            width: calc(100% - 20px) !important;
-            z-index: 5001 !important; 
-            background: rgba(15, 30, 34, 0.98) !important;
-            border: 1px solid rgba(255,255,255,0.15) !important;
-            box-shadow: 0 25px 50px rgba(0,0,0,0.6) !important;
-            pointer-events: auto !important;
-          }
-        }
-        @media (max-width: 640px) {
-          .gp-center { padding: 10px !important; gap: 12px !important; }
-          .slot { width: 44px !important; height: 56px !important; fontSize: 1.4rem !important; }
-          .word-card { padding: 15px 20px !important; }
-          .letter-key { width: 48px !important; height: 48px !important; fontSize: 1.2rem !important; border-radius: 10px !important; }
-          .letter-row { gap: 6px !important; }
-          .letter-board { gap: 8px !important; }
-        }
-        @media (min-width: 1101px) {
-          .mobile-settings-btn { display: none !important; }
-          .gp-control-bar { display: flex !important; }
-        }
-      `}</style>
 
       {/* ── Celebration overlay ───────────────────────────────────────── */}
       <AnimatePresence>
@@ -916,6 +863,120 @@ export default function GamePage() {
           <DwellCursor progress={dwellProgress} hovering={!!hoveredKey} />
         </div>
       )}
+
+      {/* ── TOP BAR — settings, above the three panels ─────────────────── */}
+      {/* Mobile Settings Toggle Button */}
+      <button
+        className="mobile-settings-btn"
+        onClick={() => setShowMobileSettings(!showMobileSettings)}
+      >
+        {showMobileSettings ? <X size={18} /> : <Settings size={18} />}
+        {showMobileSettings ? 'Close Settings' : 'Game Settings'}
+      </button>
+
+      {/* ── Modern Control Bar (Live Settings - Single Line Premium) ── */}
+      <div className={`gp-control-bar ${showMobileSettings ? 'mobile-visible' : 'mobile-hidden'}`} style={{
+        width: '100%', maxWidth: '100%', margin: '0 auto', flex: '0 0 auto',
+        background: 'rgba(13, 26, 29, 0.6)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+        border: '1px solid rgba(255,255,255,0.06)', borderRadius: 18,
+        display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.2)'
+      }}>
+        {/* Level */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Mode</span>
+          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: 12, padding: 4, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
+            {['easy', 'medium'].map(lvl => {
+              const isActive = difficulty === lvl;
+              return (
+                <motion.button key={lvl} onClick={() => handleSettingChange('difficulty', lvl)}
+                  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }}
+                  style={{
+                    padding: '4px 12px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, border: 'none', cursor: 'pointer', transition: 'all 0.25s',
+                    background: isActive ? '#0D5E6B' : 'transparent', color: isActive ? '#fff' : '#9CA3AF',
+                    boxShadow: isActive ? '0 2px 8px rgba(13,94,107,0.4)' : 'none'
+                  }}>
+                  {lvl === 'easy' ? 'Easy' : 'Medium'}
+                </motion.button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="divider" style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.08)' }} />
+
+        {/* Complex */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Advanced</span>
+          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: 12, padding: 4, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
+            {[
+              { k: 'complex_words', l: 'Words' },
+              { k: 'complex_sentences', l: 'Phrases' },
+              { k: 'self_expression', l: 'Free Talk' }
+            ].map(lvl => {
+              const isActive = difficulty === lvl.k;
+              return (
+                <motion.button key={lvl.k} onClick={() => handleSettingChange('difficulty', lvl.k)}
+                  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }}
+                  style={{
+                    padding: '4px 12px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, border: 'none', cursor: 'pointer', transition: 'all 0.25s',
+                    background: isActive ? '#8B5CF6' : 'transparent', color: isActive ? '#fff' : '#9CA3AF',
+                    boxShadow: isActive ? '0 2px 8px rgba(139,92,246,0.4)' : 'none'
+                  }}>
+                  {lvl.l}
+                </motion.button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="divider" style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.08)' }} />
+
+        {/* Key Size */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Keys</span>
+          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: 12, padding: 4, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
+            {['big', 'medium', 'standard'].map(size => {
+              const isActive = keyboardSize === size;
+              return (
+                <motion.button key={size} onClick={() => handleSettingChange('keyboardSize', size)}
+                  whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }}
+                  style={{
+                    padding: '4px 12px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, border: 'none', cursor: 'pointer', transition: 'all 0.25s',
+                    background: isActive ? '#E8841A' : 'transparent', color: isActive ? '#fff' : '#9CA3AF',
+                    boxShadow: isActive ? '0 2px 8px rgba(232,132,26,0.4)' : 'none'
+                  }}>
+                  {size === 'standard' ? 'Std (26)' : size.charAt(0).toUpperCase() + size.slice(1)}
+                </motion.button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="divider" style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.08)' }} />
+
+        {/* Text to Speech */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Speech</span>
+          <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: 12, padding: 4, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
+            <motion.button
+              whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }}
+              onClick={() => setTtsEnabled(!ttsEnabled)}
+              style={{
+                padding: '4px 12px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, border: 'none', cursor: 'pointer', transition: 'all 0.25s',
+                background: ttsEnabled ? '#10B981' : 'transparent', color: ttsEnabled ? '#fff' : '#9CA3AF',
+                boxShadow: ttsEnabled ? '0 2px 8px rgba(16,185,129,0.4)' : 'none',
+                display: 'flex', alignItems: 'center', gap: 4
+              }}>
+              {ttsEnabled ? <Volume2 size={12} style={{ marginRight: 2 }} /> : <VolumeX size={12} style={{ marginRight: 2 }} />}
+              {ttsEnabled ? 'On' : 'Off'}
+            </motion.button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── PANELS ───────────────────────────────────────────────────── */}
+      <div className="gp-panels">
 
       {/* ── LEFT PANEL ───────────────────────────────────────────────── */}
       <div style={styles.leftPanel} className="gp-left">
@@ -1098,126 +1159,16 @@ export default function GamePage() {
       {/* ── CENTER PANEL ─────────────────────────────────────────────── */}
       <div style={styles.centerPanel} className="gp-center">
 
-        {/* Mobile Settings Toggle Button */}
-        <button
-          className="mobile-settings-btn"
-          onClick={() => setShowMobileSettings(!showMobileSettings)}
-        >
-          {showMobileSettings ? <X size={18} /> : <Settings size={18} />}
-          {showMobileSettings ? 'Close Settings' : 'Game Settings'}
-        </button>
-
-        {/* ── Modern Control Bar (Live Settings - Single Line Premium) ── */}
-        <div className={`gp-control-bar ${showMobileSettings ? 'mobile-visible' : 'mobile-hidden'}`} style={{
-          width: '100%', maxWidth: 960, margin: '0 auto 24px', padding: '10px 16px',
-          background: 'rgba(13, 26, 29, 0.6)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-          border: '1px solid rgba(255,255,255,0.06)', borderRadius: 18,
-          display: 'flex', flexWrap: 'nowrap', gap: 24, alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.2)', overflowX: 'auto', WebkitOverflowScrolling: 'touch',
-          scrollbarWidth: 'none', msOverflowStyle: 'none'
-        }}>
-          {/* Level */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-            <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Mode</span>
-            <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: 12, padding: 4, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
-              {['easy', 'medium'].map(lvl => {
-                const isActive = difficulty === lvl;
-                return (
-                  <motion.button key={lvl} onClick={() => handleSettingChange('difficulty', lvl)}
-                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }}
-                    style={{
-                      padding: '4px 12px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, border: 'none', cursor: 'pointer', transition: 'all 0.25s',
-                      background: isActive ? '#0D5E6B' : 'transparent', color: isActive ? '#fff' : '#9CA3AF',
-                      boxShadow: isActive ? '0 2px 8px rgba(13,94,107,0.4)' : 'none'
-                    }}>
-                    {lvl === 'easy' ? 'Easy' : 'Medium'}
-                  </motion.button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="divider" style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.08)' }} />
-
-          {/* Complex */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-            <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Advanced</span>
-            <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: 12, padding: 4, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
-              {[
-                { k: 'complex_words', l: 'Words' },
-                { k: 'complex_sentences', l: 'Phrases' },
-                { k: 'self_expression', l: 'Free Talk' }
-              ].map(lvl => {
-                const isActive = difficulty === lvl.k;
-                return (
-                  <motion.button key={lvl.k} onClick={() => handleSettingChange('difficulty', lvl.k)}
-                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }}
-                    style={{
-                      padding: '4px 12px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, border: 'none', cursor: 'pointer', transition: 'all 0.25s',
-                      background: isActive ? '#8B5CF6' : 'transparent', color: isActive ? '#fff' : '#9CA3AF',
-                      boxShadow: isActive ? '0 2px 8px rgba(139,92,246,0.4)' : 'none'
-                    }}>
-                    {lvl.l}
-                  </motion.button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="divider" style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.08)' }} />
-
-          {/* Key Size */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-            <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Keys</span>
-            <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: 12, padding: 4, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
-              {['big', 'medium', 'standard'].map(size => {
-                const isActive = keyboardSize === size;
-                return (
-                  <motion.button key={size} onClick={() => handleSettingChange('keyboardSize', size)}
-                    whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }}
-                    style={{
-                      padding: '4px 12px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, border: 'none', cursor: 'pointer', transition: 'all 0.25s',
-                      background: isActive ? '#E8841A' : 'transparent', color: isActive ? '#fff' : '#9CA3AF',
-                      boxShadow: isActive ? '0 2px 8px rgba(232,132,26,0.4)' : 'none'
-                    }}>
-                    {size === 'standard' ? 'Std (26)' : size.charAt(0).toUpperCase() + size.slice(1)}
-                  </motion.button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="divider" style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.08)' }} />
-
-          {/* Text to Speech */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
-            <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Speech</span>
-            <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: 12, padding: 4, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)' }}>
-              <motion.button
-                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.92 }}
-                onClick={() => setTtsEnabled(!ttsEnabled)}
-                style={{
-                  padding: '4px 12px', borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, border: 'none', cursor: 'pointer', transition: 'all 0.25s',
-                  background: ttsEnabled ? '#10B981' : 'transparent', color: ttsEnabled ? '#fff' : '#9CA3AF',
-                  boxShadow: ttsEnabled ? '0 2px 8px rgba(16,185,129,0.4)' : 'none',
-                  display: 'flex', alignItems: 'center', gap: 4
-                }}>
-                {ttsEnabled ? <Volume2 size={12} style={{ marginRight: 2 }} /> : <VolumeX size={12} style={{ marginRight: 2 }} />}
-                {ttsEnabled ? 'On' : 'Off'}
-              </motion.button>
-            </div>
-          </div>
-        </div>
-
         <AnimatePresence mode="wait">
 
           {/* ── SELF EXPRESSION MODE ───────────────────────────── */}
           {phase === 'playing' && isSelfExpression && (
             <motion.div key="self-expression" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-              style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, maxWidth: 680, margin: '0 auto' }}>
+              className="gp-selfexp"
+              style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', maxWidth: 680, margin: '0 auto' }}>
 
               {/* Header */}
-              <div style={seStyles.header}>
+              <div style={seStyles.header} className="gp-se-header">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ fontSize: '1.8rem' }}>💬</span>
                   <div>
@@ -1229,7 +1180,7 @@ export default function GamePage() {
               </div>
 
               {/* Text area */}
-              <div style={seStyles.textareaWrapper}>
+              <div style={seStyles.textareaWrapper} className="gp-se-editor">
                 <textarea
                   ref={textareaRef}
                   value={freeText}
@@ -1243,7 +1194,7 @@ export default function GamePage() {
               </div>
 
               {/* Action buttons */}
-              <div style={seStyles.actions}>
+              <div style={seStyles.actions} className="gp-se-actions">
                 <motion.button
                   whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
                   onClick={() => handleSpeak()}
@@ -1278,7 +1229,7 @@ export default function GamePage() {
                 </motion.button>
               </div>
               {/* Tip */}
-              <div style={seStyles.tip}>
+              <div style={seStyles.tip} className="gp-se-tip">
                 💡 No time limit. Express yourself freely. Use <strong>Speak</strong> to hear your words aloud.
               </div>
             </motion.div>
@@ -1290,7 +1241,7 @@ export default function GamePage() {
               style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}>
 
               {/* Progress bar */}
-              <div style={styles.progressionContainer}>
+              <div style={styles.progressionContainer} className="gp-progress">
                 <div style={styles.progressionText}>Words: {wordsCompleted} / {TARGET_WORDS}</div>
                 <div style={styles.progressionBarBg}>
                   <div style={{ ...styles.progressionBarFill, width: `${(wordsCompleted / TARGET_WORDS) * 100}%` }} />
@@ -1300,7 +1251,7 @@ export default function GamePage() {
               {/* Word card */}
               <div style={styles.wordCard} className="word-card">
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-                  <div style={{ fontSize: '4rem', filter: 'drop-shadow(0 10px 15px rgba(0,0,0,0.3))' }}>
+                  <div className="word-emoji" style={{ filter: 'drop-shadow(0 10px 15px rgba(0,0,0,0.3))' }}>
                     {WORD_IMAGES[currentWord] || '❓'}
                   </div>
                   {isSpeaking && (
@@ -1326,7 +1277,7 @@ export default function GamePage() {
                   )}
                 </div>
                 {/* Target word/phrase display */}
-                <div style={styles.targetTextContainer}>
+                <div style={styles.targetTextContainer} className="gp-target-text">
                   {currentWord.split('').map((char, idx) => {
                     const isSpace = char === ' ';
                     const isCorrect = slots[idx]?.correct;
@@ -1360,7 +1311,7 @@ export default function GamePage() {
                   })}
                 </div>
                 {nextCorrectLetter && (
-                  <div style={styles.nextLetterHint}>
+                  <div style={styles.nextLetterHint} className="gp-hint">
                     Point & hold on{' '}
                     <span style={{ color: '#10B981', fontWeight: 800 }}>{nextCorrectLetter}</span>
                     {' '}for 2.5 s
@@ -1369,7 +1320,7 @@ export default function GamePage() {
                 )}
 
                 {/* Letter slots */}
-                <div style={styles.slotsContainer}>
+                <div style={styles.slotsContainer} className="gp-slots">
                   {currentWord.split('').map((char, i) => {
                     const slot = slots[i] || { letter: null, correct: false };
                     const filled = slot.letter !== null;
@@ -1434,9 +1385,19 @@ export default function GamePage() {
 
         {/* Dynamic keyboard — SHARED ACROSS MODES */}
         {phase === 'playing' && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ ...styles.letterBoard, gap: kbCfg.rowGap, marginTop: 20 }} className="letter-board">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{
+              ...styles.letterBoard,
+              /* The size preset the child picked, handed to CSS so it can be
+                 capped against the viewport height instead of overflowing. */
+              '--kb-key-w': `${kbCfg.keyW}px`,
+              '--kb-key-h': `${kbCfg.keyH}px`,
+              '--kb-bs-w': `${kbCfg.bsW}px`,
+              '--kb-font': kbCfg.fontSize,
+              '--kb-gap': `${kbCfg.gap}px`,
+              '--kb-row-gap': `${kbCfg.rowGap}px`,
+            }} className="letter-board">
             {keyboardLayout.map((row, ri) => (
-              <div key={ri} style={{ ...styles.letterRow, gap: kbCfg.gap }} className="letter-row">
+              <div key={ri} style={styles.letterRow} className="letter-row">
                 {row.map(letter => {
                   // Space key maps to actual space character
                   const displayLetter = letter;
@@ -1468,17 +1429,14 @@ export default function GamePage() {
                       }}
                       style={{
                         ...styles.letterKey,
-                        width: isBackspace ? kbCfg.bsW : isSpace ? kbCfg.bsW * 1.5 : kbCfg.keyW,
-                        height: kbCfg.keyH,
-                        fontSize: isSpace ? `calc(${kbCfg.fontSize} * 0.55)` : kbCfg.fontSize,
-                        ...(isBackspace ? { ...styles.letterKeyBackspace, width: kbCfg.bsW, fontSize: `calc(${kbCfg.fontSize} * 0.72)` } : {}),
+                        ...(isBackspace ? styles.letterKeyBackspace : {}),
                         ...(isSpace ? { background: 'rgba(139,92,246,0.08)', border: '2px solid rgba(139,92,246,0.22)', color: '#8B5CF6', letterSpacing: '0.08em' } : {}),
                         ...(isHovered ? styles.letterKeyHovered : {}),
                         ...(isNextCorrect ? styles.letterKeyCorrect : {}),
                         ...(dwellingOnThis ? styles.letterKeyDwelling : {}),
                         opacity: (phase === 'ending' || showSuperAnim) ? 0.5 : 1,
                       }}
-                      className="letter-key"
+                      className={`letter-key${isBackspace ? ' is-backspace' : ''}${isSpace ? ' is-space' : ''}`}
                     >
                       {isSpace ? 'SPACE' : displayLetter}
 
@@ -1511,49 +1469,13 @@ export default function GamePage() {
         )}
 
         {/* Controls */}
-        <div style={styles.controls}>
+        <div style={styles.controls} className="gp-controls">
           <button onClick={pickNewWord} style={styles.skipBtn}>Skip Word →</button>
           <button onClick={handleEndSession} disabled={processing} style={styles.endBtn}>
             {processing ? 'Processing…' : 'End Session'}
           </button>
         </div>
 
-        {/* TTS Diagnostics (Dev Only) */}
-        {window.location.hostname === 'localhost' && (
-          <div style={{
-            marginTop: 20,
-            width: '100%',
-            maxWidth: 560,
-            padding: 12,
-            background: 'rgba(13, 26, 29, 0.4)',
-            border: '1px dashed rgba(255,255,255,0.1)',
-            borderRadius: 12,
-            fontSize: '0.75rem',
-            color: '#9CA3AF',
-            textAlign: 'left'
-          }}>
-            <details style={{ cursor: 'pointer' }}>
-              <summary style={{ fontWeight: 'bold', color: '#22D3EE', userSelect: 'none' }}>
-                🛠️ TTS Diagnostics & Voices ({voices.length} detected)
-              </summary>
-              <div style={{ maxHeight: 150, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, fontFamily: 'monospace', paddingLeft: 8, marginTop: 8 }}>
-                {voices.map((v, idx) => (
-                  <div key={`${v.name}-${idx}`} style={{ display: 'flex', flexDirection: 'column', borderBottom: '1px solid rgba(255,255,255,0.04)', paddingBottom: 4 }}>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ color: '#F472B6', fontWeight: 'bold' }}>[{v.lang}]</span>
-                      <span style={{ color: '#FFF' }}>{v.name}</span>
-                      <span style={{ color: '#10B981', fontSize: '0.65rem' }}>{v.voiceURI}</span>
-                    </div>
-                    <div style={{ color: '#6B7280', fontSize: '0.65rem', marginTop: 2 }}>
-                      Local Service: {v.localService ? 'True' : 'False'} | Default: {v.default ? 'Yes' : 'No'}
-                    </div>
-                  </div>
-                ))}
-                {voices.length === 0 && <span style={{ color: '#EF4444' }}>No voices loaded yet. If you are on Chrome/Safari, wait a few seconds or trigger onvoiceschanged.</span>}
-              </div>
-            </details>
-          </div>
-        )}
       </div>
 
       {/* ── RIGHT PANEL ──────────────────────────────────────────────── */}
@@ -1624,6 +1546,7 @@ export default function GamePage() {
             </motion.div>
           </AnimatePresence>
         )}
+        </div>
       </div>
     </div>
   );
@@ -1631,7 +1554,11 @@ export default function GamePage() {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const styles = {
-  root: { display: 'flex', minHeight: '100vh', background: '#0F1E22', overflowX: 'hidden', overflowY: 'auto', position: 'relative' },
+  /* Height, not min-height: the play screen is one viewport and never scrolls.
+     The <1100px stylesheet switches this back to a scrolling column. */
+  /* A column now: the settings bar sits above the three panels, which share
+     the rest. Height, not min-height — the play screen never scrolls. */
+  root: { display: 'flex', flexDirection: 'column', height: '100dvh', minHeight: 0, background: '#0F1E22', overflow: 'hidden', position: 'relative' },
 
   superOverlay: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,30,34,0.82)', backdropFilter: 'blur(12px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 },
   superContent: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, zIndex: 2001 },
@@ -1646,7 +1573,7 @@ const styles = {
   },
 
   // Left panel
-  leftPanel: { width: 300, display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.07)', zIndex: 10, background: '#0D1A1D' },
+  leftPanel: { width: 300, minHeight: 0, display: 'flex', flexDirection: 'column', borderRight: '1px solid rgba(255,255,255,0.07)', zIndex: 10, background: '#0D1A1D' },
   cameraBox: { width: '100%', aspectRatio: '16 / 9', background: '#0D1A1D', position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   video: { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' },
   canvas: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)', pointerEvents: 'none' },
@@ -1666,14 +1593,16 @@ const styles = {
   fatigueFill: { height: '100%', borderRadius: 3, transition: 'width 0.4s ease,background 0.4s ease' },
 
   // Center panel
-  centerPanel: { flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '20px 14px', gap: 18, zIndex: 10 },
+  /* min-height:0 is what lets this column shrink below its content, so the
+     keyboard can give height back instead of pushing the page taller. */
+  centerPanel: { flex: 1, minWidth: 0, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
 
   progressionContainer: { width: '100%', maxWidth: 560 },
   progressionText: { fontFamily: 'Inter,sans-serif', fontSize: '0.85rem', color: '#C8E8ED', fontWeight: 700, marginBottom: 8, textAlign: 'center', textTransform: 'uppercase', letterSpacing: '0.08em' },
   progressionBarBg: { height: 10, background: 'rgba(255,255,255,0.1)', borderRadius: 5, overflow: 'hidden' },
   progressionBarFill: { height: '100%', background: 'linear-gradient(90deg,#E8841A,#F59E0B)', borderRadius: 5, transition: 'width 0.5s ease' },
 
-  wordCard: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24, padding: '20px 44px', boxShadow: '0 12px 40px rgba(0,0,0,0.2)' },
+  wordCard: { display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 24, boxShadow: '0 12px 40px rgba(0,0,0,0.2)' },
   targetTextContainer: {
     display: 'flex',
     justifyContent: 'center',
@@ -1703,29 +1632,31 @@ const styles = {
   nextLetterHint: { fontSize: '0.82rem', color: 'rgba(255,255,255,0.5)', background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 20, padding: '5px 16px' },
 
   slotsContainer: { display: 'flex', gap: 12, marginTop: 4, flexWrap: 'wrap', justifyContent: 'center' },
-  slot: { width: 60, height: 72, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 14, fontSize: '2rem', fontFamily: 'Inter,sans-serif', fontWeight: 800, color: '#C8E8ED', transition: 'all 0.2s ease' },
+  slot: { display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 14, fontFamily: 'Inter,sans-serif', fontWeight: 800, color: '#C8E8ED', transition: 'all 0.2s ease' },
   slotEmpty: { background: 'rgba(34,211,238,0.04)', border: '2px dashed rgba(34,211,238,0.35)', boxShadow: '0 0 16px rgba(34,211,238,0.06)' },
   slotCorrect: { background: 'rgba(16,185,129,0.15)', border: '2px solid #10B981', color: '#10B981', boxShadow: '0 0 18px rgba(16,185,129,0.4)' },
   slotWrong: { background: 'rgba(239,68,68,0.12)', border: '2px solid #EF4444', color: '#EF4444' },
 
   // Keyboard
-  letterBoard: { display: 'flex', flexDirection: 'column', gap: 13 },
-  letterRow: { display: 'flex', gap: 11, justifyContent: 'center' },
+  /* Gaps and key sizes now come from GamePage.css, driven by the --kb-*
+     custom properties set on the board, so they can be capped against the
+     window height. Nothing size-related belongs in these objects. */
+  letterBoard: { display: 'flex', flexDirection: 'column' },
+  letterRow: { display: 'flex', justifyContent: 'center' },
   letterKey: {
     position: 'relative',
-    width: 68, height: 68,
     background: 'rgba(255,255,255,0.07)',
     border: '2px solid rgba(255,255,255,0.14)',
     borderRadius: 14,
     color: '#C8E8ED',
-    fontFamily: 'Inter, sans-serif', fontWeight: 700, fontSize: '1.65rem',
+    fontFamily: 'Inter, sans-serif', fontWeight: 700,
     cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
     userSelect: 'none', overflow: 'hidden',
     transition: 'background 0.12s, border 0.12s',
   },
-  letterKeyBackspace: { fontSize: '1.2rem', width: 82, background: 'rgba(239,68,68,0.08)', border: '2px solid rgba(239,68,68,0.22)', color: '#EF4444' },
+  letterKeyBackspace: { background: 'rgba(239,68,68,0.08)', border: '2px solid rgba(239,68,68,0.22)', color: '#EF4444' },
   letterKeyHovered: { background: 'rgba(34,211,238,0.13)', border: '2px solid rgba(34,211,238,0.45)' },
   letterKeyCorrect: { background: 'rgba(16,185,129,0.22)', border: '2px solid #10B981', color: '#10B981', boxShadow: '0 0 24px rgba(16,185,129,0.55)' },
   letterKeyDwelling: { background: 'rgba(34,211,238,0.18)', border: '2px solid #22d3ee' },
@@ -1738,7 +1669,7 @@ const styles = {
   endBtn: { padding: '10px 24px', background: '#EF4444', border: 'none', borderRadius: 10, color: '#fff', fontFamily: 'Inter,sans-serif', fontWeight: 700, fontSize: '0.9rem', cursor: 'pointer' },
 
   // Right panel
-  rightPanel: { width: 220, background: '#0D1A1D', borderLeft: '1px solid rgba(255,255,255,0.07)', padding: '24px 16px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, zIndex: 10 },
+  rightPanel: { width: 220, minHeight: 0, overflow: 'hidden', background: '#0D1A1D', borderLeft: '1px solid rgba(255,255,255,0.07)', display: 'flex', flexDirection: 'column', alignItems: 'center', zIndex: 10 },
   scoreTitle: { fontFamily: 'Inter,sans-serif', fontWeight: 700, fontSize: '0.8rem', color: '#C8E8ED', textTransform: 'uppercase', letterSpacing: '0.08em' },
   logoutBtn: { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 7, color: '#6B7280', cursor: 'pointer' },
   interactionGuide: { width: '100%', background: 'rgba(13,94,107,0.15)', border: '1px solid rgba(13,94,107,0.25)', borderRadius: 12, padding: '12px' },
@@ -1781,9 +1712,8 @@ const seStyles = {
     fontFamily: "'Inter', sans-serif",
     fontSize: '1.15rem', fontWeight: 500,
     lineHeight: 1.7,
-    resize: 'vertical',
+    resize: 'none',
     outline: 'none',
-    minHeight: 140,
     transition: 'border-color 0.2s ease',
   },
   charCount: {

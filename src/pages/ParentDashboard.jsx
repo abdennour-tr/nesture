@@ -533,9 +533,20 @@ export default function ParentDashboard() {
     }
   };
 
+  /* accuracy_score is written by five different games and is NOT stored in one
+     unit: some rows hold a 0-1 fraction, others a 0-100 percentage. Blindly
+     multiplying by 100 is what produced "6900%" in the history table. Anything
+     above 1 is already a percentage; anything at or below 1 is a fraction.
+     (A genuine 1 is 100% either way, so the ambiguity is harmless.) */
+  const toPercent = (raw) => {
+    const v = parseFloat(raw);
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    return Math.min(100, Math.round(v > 1 ? v : v * 100));
+  };
+
   const chartData = [...sessions].reverse().map((s, i) => ({
     session: `S${i + 1}`,
-    accuracy: Math.round(parseFloat(s.accuracy_score || 0) * 100),
+    accuracy: toPercent(s.accuracy_score),
     responseTime: Math.round(parseFloat(s.avg_response_time_ms || 0) / 100) / 10,
     lpi: parseInt(s.lpi_score || 0),
   }));
@@ -570,7 +581,7 @@ export default function ParentDashboard() {
 
     // 3. High accuracy milestone
     const latest = sessions[0];
-    if (latest && parseFloat(latest.accuracy_score) >= 0.9) {
+    if (latest && toPercent(latest.accuracy_score) >= 90) {
       notifs.push({
         id: `acc_${latest.id}`,
         title: 'Milestone Achieved! 🎉',
@@ -583,7 +594,7 @@ export default function ParentDashboard() {
 
     // 4. Latest session info
     if (latest) {
-      const acc = Math.round(parseFloat(latest.accuracy_score || 0) * 100);
+      const acc = toPercent(latest.accuracy_score);
       notifs.push({
         id: `latest_sess_${latest.id}`,
         title: 'Latest Session',
@@ -648,8 +659,8 @@ export default function ParentDashboard() {
   const realNotifications = generateNotifications();
 
   const latestSession = sessions[0];
-  const latestAcc = latestSession ? Math.round(parseFloat(latestSession.accuracy_score || 0) * 100) : 0;
-  const prevAcc   = sessions[1]   ? Math.round(parseFloat(sessions[1].accuracy_score || 0) * 100) : 0;
+  const latestAcc = latestSession ? toPercent(latestSession.accuracy_score) : 0;
+  const prevAcc   = sessions[1]   ? toPercent(sessions[1].accuracy_score) : 0;
   const accChange = latestAcc - prevAcc;
 
   const renderComingSoon = (title) => (
@@ -1015,7 +1026,7 @@ export default function ParentDashboard() {
                     up: accChange >= 0, color: '#E8841A' },
                   { label: 'LPI Score', value: latestSession?.lpi_score || '—', change: 'Learner Progress Index', up: true, color: '#8B5CF6' },
                   { label: 'Avg Accuracy', value: sessions.length > 0
-                    ? `${Math.round(sessions.reduce((a,s) => a + parseFloat(s.accuracy_score||0)*100, 0) / sessions.length)}%`
+                    ? `${Math.round(sessions.reduce((a, s) => a + toPercent(s.accuracy_score), 0) / sessions.length)}%`
                     : '—', change: 'Across all sessions', up: true, color: '#10B981' },
                 ].map((k) => (
                   <motion.div key={k.label} className="card" style={styles.kpiCard}
@@ -1097,7 +1108,7 @@ export default function ParentDashboard() {
                   <div>
                     <span className="section-title">Full Session History</span>
                     <span style={{ fontSize: '0.78rem', color: '#9CA3AF', marginLeft: 12 }}>
-                      Showing {totalSessions} session{totalSessions !== 1 ? 's' : ''} (from {sessions.length} total)
+                      Showing {historySessions.length} of {totalSessions} session{totalSessions !== 1 ? 's' : ''}
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -1254,7 +1265,9 @@ export default function ParentDashboard() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Date</th><th>NesturePlay (Games)</th><th>Duration</th><th>Success Rate</th>
+                      <th>Date</th><th>NesturePlay (Games)</th><th>Duration</th>
+                      <th title="Composite occupational-therapy score, comparable across every game">OT Score</th>
+                      <th title="Average time to respond during the session">Avg Response</th>
                       <th>Difficulty</th><th>LPI</th><th>Report</th><th>Actions</th>
                     </tr>
                   </thead>
@@ -1270,14 +1283,28 @@ export default function ParentDashboard() {
                             <span style={{ marginLeft: 6, fontSize: '0.65rem', background: '#E5E7EB', color: '#4B5563', padding: '1px 4px', borderRadius: 4, fontWeight: 800 }}>ARCHIVED</span>
                           )}
                         </td>
-                        <td data-label="Duration">{Math.round(parseInt(s.duration_seconds||0)/60)} min</td>
-                        <td data-label="Success Rate"><span style={{ fontWeight: 600, color: parseFloat(s.accuracy_score)>0.7?'#10B981':'#F59E0B' }}>
-                           {Math.round(parseFloat(s.accuracy_score||0)*100)}%
-                         </span></td>
+                        <td data-label="Duration">{(() => {
+                          /* Sessions under a minute were all rendering as "0 min". */
+                          const sec = parseInt(s.duration_seconds || 0, 10);
+                          return sec < 60 ? `${sec}s` : `${Math.round(sec / 60)} min`;
+                        })()}</td>
+                        <td data-label="OT Score">{(() => {
+                          const pct = toPercent(s.accuracy_score);
+                          const color = pct >= 80 ? '#10B981' : pct >= 60 ? '#F59E0B' : '#EF4444';
+                          return <span style={{ fontWeight: 700, color }}>{pct}%</span>;
+                        })()}</td>
+                        <td data-label="Avg Response">{(() => {
+                          const ms = parseFloat(s.avg_response_time_ms || 0);
+                          return ms > 0 ? `${(ms / 1000).toFixed(1)}s` : '—';
+                        })()}</td>
                         <td data-label="Difficulty"><span className={`badge badge-${s.difficulty==='hard'?'danger':s.difficulty==='medium'?'warning':'success'}`}>{s.difficulty}</span></td>
-                        <td data-label="LPI" style={{ fontWeight: 600, color: '#0D5E6B' }}>
-                          {s.game_name === 'Magic Finger Copy' ? '-' : s.lpi_score}
-                        </td>
+                        <td data-label="LPI" style={{ fontWeight: 600, color: '#0D5E6B' }}>{(() => {
+                          /* Every game computes an LPI now, so there is no
+                             per-game exception left. A missing one shows as a
+                             dash rather than a zero. */
+                          const lpi = parseInt(s.lpi_score || 0, 10);
+                          return lpi > 0 ? lpi : '—';
+                        })()}</td>
                         <td data-label="Report">
                           {s.game_name === 'Magic Finger Copy' ? '-' : (
                             <button
@@ -1315,7 +1342,7 @@ export default function ParentDashboard() {
                     ))}
                     {historySessions.length === 0 && (
                       <tr>
-                        <td colSpan="8" style={{ textAlign: 'center', padding: '24px', color: '#9CA3AF', fontStyle: 'italic' }}>
+                        <td colSpan="9" style={{ textAlign: 'center', padding: '24px', color: '#9CA3AF', fontStyle: 'italic' }}>
                           No sessions found matching filters.
                         </td>
                       </tr>

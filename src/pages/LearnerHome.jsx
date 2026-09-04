@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LogOut, Play, Lock, Gamepad2, Zap, Clock, Target, BarChart2, Star, Trophy, Menu, X, ChevronLeft, ChevronRight, CheckCircle, Video } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
@@ -10,6 +10,80 @@ import { supabase } from '../services/supabaseClient';
 import BetaBadge from '../components/shared/BetaBadge';
 import BetaFooter from '../components/shared/BetaFooter';
 import VideoModal from '../components/shared/VideoModal';
+
+/* ─── "not ready yet" notice ─────────────────────────────
+   Shown when a child taps a game that is still being built. It explains the
+   situation in words a child can read and offers the way back, rather than
+   failing silently or opening something unfinished. */
+function ComingSoonModal({ game, onClose }) {
+  if (!game) return null;
+  return (
+    <motion.div
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 4000,
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        padding: 'clamp(12px, 4vh, 32px)', overflowY: 'auto',
+        background: 'rgba(8, 20, 26, 0.62)',
+        backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+      }}
+    >
+      <motion.div
+        role="dialog" aria-modal="true" aria-labelledby="cs-title"
+        onClick={(e) => e.stopPropagation()}
+        initial={{ scale: 0.9, y: 24, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.94, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 260, damping: 24 }}
+        style={{
+          /* margin:auto centres it while it fits and never clips it when the
+             window is short -- align-items:center would cut off the top. */
+          margin: 'auto', width: 'min(440px, 100%)',
+          background: '#FFFFFF', borderRadius: 24, padding: 'clamp(20px, 3vh, 30px)',
+          boxShadow: '0 30px 70px -20px rgba(8, 20, 26, 0.55)',
+          border: '1px solid rgba(124, 58, 237, 0.18)', textAlign: 'center',
+        }}
+      >
+        <div style={{
+          width: 76, height: 76, margin: '0 auto 16px', borderRadius: 22,
+          display: 'grid', placeItems: 'center', fontSize: '2.4rem',
+          background: game.bg, border: `2px solid ${game.accent}33`,
+        }}>{game.emoji}</div>
+
+        <div style={{
+          display: 'inline-block', marginBottom: 12, padding: '4px 12px',
+          borderRadius: 999, fontSize: '0.66rem', fontWeight: 900,
+          letterSpacing: '0.09em', color: game.accent,
+          background: `${game.accent}14`, border: `1px solid ${game.accent}33`,
+        }}>UNDER CONSTRUCTION</div>
+
+        <h2 id="cs-title" style={{
+          margin: '0 0 10px', fontSize: '1.4rem', fontWeight: 800, color: '#0D3D47',
+        }}>{game.title} is almost ready</h2>
+
+        <p style={{
+          margin: '0 0 22px', fontSize: '0.95rem', lineHeight: 1.55, color: '#4B5563',
+        }}>
+          We are still building this game. It will unlock as soon as it is
+          finished — until then, pick another one and keep practising!
+        </p>
+
+        <button
+          onClick={onClose}
+          style={{
+            width: '100%', padding: '13px 24px', borderRadius: 15, border: 'none',
+            cursor: 'pointer', color: '#fff', fontSize: '1rem', fontWeight: 700,
+            background: `linear-gradient(135deg, ${game.accent}, #0EA5E9)`,
+            boxShadow: `0 10px 24px ${game.accent}44`,
+          }}
+        >
+          Choose another game
+        </button>
+      </motion.div>
+    </motion.div>
+  );
+}
 
 /* ─── animated counter hook ─────────────────────────── */
 function useCountUp(target, duration = 1200) {
@@ -31,6 +105,17 @@ function useCountUp(target, duration = 1200) {
 
 /* ─── game catalogue ─────────────────────────────────── */
 const GAMES = [
+  {
+    id: 'letterquest',
+    title: 'LetterQuest',
+    desc: 'Practice spelling words visually with hand gestures',
+    emoji: '🔤',
+    accent: '#1A8FA0',
+    bg: 'linear-gradient(135deg, #EEF6F8 0%, #D1ECF0 100%)',
+    enabled: true,
+    route: '/play/difficulty',
+    badge: 'ACTIVE',
+  },
   {
     id: 'ladybug',
     title: 'Follow the Ladybug',
@@ -83,19 +168,12 @@ const GAMES = [
     accent: '#7C3AED',
     bg: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)',
     enabled: true,
+    /* Still in development. The card stays visible and inviting, but tapping
+       it opens the notice below instead of starting a session -- a half-built
+       game that scores a child is worse than no game at all. */
+    comingSoon: true,
     route: '/play/finger-piano-difficulty',
-    badge: 'NEW',
-  },
-  {
-    id: 'letterquest',
-    title: 'LetterQuest',
-    desc: 'Practice spelling words visually with hand gestures',
-    emoji: '🔤',
-    accent: '#1A8FA0',
-    bg: 'linear-gradient(135deg, #EEF6F8 0%, #D1ECF0 100%)',
-    enabled: true,
-    route: '/play/difficulty',
-    badge: 'ACTIVE',
+    badge: 'COMING SOON',
   },
   {
     id: 'fingercopy',
@@ -154,11 +232,23 @@ const GAMES = [
 export default function LearnerHome() {
   const { user, profile, logout } = useAuthStore();
   const navigate = useNavigate();
+  const { search } = useLocation();
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [prescriptions, setPrescriptions] = useState([]);
+  const [comingSoonGame, setComingSoonGame] = useState(null);
   const [activeVideoUrl, setActiveVideoUrl] = useState(null);
   const [activeVideoTitle, setActiveVideoTitle] = useState('');
+
+  /* Reaching a locked game by its URL -- a bookmark, the back button, a typed
+     address -- redirects here with ?locked=<id>. Showing the same notice means
+     the child gets an explanation instead of a silent bounce. */
+  useEffect(() => {
+    const id = new URLSearchParams(search).get('locked');
+    if (!id) return;
+    const game = GAMES.find((g) => g.id === id && g.comingSoon);
+    if (game) setComingSoonGame(game);
+  }, [search]);
 
   useEffect(() => {
     const learnerId = profile?.learner_id || user?.id;
@@ -533,7 +623,11 @@ export default function LearnerHome() {
                     transition={{ delay: i * 0.08 }}
                     whileHover={game.enabled ? { y: -6, boxShadow: `0 16px 40px ${game.accent}33` } : {}}
                     whileTap={game.enabled ? { scale: 0.97 } : {}}
-                    onClick={() => game.enabled && navigate(game.route)}
+                    onClick={() => {
+                      if (!game.enabled) return;
+                      if (game.comingSoon) { setComingSoonGame(game); return; }
+                      navigate(game.route);
+                    }}
                     style={{
                       ...s.gameCard,
                       background: game.bg,
@@ -830,6 +924,16 @@ export default function LearnerHome() {
           <BetaFooter variant="light" />
         </main>
       </div>
+
+      <AnimatePresence>
+        {comingSoonGame && (
+          <ComingSoonModal
+            key="coming-soon"
+            game={comingSoonGame}
+            onClose={() => setComingSoonGame(null)}
+          />
+        )}
+      </AnimatePresence>
 
       <VideoModal 
         isOpen={!!activeVideoUrl} 

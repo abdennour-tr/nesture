@@ -1,0 +1,412 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Letter Quest (GamePage) — layout stylesheet
+
+   GamePage is styled inline, from a `styles` object. That is fine for colour
+   and decoration, but an inline style cannot express a media query, a
+   :focus-visible state, or a size that depends on the window — which is why
+   the play screen used to scroll. Everything size-related therefore lives
+   here, and the JSX hands over the values it owns (the child's keyboard-size
+   preset) as --kb-* custom properties.
+
+   Rule of the screen: on a desktop the page is exactly one viewport tall and
+   never scrolls; the keyboard is what gives height back. Below 1100px the
+   three panels stack and the page becomes a normal scrolling column.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.gp-root {
+  /* Vertical rhythm, clamped against the window height. */
+  --gp-sp-1: clamp(4px, 0.8vh, 8px);
+  --gp-sp-2: clamp(8px, 1.6vh, 18px);
+  --gp-sp-3: clamp(12px, 2.4vh, 24px);
+  --gp-hairline: rgba(255, 255, 255, 0.07);
+}
+
+/* ── Shell ───────────────────────────────────────────────────────────────────
+   .gp-root is a column: the settings bar first, then .gp-panels — the row that
+   holds camera / game / score and takes all the remaining height. Pulling the
+   bar out of the centre column is what gives the game its full width back. */
+.gp-panels {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+/* ── Panels ──────────────────────────────────────────────────────────────── */
+.gp-left,
+.gp-right {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.gp-right {
+  padding: var(--gp-sp-3) 16px;
+  gap: var(--gp-sp-2);
+}
+
+/* The camera keeps its 16:9 shape; the metrics below it take the rest and
+   scroll on their own if the panel gets short, so they never push the column. */
+.camera-box { flex: 0 0 auto; }
+
+.gp-left > *:last-child {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.gp-center {
+  padding: var(--gp-sp-2) 14px;
+  gap: var(--gp-sp-2);
+}
+
+/* ── Settings toolbar ───────────────────────────────────────────────────────
+   These are settings, not gameplay, so they get the smallest share of the
+   screen: a thin strip at the top of the column. It wraps onto a second line
+   rather than scrolling sideways — a row the child has to drag horizontally is
+   a row whose left half is invisible.
+
+   Every rule here is !important because the elements carry inline styles from
+   the JSX, and an inline declaration otherwise wins. (A CSS `!important` does
+   beat a plain inline style — that is the one way round it.) */
+.gp-control-bar {
+  flex: 0 0 auto;
+  padding: clamp(4px, 0.7vh, 7px) 16px !important;
+  margin: 0 !important;
+  gap: clamp(8px, 1.1vw, 16px) !important;
+  row-gap: 6px !important;
+  /* Full-width strip across the top of the app, so it reads as chrome rather
+     than as part of the game. */
+  border-radius: 0 !important;
+  border-width: 0 0 1px 0 !important;
+  border-color: var(--gp-hairline) !important;
+  box-shadow: none !important;
+}
+
+/* Group labels: KEYS, SPEECH, LEVEL… */
+.gp-control-bar span {
+  font-size: 0.58rem !important;
+  letter-spacing: 0.1em !important;
+}
+
+/* Segmented control shells */
+.gp-control-bar > div > div {
+  padding: 2px !important;
+  border-radius: 9px !important;
+}
+
+.gp-control-bar button {
+  padding: 3px 10px !important;
+  font-size: 0.68rem !important;
+  border-radius: 7px !important;
+}
+
+.gp-control-bar .divider { height: 16px !important; }
+
+/* ── The stage: progress, word card, slots ──────────────────────────────────
+   This zone is the biggest consumer of height, and it is the one that can give
+   it back — the prompt only has to be readable, while the keys have to be
+   *hit*. So everything here is capped against vh and yields first. */
+.gp-progress { flex: 0 0 auto; }
+
+.gp-progress > div:first-child {
+  font-size: clamp(0.68rem, 1.5vh, 0.85rem) !important;
+  margin-bottom: 5px !important;
+}
+
+.gp-progress > div:last-child { height: 7px !important; }
+
+.word-card {
+  flex: 0 0 auto;
+  padding: clamp(8px, 1.4vh, 16px) clamp(20px, 3vw, 40px) !important;
+  gap: clamp(4px, 0.8vh, 10px) !important;
+}
+
+.word-emoji {
+  font-size: min(5rem, 9vh);
+  line-height: 1;
+}
+
+.gp-target-text {
+  margin-top: clamp(4px, 1vh, 10px) !important;
+  margin-bottom: clamp(4px, 0.8vh, 8px) !important;
+}
+
+.gp-target-text > span {
+  font-size: min(2.2rem, 4.6vh) !important;
+}
+
+.gp-hint {
+  font-size: clamp(0.68rem, 1.5vh, 0.82rem) !important;
+  padding: 4px 14px !important;
+}
+
+.gp-slots { gap: clamp(6px, 1vh, 12px) !important; }
+
+.slot {
+  width: min(58px, 6.6vh);
+  height: min(70px, 7.8vh);
+  font-size: min(2rem, 4vh);
+}
+
+/* ── Keyboard ────────────────────────────────────────────────────────────── */
+/* --kb-* come from the JSX (the big / medium / standard preset). Each value is
+   read through min(): the preset is honoured while it fits, and above that the
+   viewport height wins. That is the whole fix — the keyboard shrinks instead
+   of pushing the page past 100vh. */
+/* flex:0 0 auto on purpose. Letting the board shrink made its box smaller
+   than the rows inside it, and the rows then spilled over the buttons below —
+   that was the "End Session on top of the keyboard" overlap. The board keeps
+   its natural height; the keys are what shrink, through --kb-cap. */
+.letter-board {
+  /* The preset is the *floor* of what the child asked for, not the ceiling:
+     --kb-boost lets a key grow past it when the window has the room, and
+     --kb-cap pulls it back when it does not. The space freed above (toolbar,
+     word card) is spent here, because the keys are the target the child has
+     to actually hit. */
+  --kb-boost: 1.2;
+  --kb-cap: 11.5vh;
+  flex: 0 0 auto;
+  margin-top: var(--gp-sp-1);
+  gap: min(var(--kb-row-gap, 13px), 1.4vh);
+}
+
+/* ── Free Talk (self expression) ─────────────────────────────────────────────
+   Same rule as the rest of the column: the text box is the one element that
+   can absorb the leftover height, so it flexes and everything around it is
+   fixed. Without this the block kept its natural height, the column overflowed
+   and both ends were clipped — the title behind the top bar, the keyboard off
+   the bottom. */
+.gp-selfexp {
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: clamp(6px, 1.2vh, 14px);
+}
+
+.gp-se-header,
+.gp-se-actions,
+.gp-se-tip {
+  flex: 0 0 auto;
+}
+
+.gp-se-header { padding: clamp(8px, 1.4vh, 16px) 20px !important; }
+
+.gp-se-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.gp-se-editor textarea {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  padding: clamp(12px, 1.8vh, 20px) 22px !important;
+  font-size: clamp(0.95rem, 2.2vh, 1.15rem) !important;
+  line-height: 1.5 !important;
+}
+
+.gp-se-actions button {
+  padding: clamp(8px, 1.4vh, 14px) 18px !important;
+  font-size: clamp(0.8rem, 1.8vh, 0.95rem) !important;
+}
+
+.gp-se-tip { font-size: clamp(0.68rem, 1.5vh, 0.78rem) !important; }
+
+.gp-controls {
+  flex: 0 0 auto;
+  margin-top: var(--gp-sp-2);
+  gap: clamp(8px, 1.2vw, 14px);
+}
+
+.letter-row {
+  gap: min(var(--kb-gap, 11px), 1.4vh);
+}
+
+.letter-key {
+  width: min(calc(var(--kb-key-w, 68px) * var(--kb-boost)), var(--kb-cap));
+  height: min(calc(var(--kb-key-h, 68px) * var(--kb-boost)), var(--kb-cap));
+  font-size: min(calc(var(--kb-font, 1.65rem) * var(--kb-boost)), calc(var(--kb-cap) * 0.44));
+  flex: none;
+}
+
+.letter-key.is-backspace {
+  width: min(calc(var(--kb-bs-w, 82px) * var(--kb-boost)), calc(var(--kb-cap) * 1.25));
+  font-size: min(calc(var(--kb-font, 1.65rem) * 0.72), calc(var(--kb-cap) * 0.3));
+}
+
+.letter-key.is-space {
+  width: min(calc(var(--kb-bs-w, 82px) * 1.5 * var(--kb-boost)), calc(var(--kb-cap) * 1.9));
+  font-size: min(calc(var(--kb-font, 1.65rem) * 0.55), calc(var(--kb-cap) * 0.24));
+}
+
+/* Keyboard reachable from a physical keyboard too, not only by dwell. */
+.letter-key:focus-visible {
+  outline: 2px solid #22d3ee;
+  outline-offset: 3px;
+}
+
+/* Very short windows (laptops at 100% zoom, tablets in landscape): the word
+   card gives up size before the keyboard does — the keys are the thing the
+   child actually has to hit. */
+@media (max-height: 820px) {
+  .letter-board { --kb-cap: 10.5vh; }
+  .word-emoji { font-size: min(4.2rem, 7.6vh); }
+}
+
+@media (max-height: 700px) {
+  .letter-board { --kb-cap: 9.6vh; --kb-boost: 1.1; }
+  .gp-control-bar { padding: 3px 10px !important; }
+  .gp-controls button { padding: 6px 13px !important; font-size: 0.78rem !important; }
+}
+
+@media (max-height: 600px) {
+  .letter-board { --kb-cap: 8.6vh; --kb-boost: 1; }
+  /* The picture is the prompt for a child who cannot read the word yet, so it
+     shrinks but never disappears. */
+  .word-emoji { font-size: min(3rem, 6vh); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Stacked layout — below 1100px the panels become one scrolling column, so
+   the one-viewport rule above is deliberately turned off here.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 1100px) {
+  .gp-root {
+    height: auto !important;
+    min-height: 100vh;
+    overflow-y: auto !important;
+  }
+
+  .gp-panels {
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .gp-left,
+  .gp-right {
+    width: 100% !important;
+    border: none !important;
+    overflow: visible;
+  }
+
+  .gp-left {
+    order: 2;
+    border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+  }
+
+  .gp-center {
+    order: 1;
+    min-height: 400px;
+    overflow: visible;
+    padding-top: 70px !important;
+    position: relative !important;
+  }
+
+  .gp-right {
+    order: 3;
+    border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+    padding-bottom: 60px !important;
+  }
+
+  .camera-box {
+    height: 300px !important;
+    flex: none !important;
+  }
+
+  /* The column scrolls here, so no ceiling is needed and the preset applies. */
+  .letter-board { --kb-cap: 999px; --kb-boost: 1; }
+
+  .gp-control-bar {
+    flex-wrap: wrap !important;
+    gap: 12px !important;
+    justify-content: center !important;
+    padding: 15px !important;
+    height: auto !important;
+  }
+
+  .gp-control-bar > div {
+    flex: 1 1 auto !important;
+    justify-content: center !important;
+  }
+
+  .gp-control-bar > div:last-child { border-left: none !important; }
+  .gp-control-bar .divider { display: none !important; }
+
+  /* Settings toggle — shown on tablets and phones */
+  .mobile-settings-btn {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    position: fixed !important;
+    top: 15px;
+    left: 15px;
+    z-index: 5000 !important;
+    background: rgba(13, 94, 107, 0.5);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 10px 16px;
+    border-radius: 14px;
+    font-weight: 800;
+    font-size: 0.85rem;
+    cursor: pointer;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+    transition: transform 0.2s;
+  }
+
+  .mobile-settings-btn:active { transform: scale(0.95); }
+
+  .gp-control-bar.mobile-hidden { display: none !important; }
+
+  .gp-control-bar.mobile-visible {
+    display: flex !important;
+    position: absolute !important;
+    top: 70px;
+    left: 10px;
+    right: 10px;
+    width: calc(100% - 20px) !important;
+    z-index: 5001 !important;
+    background: rgba(15, 30, 34, 0.98) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.6) !important;
+    pointer-events: auto !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .gp-center {
+    padding: 10px !important;
+    gap: 12px !important;
+  }
+
+  /* These were written as `fontSize:` in the old injected <style> block, which
+     is a JS property name — CSS ignored the whole declaration. */
+  .slot {
+    width: 44px !important;
+    height: 56px !important;
+    font-size: 1.4rem !important;
+  }
+
+  .word-card { padding: 15px 20px !important; }
+  .word-emoji { font-size: 2.6rem; }
+
+  .letter-key {
+    width: 48px !important;
+    height: 48px !important;
+    font-size: 1.2rem !important;
+    border-radius: 10px !important;
+  }
+
+  .letter-key.is-backspace { width: 62px !important; font-size: 1rem !important; }
+  .letter-key.is-space { width: 96px !important; font-size: 0.72rem !important; }
+
+  .letter-row { gap: 6px !important; }
+  .letter-board { gap: 8px !important; }
+}
+
+@media (min-width: 1101px) {
+  .mobile-settings-btn { display: none !important; }
+  .gp-control-bar { display: flex !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-settings-btn { transition: none; }
+}

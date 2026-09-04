@@ -158,156 +158,181 @@ function PiggyBank() {
           hole the coin is scored against. */}
       <svg viewBox="-150 -170 300 280" width="100%" height="100%">
         <defs>
-          {/* Ceramic body: light from upper-left, deep falloff bottom-right. */}
-          <radialGradient id="pcgBody" cx="34%" cy="22%" r="82%">
-            <stop offset="0%"   stopColor="#FFE3EE" />
-            <stop offset="26%"  stopColor="#FBBBD8" />
-            <stop offset="58%"  stopColor="#F293BE" />
-            <stop offset="84%"  stopColor="#DF6D9E" />
-            <stop offset="100%" stopColor="#BE4E7E" />
+          {/* Ceramic body: one light source, upper-left, with a deep falloff
+              into the lower-right. Every other shape below obeys it. */}
+          <radialGradient id="pcgBody" cx="32%" cy="20%" r="86%">
+            <stop offset="0%"   stopColor="#FFE7F1" />
+            <stop offset="22%"  stopColor="#FCC3DC" />
+            <stop offset="52%"  stopColor="#F49CC2" />
+            <stop offset="80%"  stopColor="#DF74A2" />
+            <stop offset="100%" stopColor="#B84C7B" />
           </radialGradient>
-          {/* Contact occlusion pooled under the belly. */}
-          <radialGradient id="pcgAO" cx="50%" cy="88%" r="58%">
-            <stop offset="0%"   stopColor="#A33B6B" stopOpacity="0" />
-            <stop offset="60%"  stopColor="#A8386A" stopOpacity="0" />
-            <stop offset="100%" stopColor="#8E2A56" stopOpacity=".3" />
+          {/* Occlusion pooled under the belly, where the light cannot reach. */}
+          <radialGradient id="pcgAO" cx="46%" cy="92%" r="62%">
+            <stop offset="0%"   stopColor="#8E2A56" stopOpacity="0" />
+            <stop offset="58%"  stopColor="#8E2A56" stopOpacity="0" />
+            <stop offset="100%" stopColor="#7D2049" stopOpacity=".34" />
           </radialGradient>
-          <linearGradient id="pcgLeg" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor="#EE86B2" />
-            <stop offset="60%"  stopColor="#D9628F" />
-            <stop offset="100%" stopColor="#B84571" />
+          <linearGradient id="pcgLegNear" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor="#F09FC2" />
+            <stop offset="55%"  stopColor="#DE7BA6" />
+            <stop offset="100%" stopColor="#B85180" />
           </linearGradient>
-          <linearGradient id="pcgLegBack" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor="#CE5D8B" />
-            <stop offset="100%" stopColor="#A63C68" />
+          {/* The far pair is darker, not just smaller: depth comes from value. */}
+          <linearGradient id="pcgLegFar" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor="#C86592" />
+            <stop offset="100%" stopColor="#9A3D68" />
           </linearGradient>
-          <radialGradient id="pcgSnout" cx="36%" cy="26%" r="76%">
-            <stop offset="0%"   stopColor="#FFE0EC" />
-            <stop offset="55%"  stopColor="#F9AECE" />
-            <stop offset="100%" stopColor="#E07AA6" />
+          <radialGradient id="pcgSnout" cx="34%" cy="24%" r="78%">
+            <stop offset="0%"   stopColor="#FFE6F0" />
+            <stop offset="52%"  stopColor="#FBB7D4" />
+            <stop offset="100%" stopColor="#DE7BA6" />
           </radialGradient>
-          <linearGradient id="pcgEarOut" x1="0.2" y1="0" x2="0.8" y2="1">
-            <stop offset="0%"   stopColor="#F9B3D2" />
-            <stop offset="100%" stopColor="#CF5A88" />
+          <linearGradient id="pcgEarOut" x1="0.15" y1="0" x2="0.85" y2="1">
+            <stop offset="0%"   stopColor="#FBBFDA" />
+            <stop offset="100%" stopColor="#C95686" />
           </linearGradient>
-          <linearGradient id="pcgEarIn" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor="#FBC9DE" />
-            <stop offset="100%" stopColor="#E792B6" />
+          <linearGradient id="pcgEarIn" x1="0" y1="0" x2="0.2" y2="1">
+            <stop offset="0%"   stopColor="#F7A9C9" />
+            <stop offset="100%" stopColor="#D9749F" />
           </linearGradient>
-          {/* Slot: dark cavity with a light lip so it reads as a real opening. */}
+          {/* Slot: a dark cavity that gets lighter towards the bottom, so the
+              eye reads depth rather than a black sticker. */}
           <linearGradient id="pcgSlotCav" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor="#3E1228" />
-            <stop offset="55%"  stopColor="#6B2646" />
-            <stop offset="100%" stopColor="#8F3D62" />
+            <stop offset="0%"   stopColor="#2E0C1D" />
+            <stop offset="48%"  stopColor="#521B38" />
+            <stop offset="100%" stopColor="#7E3357" />
           </linearGradient>
-          {/* Soft cast shadow — a gradient, not a flat disc. */}
           <radialGradient id="pcgCast" cx="50%" cy="50%" r="50%">
-            <stop offset="0%"   stopColor="#4A2A0C" stopOpacity=".34" />
-            <stop offset="62%"  stopColor="#4A2A0C" stopOpacity=".16" />
+            <stop offset="0%"   stopColor="#4A2A0C" stopOpacity=".36" />
+            <stop offset="58%"  stopColor="#4A2A0C" stopOpacity=".15" />
             <stop offset="100%" stopColor="#4A2A0C" stopOpacity="0" />
           </radialGradient>
+          {/* Glaze and occlusion are clipped to the silhouette so they can be
+              drawn as free strokes without leaking past the edge. */}
+          <clipPath id="pcgBodyClip">
+            <path d="M-112 -14
+                     C -114 -60, -86 -94, -34 -99
+                     C -14 -101, 4 -101, 24 -99
+                     C 82 -93, 113 -60, 113 -12
+                     C 113 30, 66 60, -2 60
+                     C -70 60, -110 30, -112 -14 Z" />
+          </clipPath>
         </defs>
 
-        <ellipse className="pcg-pig-shadow" cx="4" cy="90" rx="118" ry="19" fill="url(#pcgCast)" />
+        <ellipse className="pcg-pig-shadow" cx="2" cy="90" rx="120" ry="18" fill="url(#pcgCast)" />
         <circle className="pcg-slot-halo" cx="0" cy="-88" r="56" />
 
         <g className="pcg-pig-body">
-          {/* Legs are drawn BEFORE the body so the belly overlaps their tops and
-             they read as limbs, not blocks stuck on the front. The body is kept
-             short enough for a real length of leg to show below it. */}
-          <path d="M-58 10 h30 a17 17 0 0 1 17 17 v45 a13 13 0 0 1 -13 13 h-38 a13 13 0 0 1 -13 -13 v-45 a17 17 0 0 1 17 -17 z"
-            fill="url(#pcgLegBack)" />
-          <path d="M34 10 h28 a17 17 0 0 1 17 17 v45 a13 13 0 0 1 -13 13 h-36 a13 13 0 0 1 -13 -13 v-45 a17 17 0 0 1 17 -17 z"
-            fill="url(#pcgLegBack)" />
-          <path d="M-92 6 h34 a18 18 0 0 1 18 18 v48 a14 14 0 0 1 -14 14 h-42 a14 14 0 0 1 -14 -14 v-48 a18 18 0 0 1 18 -18 z"
-            fill="url(#pcgLeg)" />
-          <path d="M56 6 h32 a18 18 0 0 1 18 18 v48 a14 14 0 0 1 -14 14 h-40 a14 14 0 0 1 -14 -14 v-48 a18 18 0 0 1 18 -18 z"
-            fill="url(#pcgLeg)" />
-          {/* hooves */}
-          <path d="M-106 72 h62 v6 a12 12 0 0 1 -12 12 h-38 a12 12 0 0 1 -12 -12 z" fill="#A63C68" opacity=".6" />
-          <path d="M42 72 h64 v6 a12 12 0 0 1 -12 12 h-40 a12 12 0 0 1 -12 -12 z" fill="#A63C68" opacity=".6" />
+          {/* Legs first, so the belly overlaps their tops and they read as
+              limbs the body sits on rather than blocks glued to the front. */}
+          <path d="M-58 4 C -64 30 -64 56 -60 76 C -58 87 -34 87 -32 76 C -28 56 -28 30 -34 4 Z"
+            fill="url(#pcgLegFar)" />
+          <path d="M34 4 C 28 30 28 56 32 76 C 34 87 58 87 60 76 C 64 56 64 30 58 4 Z"
+            fill="url(#pcgLegFar)" />
+          <path d="M-61 74 C -59 87 -33 87 -31 74 C -31 84 -33 90 -46 90 C -59 90 -61 84 -61 74 Z"
+            fill="#8A3159" opacity=".55" />
+          <path d="M31 74 C 33 87 59 87 61 74 C 61 84 59 90 46 90 C 33 90 31 84 31 74 Z"
+            fill="#8A3159" opacity=".55" />
 
-          {/* ── ears ── */}
-          <path d="M-70 -72 C -86 -106 -60 -128 -38 -112 C -25 -102 -28 -80 -40 -68 Z"
-            fill="url(#pcgEarOut)" />
-          <path d="M-64 -78 C -74 -100 -56 -114 -44 -103 C -37 -96 -40 -82 -47 -74 Z"
-            fill="url(#pcgEarIn)" />
-          <path d="M58 -74 C 76 -108 50 -130 30 -113 C 18 -103 22 -81 34 -69 Z"
-            fill="url(#pcgEarOut)" />
-          <path d="M53 -80 C 64 -102 46 -116 35 -104 C 28 -97 31 -83 38 -75 Z"
-            fill="url(#pcgEarIn)" />
+          <path d="M-96 2 C -103 30 -103 56 -98 74 C -96 85 -68 85 -66 74 C -61 56 -61 30 -68 2 Z"
+            fill="url(#pcgLegNear)" />
+          <path d="M52 2 C 45 30 45 56 50 74 C 52 85 80 85 82 74 C 87 56 87 30 80 2 Z"
+            fill="url(#pcgLegNear)" />
+          <path d="M-99 72 C -97 85 -67 85 -65 72 C -65 82 -68 88 -82 88 C -96 88 -99 82 -99 72 Z"
+            fill="#A94272" />
+          <path d="M49 72 C 51 85 81 85 83 72 C 83 82 80 88 66 88 C 52 88 49 82 49 72 Z"
+            fill="#A94272" />
 
-          {/* ── tail, behind the flank ── */}
-          {/* Starts inside the flank so it looks attached, and the curl clears
-             the silhouette far enough to actually read as a tail. */}
-          <path d="M96 -24 C 124 -30, 142 -44, 138 -60 C 135 -73, 118 -75, 113 -63
-                   C 108 -50, 122 -41, 134 -46"
-            fill="none" stroke="#C9527F" strokeWidth="13" strokeLinecap="round" />
-          <path d="M96 -24 C 124 -30, 142 -44, 138 -60 C 135 -73, 118 -75, 113 -63
-                   C 108 -50, 122 -41, 134 -46"
-            fill="none" stroke="#EE86B2" strokeWidth="8" strokeLinecap="round" />
-          <path d="M100 -26 C 122 -32, 136 -44, 134 -57"
-            fill="none" stroke="#FBC0DA" strokeWidth="3.2" strokeLinecap="round" opacity=".7" />
+          {/* ── ears: the far one is dimmed so it sits behind the head ── */}
+          <path d="M-72 -76 C -90 -110 -62 -132 -38 -116 C -24 -106 -28 -84 -41 -71 Z"
+            fill="url(#pcgEarOut)" />
+          <path d="M-66 -82 C -78 -104 -58 -118 -45 -106 C -37 -99 -40 -85 -48 -76 Z"
+            fill="url(#pcgEarIn)" />
+          <path d="M64 -74 C 84 -108 58 -130 36 -113 C 23 -102 28 -80 41 -68 Z"
+            fill="url(#pcgEarOut)" opacity=".82" />
+          <path d="M59 -80 C 72 -102 53 -116 41 -104 C 33 -96 37 -82 45 -74 Z"
+            fill="url(#pcgEarIn)" opacity=".82" />
+
+          {/* ── tail: dark core, lit body, thin highlight along the curl ── */}
+          <path d="M104 -20 C 128 -24 142 -38 139 -54 C 136 -68 118 -70 113 -58 C 109 -46 122 -38 133 -44"
+            fill="none" stroke="#B34C79" strokeWidth="13" strokeLinecap="round" />
+          <path d="M104 -20 C 128 -24 142 -38 139 -54 C 136 -68 118 -70 113 -58 C 109 -46 122 -38 133 -44"
+            fill="none" stroke="#E886B0" strokeWidth="7.5" strokeLinecap="round" />
+          <path d="M107 -22 C 126 -26 137 -37 135 -50"
+            fill="none" stroke="#FBC7DD" strokeWidth="2.8" strokeLinecap="round" opacity=".75" />
 
           {/* ── body ── */}
-          <path d="M-114 -18
-                   C -114 -68, -76 -100, -8 -100
-                   C 62 -100, 114 -66, 114 -16
-                   C 114 28, 66 56, 0 56
-                   C -66 56, -114 26, -114 -18 Z"
+          <path d="M-112 -14
+                   C -114 -60, -86 -94, -34 -99
+                   C -14 -101, 4 -101, 24 -99
+                   C 82 -93, 113 -60, 113 -12
+                   C 113 30, 66 60, -2 60
+                   C -70 60, -110 30, -112 -14 Z"
             fill="url(#pcgBody)" />
-          <path d="M-114 -18
-                   C -114 -68, -76 -100, -8 -100
-                   C 62 -100, 114 -66, 114 -16
-                   C 114 28, 66 56, 0 56
-                   C -66 56, -114 26, -114 -18 Z"
-            fill="url(#pcgAO)" />
 
-          {/* ── rim light along the lit edge (restrained) ── */}
-          <path d="M-104 -42 C -98 -76, -60 -96, -8 -96"
-            fill="none" stroke="#FFFFFF" strokeWidth="5" opacity=".3" strokeLinecap="round" />
-          {/* ── ceramic specular: small and kept clear of the face ── */}
-          <ellipse cx="-16" cy="-66" rx="30" ry="13" fill="#FFFFFF" opacity=".26"
-            transform="rotate(-16 -16 -66)" />
-          <ellipse cx="-30" cy="-72" rx="12" ry="5.5" fill="#FFFFFF" opacity=".45"
-            transform="rotate(-18 -30 -72)" />
-          {/* ── bounce light on the shaded flank ── */}
-          <path d="M98 8 C 108 -8, 110 -26, 105 -40"
-            fill="none" stroke="#FFC2DC" strokeWidth="5" opacity=".28" strokeLinecap="round" />
+          <g clipPath="url(#pcgBodyClip)">
+            <path d="M-112 -14
+                     C -114 -60, -86 -94, -34 -99
+                     C -14 -101, 4 -101, 24 -99
+                     C 82 -93, 113 -60, 113 -12
+                     C 113 30, 66 60, -2 60
+                     C -70 60, -110 30, -112 -14 Z"
+              fill="url(#pcgAO)" />
+            {/* A jaw break, so the head is not just the left end of a barrel. */}
+            <path d="M-58 -96 C -46 -56 -50 -18 -74 10"
+              fill="none" stroke="#C4608C" strokeWidth="3" opacity=".22" strokeLinecap="round" />
+            {/* Glaze: three strokes that follow the silhouette instead of a
+                floating ellipse. A rotated blob reads as a smudge across the
+                face; a crescent hugging the lit edge reads as glazed ceramic. */}
+            <path d="M-99 -34 C -92 -72, -58 -92, -12 -94"
+              fill="none" stroke="#FFFFFF" strokeWidth="20" opacity=".16" strokeLinecap="round" />
+            <path d="M-92 -40 C -85 -70, -56 -85, -22 -87"
+              fill="none" stroke="#FFFFFF" strokeWidth="7" opacity=".30" strokeLinecap="round" />
+            <path d="M-80 -60 C -72 -72, -58 -79, -44 -81"
+              fill="none" stroke="#FFFFFF" strokeWidth="4" opacity=".55" strokeLinecap="round" />
+            {/* Warm bounce light on the shaded flank. */}
+            <path d="M104 6 C 112 -12 113 -32 108 -48"
+              fill="none" stroke="#FFC7DD" strokeWidth="6" opacity=".26" strokeLinecap="round" />
+            {/* Where the belly meets the legs. */}
+            <ellipse cx="-4" cy="66" rx="96" ry="20" fill="#8E2A56" opacity=".18" />
+          </g>
 
-          {/* ── snout, raised off the face ── */}
-          <ellipse cx="-90" cy="-2" rx="35" ry="30" fill="#C1547F" opacity=".3" />
-          <ellipse cx="-92" cy="-6" rx="35" ry="30" fill="url(#pcgSnout)" />
-          <ellipse cx="-92" cy="-6" rx="35" ry="30" fill="none" stroke="#D9709F" strokeWidth="2" opacity=".45" />
-          <ellipse cx="-100" cy="-10" rx="6" ry="9" fill="#A83E6B" />
-          <ellipse cx="-83"  cy="-10" rx="6" ry="9" fill="#A83E6B" />
-          <ellipse cx="-101" cy="-15" rx="2.2" ry="3" fill="#FFFFFF" opacity=".4" />
-          <ellipse cx="-103" cy="-22" rx="11" ry="5" fill="#FFFFFF" opacity=".4"
-            transform="rotate(-18 -103 -22)" />
+          <path d="M-105 -38 C -100 -74, -66 -95, -20 -98"
+            fill="none" stroke="#FFFFFF" strokeWidth="4.5" opacity=".34" strokeLinecap="round" />
+
+          {/* ── snout, raised off the face by its own contact shadow ── */}
+          <ellipse cx="-93" cy="4" rx="33" ry="28" fill="#B84C7B" opacity=".26" />
+          <ellipse cx="-95" cy="0" rx="33" ry="28" fill="url(#pcgSnout)" />
+          <ellipse cx="-95" cy="0" rx="33" ry="28" fill="none" stroke="#D06E9C" strokeWidth="1.8" opacity=".5" />
+          <ellipse cx="-104" cy="-3" rx="5.4" ry="8.4" fill="#9E3765" />
+          <ellipse cx="-87"  cy="-3" rx="5.4" ry="8.4" fill="#9E3765" />
+          <ellipse cx="-104" cy="-19" rx="12" ry="5" fill="#FFFFFF" opacity=".42"
+            transform="rotate(-16 -104 -19)" />
 
           {/* ── eye ── */}
-          <ellipse cx="-50" cy="-50" rx="13" ry="14.5" fill="#FFFFFF" />
-          <ellipse cx="-50" cy="-50" rx="13" ry="14.5" fill="none" stroke="#D9709F" strokeWidth="1.6" opacity=".45" />
-          <circle cx="-48" cy="-48" r="7.6" fill="#40243A" />
-          <circle cx="-45.2" cy="-51" r="2.9" fill="#FFFFFF" />
-          <circle cx="-51" cy="-43" r="1.5" fill="#FFFFFF" opacity=".7" />
-          <path className="pcg-pig-lid" d="M-63 -50 A 13 14.5 0 0 1 -37 -50 Z" fill="#EE87B4" />
-          <path d="M-64 -67 q13 -9 26 -2" stroke="#C1547F" strokeWidth="3.6"
-            fill="none" strokeLinecap="round" opacity=".6" />
+          <ellipse cx="-48" cy="-46" rx="11.5" ry="13" fill="#FFFFFF" />
+          <ellipse cx="-48" cy="-46" rx="11.5" ry="13" fill="none" stroke="#D06E9C" strokeWidth="1.5" opacity=".5" />
+          <circle cx="-46.5" cy="-44.5" r="6.8" fill="#3B2136" />
+          <circle cx="-44" cy="-47.5" r="2.6" fill="#FFFFFF" />
+          <circle cx="-49.5" cy="-40" r="1.4" fill="#FFFFFF" opacity=".7" />
+          <path className="pcg-pig-lid" d="M-59.5 -46 A 11.5 13 0 0 1 -36.5 -46 Z" fill="#EE87B4" />
+          <path d="M-61 -62 q13 -8 25 -2" stroke="#BE5786" strokeWidth="3.4"
+            fill="none" strokeLinecap="round" opacity=".55" />
 
           {/* ── smile + blush ── */}
-          <path d="M-66 12 q16 13 33 4" stroke="#B84571" strokeWidth="3.6"
-            fill="none" strokeLinecap="round" opacity=".55" />
-          <ellipse cx="-64" cy="-18" rx="14" ry="8" fill="#EF5D95" opacity=".3" />
+          <path d="M-70 16 q15 12 31 3" stroke="#B04A77" strokeWidth="3.4"
+            fill="none" strokeLinecap="round" opacity=".5" />
+          <ellipse cx="-66" cy="-14" rx="13" ry="7.5" fill="#EF5D95" opacity=".26" />
 
           {/* ── coin slot: cavity, lip, and a bright rim while it beckons ── */}
           <g className="pcg-slot-group">
-            <ellipse cx="0" cy="-80" rx="42" ry="11" fill="#C1547F" opacity=".28" />
+            <ellipse cx="0" cy="-82" rx="46" ry="12" fill="#B84C7B" opacity=".22" />
             <rect x="-38" y="-97" width="76" height="18" rx="9" fill="url(#pcgSlotCav)" />
-            <rect x="-38" y="-97" width="76" height="6"  rx="3" fill="#330E20" />
-            <rect x="-34" y="-82" width="68" height="3"  rx="1.5" fill="#FFB9D6" opacity=".4" />
+            <rect x="-38" y="-97" width="76" height="5.5" rx="2.75" fill="#280A19" />
+            <rect x="-33" y="-82.5" width="66" height="2.6" rx="1.3" fill="#FFC2DC" opacity=".45" />
             <rect className="pcg-slot" x="-38" y="-97" width="76" height="18" rx="9"
-              fill="none" stroke="#FFD3E5" strokeWidth="3" />
+              fill="none" stroke="#F7BFD9" strokeWidth="2" opacity=".9" />
           </g>
         </g>
 

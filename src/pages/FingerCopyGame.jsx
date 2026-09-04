@@ -24,10 +24,21 @@ import api from '../services/api';
 import '../styles/FingerCopyGame.css';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-const MATCH_THRESHOLD   = 100;   // Accuracy % needed to count as matching
+/* 80, not 100. Demanding a perfect landmark match made the game unplayable for
+   the children it is meant for: a hand with reduced motor control rarely hits
+   every finger exactly, and MediaPipe itself jitters by a few percent. 80 still
+   requires the right shape, but leaves room for a real hand. */
+const MATCH_THRESHOLD   = 80;    // Accuracy % needed to count as matching
 const HOLD_DURATION_MS  = 1000;  // Hold gesture for 1 second to confirm
 const SUCCESS_DELAY_MS  = 1800;  // Delay before advancing to next challenge
 const COUNTDOWN_SECONDS = 3;     // 3…2…1…Go!
+const RULES_FLAG        = 'fingercopy_rules_seen';
+/* Reference time (seconds) to produce one gesture at each level; the Speed
+   sub-score is measured against it, so a level with harder shapes is not
+   punished for taking longer. */
+const LEVEL_REF_SEC     = { 1: 6, 2: 8, 3: 12 };
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 // ── Encouraging messages pool ──────────────────────────────────────────────
 const ENCOURAGEMENTS = [
@@ -71,6 +82,64 @@ function buildChallenges(level) {
     type: 'single',
     gesture: g,
   }));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RULES MODAL — shown once per tab, before the countdown
+   ═══════════════════════════════════════════════════════════════════════════ */
+const RULES = [
+  { icon: '✋', text: 'Copy the gesture on the card with your own hand.' },
+  { icon: '🎯', text: `The ring shows how close you are — reach ${MATCH_THRESHOLD}% to start the hold.` },
+  { icon: '⏱️', text: 'Hold the shape still for 1 second to validate it.' },
+  { icon: '🔁', text: 'If your hand leaves the shape, the hold restarts from zero.' },
+  { icon: '🔢', text: 'Level 3 chains several gestures — do them in order.' },
+  { icon: '🖐️', text: 'Either hand works; the game notes which one you favour.' },
+];
+
+function RulesModal({ level, onStart }) {
+  return (
+    <motion.div
+      className="fc-rules-overlay"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+    >
+      <motion.div
+        className="fc-rules-card"
+        initial={{ scale: 0.88, y: 30, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 240, damping: 22 }}
+      >
+        <div className="fc-rules-head">
+          <div className="fc-rules-badge">🖐️</div>
+          <div>
+            <h2 className="fc-rules-title">Magic Finger Copy</h2>
+            <p className="fc-rules-sub">Level {level} — {LEVELS[level]?.label}</p>
+          </div>
+        </div>
+
+        <ul className="fc-rules-list">
+          {RULES.map((r, i) => (
+            <motion.li
+              key={i}
+              initial={{ opacity: 0, x: -18 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.12 + i * 0.07 }}
+            >
+              <span className="fc-rule-icon">{r.icon}</span>
+              <span>{r.text}</span>
+            </motion.li>
+          ))}
+        </ul>
+
+        <div className="fc-rules-ot">
+          <strong>OT Score</strong> = Match accuracy 30% · Hold stability 25% ·
+          Speed 25% · Consistency 20%
+        </div>
+
+        <button className="fc-rules-start" onClick={onStart}>▶ Let&apos;s go!</button>
+      </motion.div>
+    </motion.div>
+  );
 }
 
 // ── Confetti component ─────────────────────────────────────────────────────
@@ -135,7 +204,9 @@ export default function FingerCopyGame() {
   } = useHandTracking(videoRef, canvasRef, trackingEnabled);
 
   // ── Game state ──────────────────────────────────────────────────────────
-  const [gamePhase, setGamePhase]       = useState('countdown'); // countdown | playing | success | results
+  const [gamePhase, setGamePhase]       = useState(
+    () => (sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules')
+  ); // rules | countdown | playing | success | results
   const [countdown, setCountdown]       = useState(COUNTDOWN_SECONDS);
   const [challenges, setChallenges]     = useState([]);
   const [currentIdx, setCurrentIdx]     = useState(0);
@@ -159,6 +230,11 @@ export default function FingerCopyGame() {
     responseTimes: [],
     handsUsed: { left: 0, right: 0 },
   });
+
+  /* Raw OT counters. They live in a ref because the match loop runs on every
+     tracking frame and must never trigger a render. */
+  const otRef = useRef({ holdBreaks: 0, holdsStarted: 0 });
+  const [otResults, setOtResults] = useState(null);
 
   // ── Current target gesture ──────────────────────────────────────────────
   const currentChallenge = challenges[currentIdx] || null;
@@ -208,9 +284,59 @@ export default function FingerCopyGame() {
     }
   }, [gamePhase, currentSessionId, level, profile, user, storeStartSession]);
 
+  /* ── OT score ──────────────────────────────────────────────────────────
+     Computed in its own effect rather than inside the success timeout, so it
+     reads the final sessionStats instead of a stale closure. */
+  useEffect(() => {
+    if (gamePhase !== 'results' || otResults) return;
+
+    const accs = sessionStats.accuracies;
+    const times = sessionStats.responseTimes;
+    const ot = otRef.current;
+
+    // 1. Match accuracy — how well the hand reproduced each shape.
+    const matchAccuracy = accs.length
+      ? accs.reduce((a, b) => a + b, 0) / accs.length : 0;
+
+    // 2. Hold stability — a hold that collapses before the second is up means
+    //    the grip was not steady. Every restart costs.
+    const stability = ot.holdsStarted
+      ? clamp01(1 - ot.holdBreaks / ot.holdsStarted) * 100 : 100;
+
+    // 3. Speed — against a per-level reference, never above 100.
+    const avgTime = times.length
+      ? times.reduce((a, b) => a + b, 0) / times.length : 0;
+    const speedScore = avgTime > 0
+      ? clamp01((LEVEL_REF_SEC[level] || 8) / avgTime) * 100 : 100;
+
+    // 4. Consistency — spread of the per-gesture accuracies. A child who is
+    //    steady across every shape scores higher than one who alternates
+    //    between perfect and poor, even at the same average.
+    let consistency = 100;
+    if (accs.length > 1) {
+      const mean = matchAccuracy;
+      const variance = accs.reduce((a, v) => a + (v - mean) ** 2, 0) / accs.length;
+      consistency = clamp01(1 - Math.sqrt(variance) / 25) * 100;
+    }
+
+    const composite = Math.round(
+      matchAccuracy * 0.30 + stability * 0.25 + speedScore * 0.25 + consistency * 0.20
+    );
+
+    setOtResults({
+      composite,
+      matchAccuracy: Math.round(matchAccuracy),
+      stability: Math.round(stability),
+      speedScore: Math.round(speedScore),
+      consistency: Math.round(consistency),
+      holdBreaks: ot.holdBreaks,
+      avgResponseSec: avgTime,
+    });
+  }, [gamePhase, otResults, sessionStats, level]);
+
   // Save session when game finishes (results phase)
   useEffect(() => {
-    if (gamePhase === 'results' && currentSessionId && !sessionSaved) {
+    if (gamePhase === 'results' && currentSessionId && !sessionSaved && otResults) {
       setSessionSaved(true);
       const durationSeconds = Math.max(1, Math.round((Date.now() - (gameStartTime || Date.now())) / 1000));
       const avgAccuracy = Math.round(
@@ -218,13 +344,24 @@ export default function FingerCopyGame() {
           ? sessionStats.accuracies.reduce((a, b) => a + b, 0) / sessionStats.accuracies.length
           : 100
       );
-      const accuracyScore = parseFloat((avgAccuracy / 100).toFixed(2));
+      /* The OT composite is the headline number for therapists; the raw match
+         average stays as the fallback. */
+      const otScore = otResults?.composite ?? avgAccuracy;
+      const accuracyScore = parseFloat((otScore / 100).toFixed(2));
 
       api.post('/sessions/end', {
         session_id: currentSessionId,
         duration_seconds: durationSeconds,
         accuracy_score: accuracyScore,
-        accuracy: avgAccuracy,
+        accuracy: otScore,
+        metrics: otResults ? {
+          otScore: otResults.composite,
+          matchAccuracy: otResults.matchAccuracy,
+          stability: otResults.stability,
+          speedScore: otResults.speedScore,
+          consistency: otResults.consistency,
+          holdBreaks: otResults.holdBreaks,
+        } : undefined,
         perfect_grabs: sessionStats.accuracies.length,
         total_attempts: challenges.length || 1,
         game_name: 'Magic Finger Copy'
@@ -296,11 +433,15 @@ export default function FingerCopyGame() {
     if (isMatching) {
       if (!holdStartTime) {
         // Start holding
+        otRef.current.holdsStarted += 1;
         setHoldStartTime(Date.now());
       }
     } else {
       // Reset hold if gesture breaks
       if (holdStartTime) {
+        /* A hold that collapses before the second is up is the clearest signal
+           of an unsteady grip — it is the Hold stability sub-score. */
+        otRef.current.holdBreaks += 1;
         setHoldStartTime(null);
         setHoldProgress(0);
       }
@@ -424,6 +565,8 @@ export default function FingerCopyGame() {
     setEncourageMsg('');
     setCurrentSessionId(null);
     setSessionSaved(false);
+    otRef.current = { holdBreaks: 0, holdsStarted: 0 };
+    setOtResults(null);
     setSessionStats({
       totalScore: 0,
       accuracies: [],
@@ -475,6 +618,22 @@ export default function FingerCopyGame() {
     <div className="fc-page">
       {/* ── Confetti ─────────────────────────────────────────────────── */}
       <Confetti show={showConfetti} />
+
+      {/* ── Rules ────────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {gamePhase === 'rules' && (
+          <RulesModal
+            key="rules"
+            level={level}
+            onStart={() => {
+              /* Remembered per tab: replaying skips the rules, a fresh visit
+                 always shows them. */
+              sessionStorage.setItem(RULES_FLAG, '1');
+              setGamePhase('countdown');
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ── Countdown Overlay ────────────────────────────────────────── */}
       <AnimatePresence>
@@ -538,6 +697,40 @@ export default function FingerCopyGame() {
               <div className="fc-results-subtitle">
                 Level {level} — {LEVELS[level]?.label}
               </div>
+
+              {otResults && (
+                <div className="fc-ot-block">
+                  <div className="fc-perf-ring" style={{ '--pct': otResults.composite }}>
+                    <div className="fc-perf-inner">
+                      <span className="fc-perf-val">{otResults.composite}</span>
+                      <span className="fc-perf-lbl">OT Score</span>
+                    </div>
+                  </div>
+                  <div className="fc-ot-bars">
+                    {[
+                      ['Match accuracy', otResults.matchAccuracy, '30%'],
+                      ['Hold stability', otResults.stability,     '25%'],
+                      ['Speed',          otResults.speedScore,    '25%'],
+                      ['Consistency',    otResults.consistency,   '20%'],
+                    ].map(([label, value, weight]) => (
+                      <div className="fc-ot-bar" key={label}>
+                        <div className="fc-ot-bar-head">
+                          <span>{label} <em>{weight}</em></span>
+                          <strong>{value}%</strong>
+                        </div>
+                        <div className="fc-ot-bar-track">
+                          <motion.div
+                            className="fc-ot-bar-fill"
+                            initial={{ width: 0 }}
+                            animate={{ width: `${value}%` }}
+                            transition={{ duration: 0.7, delay: 0.3 }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="fc-results-grid">
                 <div className="fc-result-item">

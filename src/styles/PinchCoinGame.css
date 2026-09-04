@@ -244,7 +244,9 @@
 
 /* The eye blinks on its own, and squeezes shut while the bank celebrates. */
 .pcg-pig-lid {
-  transform-origin: -46px -40px;
+  /* Must match the eye's centre in the SVG, or the lid slides instead of
+     closing over the eye. */
+  transform-origin: -48px -46px;
   transform: scaleY(0);
   animation: pcgBlink2 5.5s ease-in-out infinite;
 }

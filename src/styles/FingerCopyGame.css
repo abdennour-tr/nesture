@@ -1021,3 +1021,393 @@
     display: none;
   }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OVERLAY CARDS THAT OUTGROW THE WINDOW
+   The rules / pause / results cards were centred in their overlay with
+   justify-content (or align-items) : center. When a flex item is larger than
+   the container it is centred in, it overflows at BOTH ends — and the half
+   above the container's edge cannot be scrolled to at all. That is why the
+   buttons at the bottom of the results card were unreachable on a short
+   window.
+
+   The fix is the standard one: the overlay stops centring and scrolls, and the
+   card centres itself with `margin: auto`, which centres while it fits and
+   gives up cleanly when it does not. The card is also capped to the window and
+   scrolls internally, so it can never grow past the screen again.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.fc-results-overlay, .fc-success-overlay {
+  /* Centring on the block axis is what clipped the card — see above. */
+  align-items: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.fc-results-card {
+  /* Centres in the free space, never clips when there is none. */
+  margin: auto;
+  max-height: calc(100dvh - 40px);
+  /* overflow-x stays hidden: the decorative confetti and glows are meant to be
+     clipped. Only the vertical axis becomes scrollable. */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESULTS CARD — SHRINKS INSTEAD OF SCROLLING
+   Scrolling was only the safety net. At 150% browser zoom the window is barely
+   600 CSS pixels tall, and a card built from fixed pixel sizes cannot fit
+   whatever the overflow rules say. Everything below is clamped against vh, so
+   the card loses height as one piece and stays whole on screen.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.fc-results-card {
+  padding: clamp(16px, 3vh, 40px) clamp(18px, 2.6vw, 48px);
+}
+
+.fc-results-title { font-size: clamp(1.15rem, 3.2vh, 1.8rem); }
+.fc-results-subtitle { font-size: clamp(0.76rem, 1.7vh, 1rem); }
+
+.fc-results-grid { gap: clamp(8px, 1.6vh, 16px); }
+
+.fc-result-item {
+  padding: clamp(8px, 1.6vh, 16px);
+}
+
+.fc-result-value { font-size: clamp(1.05rem, 3.4vh, 1.8rem); }
+.fc-result-label { font-size: clamp(0.6rem, 1.3vh, 0.75rem); }
+
+.fc-results-actions { gap: clamp(8px, 1.4vh, 12px); }
+
+.fc-results-actions button {
+  padding: clamp(8px, 1.7vh, 12px) clamp(16px, 2vw, 28px) !important;
+  font-size: clamp(0.8rem, 1.8vh, 0.95rem) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RULES MODAL + OT SCORE
+   ═══════════════════════════════════════════════════════════════════════════ */
+.fc-rules-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  /* flex-start, not center: a card centred in a container it overflows is
+     clipped at both ends and its top becomes unreachable. `margin:auto` on the
+     card centres it while it fits. */
+  align-items: flex-start;
+  justify-content: center;
+  padding: clamp(12px, 3vh, 24px);
+  background: rgba(8, 14, 18, 0.8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overflow-y: auto;
+}
+
+.fc-rules-card {
+  width: min(560px, 100%);
+  margin: auto;
+  max-height: calc(100dvh - 2 * clamp(12px, 3vh, 24px));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: linear-gradient(160deg, rgba(13, 26, 29, 0.97), rgba(9, 15, 20, 0.97));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  padding: clamp(16px, 2.6vh, 28px);
+  box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.6);
+  color: #C8E8ED;
+}
+
+.fc-rules-head,
+.fc-rules-ot,
+.fc-rules-start { flex: 0 0 auto; }
+
+.fc-rules-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: clamp(12px, 2.2vh, 22px);
+}
+
+.fc-rules-badge {
+  width: clamp(46px, 7vh, 58px);
+  height: clamp(46px, 7vh, 58px);
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: clamp(1.5rem, 3.4vh, 1.9rem);
+  border-radius: 18px;
+  background: linear-gradient(135deg, #8B5CF6, #22D3EE);
+  box-shadow: 0 8px 24px rgba(139, 92, 246, 0.35);
+}
+
+.fc-rules-title {
+  margin: 0;
+  font-size: clamp(1.2rem, 3vh, 1.55rem);
+  font-weight: 800;
+  color: #FFFFFF;
+}
+
+.fc-rules-sub {
+  margin: 4px 0 0;
+  font-size: clamp(0.8rem, 1.8vh, 0.95rem);
+  color: #7BA3AB;
+}
+
+.fc-rules-list {
+  list-style: none;
+  margin: 0 0 clamp(12px, 2vh, 20px);
+  padding: 0 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 1.4vh, 12px);
+  /* The one element that gives up height on a short window. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.fc-rules-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: clamp(0.85rem, 1.9vh, 1rem);
+  line-height: 1.45;
+}
+
+.fc-rule-icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.fc-rules-ot {
+  font-size: clamp(0.74rem, 1.6vh, 0.86rem);
+  line-height: 1.5;
+  color: #7BA3AB;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: clamp(9px, 1.5vh, 12px) 14px;
+  margin-bottom: clamp(12px, 2vh, 20px);
+}
+
+.fc-rules-ot strong { color: #E8841A; }
+
+.fc-rules-start {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: clamp(11px, 2vh, 15px) 24px;
+  font-size: clamp(0.95rem, 2.2vh, 1.1rem);
+  font-weight: 700;
+  color: #fff;
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  background: linear-gradient(135deg, #8B5CF6, #22D3EE);
+  box-shadow: 0 10px 26px rgba(139, 92, 246, 0.35);
+  transition: transform 0.15s ease;
+}
+
+.fc-rules-start:hover { transform: translateY(-2px); }
+
+/* ── OT ring + weighted sub-score bars ─────────────────────────────────── */
+.fc-ot-block {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 2.4vw, 26px);
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: clamp(10px, 2vh, 20px) 0 clamp(12px, 2.2vh, 24px);
+}
+
+.fc-perf-ring {
+  --pct: 0;
+  flex: none;
+  width: clamp(88px, 15vh, 130px);
+  height: clamp(88px, 15vh, 130px);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(#22D3EE calc(var(--pct) * 1%), rgba(255, 255, 255, 0.09) 0);
+}
+
+.fc-perf-inner {
+  width: 79%;
+  height: 79%;
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: #0D1A1D;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.fc-perf-val {
+  font-size: clamp(1.3rem, 3.8vh, 2.1rem);
+  font-weight: 800;
+  line-height: 1;
+  color: #FFFFFF;
+}
+
+.fc-perf-lbl {
+  font-size: clamp(0.58rem, 1.3vh, 0.72rem);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7BA3AB;
+}
+
+.fc-ot-bars {
+  flex: 1 1 240px;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(5px, 1vh, 10px);
+  text-align: left;
+}
+
+.fc-ot-bar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: clamp(0.68rem, 1.5vh, 0.85rem);
+  color: #7BA3AB;
+  margin-bottom: 4px;
+}
+
+.fc-ot-bar-head em { font-style: normal; font-size: 0.72em; opacity: 0.6; }
+.fc-ot-bar-head strong { color: #FFFFFF; }
+
+.fc-ot-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.fc-ot-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #8B5CF6, #22D3EE);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FIT TO VIEWPORT
+   The play screen is exactly one viewport tall and never scrolls, at any zoom
+   level: every wrapper gets min-height:0 so it may shrink below its content,
+   and the webcam — the only elastic block — absorbs what is left.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.fc-page {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  max-height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.fc-header {
+  flex: 0 0 auto;
+  padding: clamp(6px, 1.2vh, 16px) clamp(12px, 2vw, 28px);
+}
+
+.fc-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  width: 100%;
+  padding: clamp(8px, 1.6vh, 24px) clamp(12px, 2vw, 28px);
+  gap: clamp(8px, 1.6vh, 24px);
+}
+
+.fc-game-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch;
+  gap: clamp(10px, 1.8vw, 24px);
+}
+
+/* The card is as tall as the camera beside it, so its content is centred in
+   that space instead of sitting at the top with a hole underneath. The gesture
+   is what the child has to read across the room: it gets the height. */
+.fc-target-card {
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(12px, 2.2vh, 32px) clamp(12px, 1.6vw, 24px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(4px, 0.8vh, 10px);
+}
+
+.fc-target-card > * { flex: 0 0 auto; }
+
+/* The label anchors to the top; everything else stays centred under it. */
+.fc-target-label {
+  position: absolute;
+  top: clamp(12px, 2.2vh, 28px);
+  left: 0;
+  right: 0;
+  margin-bottom: 0;
+  font-size: clamp(0.66rem, 1.5vh, 0.8rem);
+}
+
+.fc-target-emoji {
+  font-size: clamp(4rem, 17vh, 11rem);
+  margin-bottom: clamp(6px, 1.4vh, 18px);
+}
+
+.fc-target-name {
+  font-size: clamp(1.3rem, 3.6vh, 2.4rem);
+  margin-bottom: clamp(4px, 0.9vh, 10px);
+}
+
+.fc-target-hint {
+  font-size: clamp(0.8rem, 1.9vh, 1.05rem);
+}
+
+.fc-sequence-row { margin-top: clamp(8px, 1.8vh, 20px); }
+
+/* The camera fills the column rather than imposing a 4:3 height on it. */
+.fc-webcam-container {
+  aspect-ratio: auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.fc-webcam-video,
+.fc-webcam-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fc-progress-section,
+.fc-match-section { flex: 0 0 auto; }
+
+.fc-target-emoji { font-size: clamp(2.4rem, 7vh, 4.5rem); }
+.fc-target-name { font-size: clamp(1rem, 2.6vh, 1.5rem); }
+.fc-target-hint,
+.fc-target-label { font-size: clamp(0.68rem, 1.5vh, 0.85rem); }
+
+.fc-match-ring-wrapper {
+  width: clamp(90px, 16vh, 140px);
+  height: clamp(90px, 16vh, 140px);
+}
+
+.fc-match-percent { font-size: clamp(1.1rem, 3.2vh, 1.8rem); }

@@ -393,6 +393,73 @@ export async function startSession(learnerId, difficulty, gameName = 'LetterQues
   return { session_id: data.id };
 }
 
+/* ── Learner Progress Index for summary-only sessions ──────────────────────
+   Games that post a summary (every game except Letter Quest) never reach the
+   aiEngine, so this branch used to write a hard-coded `lpi_score: 85` — the
+   same number on every row, in every game, for every child. This rebuilds a
+   real one from what the games actually send.
+
+   Same four components and weights as aiEngine's _calculateLpi, with the
+   reflex share (which needs raw gestures) replaced by a motor-control share
+   the games can supply. Components that a given game does not report are
+   dropped and the weights renormalised over the rest, so the score stays on a
+   0-100 scale instead of being silently dragged down by a missing metric.
+
+   Detail lands in two shapes historically: newer games send a `metrics`
+   object, older ones a JSON string in `notes`. Both are read. Values may be
+   0-1 or 0-100 depending on the game, so each one is normalised. */
+function _toUnit(raw) {
+  const v = typeof raw === 'string' ? parseFloat(raw) : raw;
+  if (!Number.isFinite(v) || v < 0) return null;
+  return Math.min(1, v > 1 ? v / 100 : v);
+}
+
+function _calculateClientLpi(clientPayload, accuracyFraction) {
+  let detail = clientPayload?.metrics && typeof clientPayload.metrics === 'object'
+    ? clientPayload.metrics
+    : {};
+
+  if (!Object.keys(detail).length && typeof clientPayload?.notes === 'string') {
+    try { detail = JSON.parse(clientPayload.notes) || {}; } catch { detail = {}; }
+  }
+
+  const first = (...values) => {
+    for (const v of values) {
+      const u = _toUnit(v);
+      if (u !== null) return u;
+    }
+    return null;
+  };
+
+  /* Response time, when no game-computed speed score exists: 10 s is the point
+     where the component reaches zero, matching aiEngine's scale. */
+  const rtMs = [detail.reactionMs, detail.reactionTimeMs, detail.pinchOnsetMs]
+    .map((v) => (typeof v === 'string' ? parseFloat(v) : v))
+    .find((v) => Number.isFinite(v) && v > 0);
+  const rtUnit = Number.isFinite(rtMs) ? Math.max(0, 1 - rtMs / 10000) : null;
+
+  const components = [
+    // Accuracy — always present: it is the session's own accuracy_score.
+    { weight: 0.40, value: _toUnit(accuracyFraction) },
+    // Speed — a game-computed speed score, else derived from response time.
+    { weight: 0.25, value: first(detail.speedScore) ?? rtUnit },
+    // Movement quality.
+    { weight: 0.20, value: first(detail.smoothness, detail.trajectorySmoothness) },
+    // Motor control: grip, pinch stability, hold steadiness, path efficiency
+    // or consistency — whichever the game measures.
+    { weight: 0.15, value: first(
+        detail.stability, detail.gripScore, detail.pinchStability,
+        detail.consistency, detail.pathEfficiency, detail.grip,
+      ) },
+  ].filter((c) => c.value !== null);
+
+  if (!components.length) return null;
+
+  const totalWeight = components.reduce((sum, c) => sum + c.weight, 0);
+  const score = components.reduce((sum, c) => sum + c.value * c.weight, 0) / totalWeight;
+  return Math.max(0, Math.min(100, Math.round(score * 100)));
+}
+
 export async function endSession(sessionId, gestures, reflexEngineOutput = null, clientPayload = null) {
   const { analyseSession } = await import('./aiEngine.js');
 
@@ -431,14 +498,31 @@ export async function endSession(sessionId, gestures, reflexEngineOutput = null,
       accuracy: actualAccuracyInt,
       total_attempts: total,
       perfect_grabs: perfect,
-      lpi_score: 85,
     };
+
+    /* Null rather than a placeholder when the game reported nothing usable:
+       an empty LPI is information, a fake 85 is not. */
+    const clientLpi = _calculateClientLpi(clientPayload, actualAccuracyScore);
+    if (clientLpi !== null) updatePayload.lpi_score = clientLpi;
     if (clientPayload && clientPayload.notes !== undefined) {
       updatePayload.notes = clientPayload.notes;
+    } else if (clientPayload && clientPayload.metrics && typeof clientPayload.metrics === 'object') {
+      /* Newer games (Trace Find Type, Magic Finger Copy) send their detail as a
+         `metrics` object rather than a `notes` string. There is no metrics
+         column, so it was being dropped on the floor: the session report and
+         the LPI backfill both read `notes`. Persist it in the same shape the
+         other games use. */
+      updatePayload.notes = JSON.stringify(clientPayload.metrics);
     }
 
     await supabase.from('sessions').update(updatePayload).eq('id', sessionId);
-    return { session_id: sessionId, narrative: 'Session completed successfully.', lpi_score: 85, scenario: 'Completed Session', reflex_scores: [], recommendations: [], metrics: {} };
+    return {
+      session_id: sessionId,
+      narrative: 'Session completed successfully.',
+      lpi_score: clientLpi,
+      scenario: 'Completed Session',
+      reflex_scores: [], recommendations: [], metrics: {},
+    };
   }
 
   const total    = gestures.length;
