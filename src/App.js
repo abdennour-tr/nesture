@@ -30,6 +30,14 @@ import FingerCopyDifficulty   from './pages/FingerCopyDifficulty';
 import FingerCopyGame         from './pages/FingerCopyGame';
 import TraceTypeDifficulty    from './pages/TraceTypeDifficulty';
 import TraceTypeGame          from './pages/TraceTypeGame';
+import FingerPianoDifficulty  from './pages/FingerPianoDifficulty';
+import FingerPianoGame        from './pages/FingerPianoGame';
+import PinchCoinDifficulty    from './pages/PinchCoinDifficulty';
+import PinchCoinGame          from './pages/PinchCoinGame';
+import LadybugDifficulty      from './pages/LadybugDifficulty';
+import LadybugGame            from './pages/LadybugGame';
+import BubbleDifficulty       from './pages/BubbleDifficulty';
+import BubbleGame             from './pages/BubbleGame';
 import PricingPage            from './pages/PricingPage';
 
 import ErrorBoundary from './components/shared/ErrorBoundary';
@@ -293,6 +301,30 @@ export default function App() {
           } />
           <Route path="/play/trace-type-game" element={
             <ProtectedRoute allowedRoles={['learner']}><TraceTypeGame /></ProtectedRoute>
+          } />
+          <Route path="/play/finger-piano-difficulty" element={
+            <ProtectedRoute allowedRoles={['learner']}><FingerPianoDifficulty /></ProtectedRoute>
+          } />
+          <Route path="/play/finger-piano-game" element={
+            <ProtectedRoute allowedRoles={['learner']}><FingerPianoGame /></ProtectedRoute>
+          } />
+          <Route path="/play/pinch-coin-difficulty" element={
+            <ProtectedRoute allowedRoles={['learner']}><PinchCoinDifficulty /></ProtectedRoute>
+          } />
+          <Route path="/play/pinch-coin-game" element={
+            <ProtectedRoute allowedRoles={['learner']}><PinchCoinGame /></ProtectedRoute>
+          } />
+          <Route path="/play/ladybug-difficulty" element={
+            <ProtectedRoute allowedRoles={['learner']}><LadybugDifficulty /></ProtectedRoute>
+          } />
+          <Route path="/play/ladybug-game" element={
+            <ProtectedRoute allowedRoles={['learner']}><LadybugGame /></ProtectedRoute>
+          } />
+          <Route path="/play/bubble-difficulty" element={
+            <ProtectedRoute allowedRoles={['learner']}><BubbleDifficulty /></ProtectedRoute>
+          } />
+          <Route path="/play/bubble-game" element={
+            <ProtectedRoute allowedRoles={['learner']}><BubbleGame /></ProtectedRoute>
           } />
           <Route path="/play/results/:sessionId" element={
             <ProtectedRoute allowedRoles={['learner']}><SessionResults /></ProtectedRoute>

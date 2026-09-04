@@ -127,7 +127,7 @@ export function detectMidlineCrossing(startX, endX) {
 }
 
 // ── Main hook ─────────────────────────────────────────────────────────────────
-export default function useHandTracking(videoRef, canvasRef, enabled = true, pauseProcessing = false) {
+export default function useHandTracking(videoRef, canvasRef, enabled = true, pauseProcessing = false, maxHands = 2) {
   const [landmarks,      setLandmarks]      = useState(null);  // main détectée (1re)
   const [multiHandData,  setMultiHandData]  = useState(null);  // { left, right, all }
   const [isTracking,     setIsTracking]     = useState(false);
@@ -240,7 +240,7 @@ export default function useHandTracking(videoRef, canvasRef, enabled = true, pau
         });
 
         hands.setOptions({
-          maxNumHands: 2,           // ← les deux mains pour le moteur de réflexes
+          maxNumHands: maxHands,
           modelComplexity: 1,
           minDetectionConfidence: 0.7,
           minTrackingConfidence: 0.5,

@@ -35,9 +35,17 @@ const POINTS_PER_STEP    = 10;
 
 // ── Letters per level ──────────────────────────────────────────────────────
 const LEVEL_LETTERS = {
-  1: 'ABCDEFGHI'.split(''),
-  2: 'JKLMNOPQR'.split(''),
-  3: 'STUVWXYZ'.split(''),
+  1: 'LVXTIFEH'.split(''), // Simple straight lines, fewer points
+  2: 'AMNKOPUYZCD'.split(''), // Moderate complexity, simple curves or angled lines
+  3: 'QSRGJWB'.split(''), // High complexity, multiple curves or strokes
+};
+
+// Explicitly mark waypoint connections that are "jumps" (i.e. moving to a new stroke)
+// where a segment line should NOT be drawn.
+const BAD_JUMPS = {
+  A: [3], // Jump from bottom right leg to the start of the crossbar
+  Q: [9], // Jump from the O ring to the start of the tail
+  X: [2], // Jump from bottom right of first stroke to top right of second stroke
 };
 
 // ── Encouraging messages pool ──────────────────────────────────────────────
@@ -76,26 +84,24 @@ const LETTER_DATA = {
   },
   B: {
     waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },
       { x: 70, y: 40 },   { x: 190, y: 60 },   { x: 190, y: 130 },
       { x: 70, y: 150 },  { x: 210, y: 170 },  { x: 210, y: 240 },
-      { x: 70, y: 260 },
+      { x: 70, y: 260 },  { x: 70, y: 40 },
     ],
     path: 'M70,40 L70,260 M70,40 Q230,40 230,100 Q230,150 70,150 Q240,150 240,210 Q240,260 70,260',
   },
   C: {
     waypoints: [
-      { x: 230, y: 80 },   { x: 150, y: 40 },   { x: 70, y: 100 },
-      { x: 60, y: 150 },   { x: 70, y: 210 },   { x: 150, y: 260 },
+      { x: 230, y: 80 },   { x: 150, y: 55 },   { x: 70, y: 100 },
+      { x: 60, y: 150 },   { x: 70, y: 210 },   { x: 150, y: 245 },
       { x: 230, y: 230 },
     ],
     path: 'M230,80 Q150,20 70,80 Q40,150 70,220 Q150,280 230,230',
   },
   D: {
     waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 70, y: 40 },   { x: 180, y: 70 },   { x: 230, y: 150 },
-      { x: 180, y: 230 },  { x: 70, y: 260 },
+      { x: 70, y: 40 },   { x: 215, y: 70 },   { x: 260, y: 150 },
+      { x: 215, y: 230 },  { x: 70, y: 260 },   { x: 70, y: 40 },
     ],
     path: 'M70,40 L70,260 M70,40 Q260,40 260,150 Q260,260 70,260',
   },
@@ -193,7 +199,7 @@ const LETTER_DATA = {
     waypoints: [
       { x: 150, y: 40 },  { x: 70, y: 80 },   { x: 50, y: 150 },
       { x: 70, y: 220 },  { x: 150, y: 260 },  { x: 230, y: 220 },
-      { x: 250, y: 150 }, { x: 230, y: 80 },
+      { x: 250, y: 150 }, { x: 230, y: 80 },   { x: 150, y: 40 },
       { x: 200, y: 210 }, { x: 260, y: 270 },
     ],
     path: 'M150,40 Q50,40 50,150 Q50,260 150,260 Q250,260 250,150 Q250,40 150,40 Z M200,210 L260,270',
@@ -368,7 +374,7 @@ export default function TraceTypeGame() {
     landmarks,
     isTracking,
     error: trackingError,
-  } = useHandTracking(videoRef, canvasRef, trackingEnabled, pauseProcessing);
+  } = useHandTracking(videoRef, canvasRef, trackingEnabled, pauseProcessing, 1);
 
   // ── TTS ─────────────────────────────────────────────────────────────────
   const { speak } = useTextToSpeech(true);
@@ -916,129 +922,83 @@ export default function TraceTypeGame() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.4 }}
+          transition={{ duration: 0.2 }}
           style={{
             position: 'fixed',
             inset: 0,
             zIndex: 200,
-            background: 'rgba(8, 10, 22, 0.75)',
-            backdropFilter: 'blur(8px)',
-            WebkitBackdropFilter: 'blur(8px)',
+            background: 'rgba(8, 10, 22, 0.9)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
           }}
         >
-          {/* Glassmorphic Card */}
+          {/* Card */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.92, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -10 }}
-            transition={{ type: 'spring', stiffness: 200, damping: 22, delay: 0.1 }}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ type: 'tween', duration: 0.2 }}
             style={{
-              background: 'linear-gradient(135deg, rgba(30, 32, 55, 0.85), rgba(20, 22, 42, 0.9))',
+              background: '#151726',
               border: '1px solid rgba(99, 102, 241, 0.2)',
               borderRadius: 24,
-              padding: '48px 56px',
+              padding: '40px 48px',
               maxWidth: 520,
               width: '90%',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: 28,
-              position: 'relative',
-              overflow: 'hidden',
-              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.5), 0 0 40px rgba(99, 102, 241, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
+              gap: 24,
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
             }}
           >
-            {/* Subtle gradient shimmer at top */}
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              height: 1,
-              background: 'linear-gradient(90deg, transparent, rgba(139, 142, 255, 0.4), transparent)',
-            }} />
-
-            {/* Message — above the hand */}
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              style={{ textAlign: 'center', zIndex: 2 }}
-            >
+            {/* Message */}
+            <div style={{ textAlign: 'center' }}>
               <div style={{
-                fontSize: '1.5rem',
+                fontSize: '1.4rem',
                 fontWeight: 700,
                 color: '#fff',
-                letterSpacing: '0.01em',
-                lineHeight: 1.4,
                 marginBottom: 4,
               }}>
-                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '1.3rem' }}>«</span>
+                <span style={{ color: 'rgba(255,255,255,0.4)' }}>«</span>
                 {' '}Show one of your hands{' '}
               </div>
               <div style={{
-                fontSize: '1.5rem',
+                fontSize: '1.4rem',
                 fontWeight: 700,
                 color: '#fff',
-                letterSpacing: '0.01em',
-                lineHeight: 1.4,
               }}>
                 to start playing{' '}
-                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '1.3rem' }}>»</span>
+                <span style={{ color: 'rgba(255,255,255,0.4)' }}>»</span>
               </div>
-            </motion.div>
+            </div>
 
-            {/* Hand Illustration Container */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.4, type: 'spring', stiffness: 180, damping: 18 }}
+            {/* Hand Illustration Container - Simplified */}
+            <div
               style={{
                 position: 'relative',
-                width: 220,
-                height: 280,
+                width: 180,
+                height: 220,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
             >
-              {/* Pulsing glow behind hand */}
+              {/* Simple pulsing background instead of blurred radial gradient */}
               <motion.div
-                animate={{
-                  scale: [1, 1.12, 1],
-                  opacity: [0.2, 0.45, 0.2],
-                }}
-                transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+                animate={{ opacity: [0.1, 0.3, 0.1] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
                 style={{
                   position: 'absolute',
-                  width: 240,
-                  height: 280,
+                  width: '100%',
+                  height: '100%',
                   borderRadius: '50%',
-                  background: 'radial-gradient(ellipse, rgba(99, 102, 241, 0.25) 0%, rgba(99, 102, 241, 0.08) 40%, transparent 70%)',
-                  filter: 'blur(10px)',
+                  background: '#6366f1',
                 }}
               />
 
-              {/* Scanning line */}
-              <motion.div
-                animate={{ top: ['10%', '85%', '10%'] }}
-                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                style={{
-                  position: 'absolute',
-                  left: '10%',
-                  right: '10%',
-                  height: 2,
-                  background: 'linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.5), rgba(139, 142, 255, 0.7), rgba(99, 102, 241, 0.5), transparent)',
-                  borderRadius: 1,
-                  boxShadow: '0 0 12px rgba(99, 102, 241, 0.4)',
-                  zIndex: 5,
-                }}
-              />
-
-              {/* High-fidelity wireframe hand image (mix-blend-mode screen to drop dark background) */}
+              {/* Static Hand Image without expensive filters */}
               <img 
                 src="/hand-wireframe.png" 
                 alt="Wireframe Hand"
@@ -1048,83 +1008,57 @@ export default function TraceTypeGame() {
                   objectFit: 'contain',
                   position: 'relative',
                   zIndex: 2,
-                  mixBlendMode: 'screen',
-                  filter: 'drop-shadow(0 0 12px rgba(139, 142, 255, 0.4))'
                 }}
               />
-            </motion.div>
+            </div>
 
-            {/* Loading dots */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.6 }}
-              style={{ display: 'flex', gap: 10, marginTop: -8 }}
-            >
+            {/* Simple Loading text/dots */}
+            <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
               {[0, 1, 2].map((i) => (
                 <motion.div
                   key={i}
-                  animate={{
-                    scale: [1, 1.4, 1],
-                    opacity: [0.3, 0.9, 0.3],
-                  }}
+                  animate={{ opacity: [0.3, 1, 0.3] }}
                   transition={{
-                    duration: 1.4,
+                    duration: 1,
                     repeat: Infinity,
-                    delay: i * 0.25,
-                    ease: 'easeInOut',
+                    delay: i * 0.2,
                   }}
                   style={{
-                    width: 7,
-                    height: 7,
+                    width: 8,
+                    height: 8,
                     borderRadius: '50%',
-                    background: 'rgba(139, 142, 255, 0.8)',
+                    background: '#8b8eff',
                   }}
                 />
               ))}
-            </motion.div>
+            </div>
 
             {/* MediaPipe Badge */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.8 }}
+            <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                padding: '6px 14px',
+                padding: '8px 16px',
                 borderRadius: 20,
-                background: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
               }}
             >
               <div style={{
-                width: 7,
-                height: 7,
+                width: 8,
+                height: 8,
                 borderRadius: '50%',
                 background: isTracking ? '#10B981' : '#F59E0B',
-                boxShadow: isTracking ? '0 0 8px rgba(16, 185, 129, 0.6)' : '0 0 8px rgba(245, 158, 11, 0.6)',
               }} />
               <span style={{
-                fontSize: '0.72rem',
-                color: 'rgba(255, 255, 255, 0.45)',
+                fontSize: '0.8rem',
+                color: 'rgba(255, 255, 255, 0.7)',
                 fontWeight: 500,
-                letterSpacing: '0.04em',
               }}>
-                {isTracking ? 'MediaPipe™ Hand Tracking Active' : 'Initializing MediaPipe™...'}
+                {isTracking ? 'MediaPipe™ Active' : 'Initializing Tracking...'}
               </span>
-            </motion.div>
-
-            {/* Bottom shimmer */}
-            <div style={{
-              position: 'absolute',
-              bottom: 0,
-              left: 0,
-              right: 0,
-              height: 1,
-              background: 'linear-gradient(90deg, transparent, rgba(139, 142, 255, 0.2), transparent)',
-            }} />
+            </div>
           </motion.div>
         </motion.div>
       )}
@@ -1490,22 +1424,85 @@ export default function TraceTypeGame() {
               >
                 <path d={letterData.path} className="tt-trace-guide-path" />
                 <path d={letterData.path} className="tt-trace-guide-outline" />
-                {traceProgress > 0 && (
-                  <path
-                    d={letterData.path}
-                    className="tt-trace-progress-path"
-                    pathLength="1"
-                    strokeDasharray="1"
-                    strokeDashoffset={1 - traceProgress}
-                  />
-                )}
+                {reachedWaypoints.map((wpIndex, i) => {
+                  if (i === 0) return null;
+                  const prevWp = letterData.waypoints[reachedWaypoints[i - 1]];
+                  const currWp = letterData.waypoints[wpIndex];
+                  
+                  const isJump = BAD_JUMPS[currentLetter]?.includes(i);
+                  
+                  return (
+                    <g key={`segment-${i}`}>
+                      {!isJump && (
+                        <>
+                          {/* 1. The Filled Segment with initial glow burst */}
+                          <motion.line
+                            x1={prevWp.x}
+                            y1={prevWp.y}
+                            x2={currWp.x}
+                            y2={currWp.y}
+                            className="tt-trace-segment-path"
+                            initial={{ pathLength: 0, filter: 'drop-shadow(0 0 25px #fff)' }}
+                            animate={{ pathLength: 1, filter: 'drop-shadow(0 0 12px var(--tt-indigo-glow))' }}
+                            transition={{ duration: 0.35, ease: 'easeOut' }}
+                          />
+                          
+                          {/* 2. Traveling Flare that moves along the segment */}
+                          <motion.circle
+                            r={15}
+                            fill="#fff"
+                            initial={{ cx: prevWp.x, cy: prevWp.y, opacity: 1, scale: 0.5 }}
+                            animate={{ cx: currWp.x, cy: currWp.y, opacity: [1, 1, 0], scale: [0.5, 1.5, 2] }}
+                            transition={{ duration: 0.4, ease: 'easeOut' }}
+                            style={{ filter: 'blur(3px)' }}
+                          />
+                        </>
+                      )}
+
+                      {/* 3. Intense Sparkle Burst at the destination */}
+                      {[...Array(12)].map((_, sparkIdx) => {
+                        const angle = (Math.PI * 2 * sparkIdx) / 12 + (Math.random() * 0.2);
+                        const dist = 30 + Math.random() * 40;
+                        return (
+                          <motion.circle
+                            key={`sparkle-${i}-${sparkIdx}`}
+                            r={Math.random() * 4 + 2}
+                            fill={sparkIdx % 2 === 0 ? '#ffffff' : '#06b6d4'}
+                            initial={{ cx: currWp.x, cy: currWp.y, opacity: 0, scale: 0 }}
+                            animate={{ 
+                              cx: currWp.x + Math.cos(angle) * dist, 
+                              cy: currWp.y + Math.sin(angle) * dist, 
+                              opacity: [0, 1, 0],
+                              scale: [0, 1.5, 0]
+                            }}
+                            transition={{ duration: 0.5 + Math.random() * 0.4, ease: 'easeOut', delay: isJump ? 0 : 0.2 }}
+                            style={{ filter: 'blur(1px)' }}
+                          />
+                        );
+                      })}
+                    </g>
+                  );
+                })}
                 {letterData.waypoints.map((wp, i) => {
                   const isReached = reachedWaypoints.includes(i);
                   const isActive = i === reachedWaypoints.length;
+                  
+                  // Find the lowest index at this coordinate that has NOT been reached yet
+                  const nextIndexAtCoord = letterData.waypoints.findIndex(
+                    (w, idx) => w.x === wp.x && w.y === wp.y && !reachedWaypoints.includes(idx)
+                  );
+                  
+                  // Only show text if this is the next unreached waypoint at this coordinate
+                  const shouldShowText = !isReached && nextIndexAtCoord === i;
+
                   return (
                     <g key={i} className="tt-trace-waypoint">
                       <circle cx={wp.x} cy={wp.y} r={isActive ? 16 : 13} className={`tt-trace-waypoint-circle ${isReached ? 'reached' : ''} ${isActive ? 'active' : ''}`} />
-                      <text x={wp.x} y={wp.y} className={`tt-trace-waypoint-number ${isReached ? 'reached' : ''} ${isActive ? 'active' : ''}`}>{i + 1}</text>
+                      {shouldShowText && (
+                        <text x={wp.x} y={wp.y} className={`tt-trace-waypoint-number ${isReached ? 'reached' : ''} ${isActive ? 'active' : ''}`}>
+                          {i + 1}
+                        </text>
+                      )}
                     </g>
                   );
                 })}

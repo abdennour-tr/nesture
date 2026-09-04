@@ -1,15 +1,24 @@
 /**
- * TraceTypeDifficulty.jsx
- * Level selection screen for Trace → Find → Type game.
+ * FingerPianoDifficulty.jsx
+ * Level selection screen for Finger Piano game.
  *
- * Presents 3 difficulty levels with letter previews.
- * Navigates to /play/trace-type-game?level=<1|2|3> on selection.
+ * Presents 3 difficulty levels with finger previews.
+ * Navigates to /play/finger-piano-game?level=<1|2|3> on selection.
  */
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Play } from 'lucide-react';
-import '../styles/TraceTypeGame.css';
+import '../styles/FingerPianoGame.css';
+
+// ── Finger names for preview ───────────────────────────────────────────────
+const FINGER_NAMES = {
+  thumb:  { emoji: '👍', name: 'Thumb' },
+  index:  { emoji: '👆', name: 'Index' },
+  middle: { emoji: '🖕', name: 'Middle' },
+  ring:   { emoji: '💍', name: 'Ring' },
+  little: { emoji: '🤙', name: 'Little' },
+};
 
 // ── Level card metadata ────────────────────────────────────────────────────
 const LEVEL_CARDS = [
@@ -17,31 +26,31 @@ const LEVEL_CARDS = [
     level: 1,
     emoji: '🌱',
     name: 'Beginner',
-    desc: 'Start with basic letters! Larger tracing guides and a simplified keyboard to build confidence.',
-    color: '#22d3ee', // Cyan glowing
-    gradient: 'linear-gradient(135deg, rgba(34, 211, 238, 0.2), rgba(34, 211, 238, 0))',
-    borderColor: 'rgba(34, 211, 238, 0.5)',
-    letters: 'LVXTIFEH'.split(''),
+    desc: 'Learn the basics! Use 3 fingers at a slow pace with large, colorful keys and lots of guidance.',
+    color: '#10B981',
+    gradient: 'linear-gradient(135deg, #10B981, #059669)',
+    borderColor: 'rgba(16, 185, 129, 0.5)',
+    fingers: ['thumb', 'index', 'middle'],
   },
   {
     level: 2,
     emoji: '⚡',
     name: 'Intermediate',
-    desc: 'Take on more complex letters with standard tracing and a full QWERTY keyboard.',
-    color: '#818cf8', // Indigo glowing
-    gradient: 'linear-gradient(135deg, rgba(129, 140, 248, 0.2), rgba(129, 140, 248, 0))',
-    borderColor: 'rgba(129, 140, 248, 0.5)',
-    letters: 'AMNKOPUYZCD'.split(''),
+    desc: 'Use all 5 fingers at medium speed! Keys change faster and some visual cues are hidden.',
+    color: '#E8841A',
+    gradient: 'linear-gradient(135deg, #E8841A, #D97706)',
+    borderColor: 'rgba(232, 132, 26, 0.5)',
+    fingers: ['thumb', 'index', 'middle', 'ring', 'little'],
   },
   {
     level: 3,
     emoji: '🔥',
     name: 'Expert',
-    desc: 'Master the final letters with precision tracing, timed challenges, and bonus points!',
-    color: '#f43f5e', // Rose glowing
-    gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.2), rgba(244, 63, 94, 0))',
-    borderColor: 'rgba(244, 63, 94, 0.5)',
-    letters: 'QSRGJWB'.split(''),
+    desc: 'Fast sequences and rhythm challenges! Master all fingers with minimal cues and time bonuses.',
+    color: '#EF4444',
+    gradient: 'linear-gradient(135deg, #EF4444, #DC2626)',
+    borderColor: 'rgba(239, 68, 68, 0.5)',
+    fingers: ['thumb', 'index', 'middle', 'ring', 'little'],
   },
 ];
 
@@ -65,18 +74,18 @@ const cardVariants = {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-export default function TraceTypeDifficulty() {
+export default function FingerPianoDifficulty() {
   const navigate = useNavigate();
 
   const handleSelectLevel = (level) => {
-    navigate(`/play/trace-type-game?level=${level}`);
+    navigate(`/play/finger-piano-game?level=${level}`);
   };
 
   return (
-    <div className="tt-difficulty-page">
+    <div className="fp-difficulty-page">
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div className="tt-difficulty-header">
-        <button className="tt-difficulty-back" onClick={() => navigate('/play')}>
+      <div className="fp-difficulty-header">
+        <button className="fp-difficulty-back" onClick={() => navigate('/play')}>
           <ArrowLeft size={18} />
           Back to Games
         </button>
@@ -86,16 +95,16 @@ export default function TraceTypeDifficulty() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <h1 className="tt-difficulty-title">✏️ Trace → Find → Type</h1>
-          <p className="tt-difficulty-subtitle">
-            Learn letters in 3 fun steps — trace, find on the keyboard, then type!
+          <h1 className="fp-difficulty-title">🎹 Finger Piano</h1>
+          <p className="fp-difficulty-subtitle">
+            Choose your challenge level and play the piano with your fingers!
           </p>
         </motion.div>
       </div>
 
       {/* ── Level Cards ────────────────────────────────────────────────── */}
       <motion.div
-        className="tt-difficulty-grid"
+        className="fp-difficulty-grid"
         variants={containerVariants}
         initial="hidden"
         animate="visible"
@@ -103,7 +112,7 @@ export default function TraceTypeDifficulty() {
         {LEVEL_CARDS.map((card) => (
           <motion.div
             key={card.level}
-            className="tt-level-card"
+            className="fp-level-card"
             variants={cardVariants}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
@@ -123,24 +132,24 @@ export default function TraceTypeDifficulty() {
               }}
             />
 
-            <div className="tt-level-emoji">{card.emoji}</div>
-            <div className="tt-level-name">
+            <div className="fp-level-emoji">{card.emoji}</div>
+            <div className="fp-level-name">
               Level {card.level} — {card.name}
             </div>
-            <div className="tt-level-desc">{card.desc}</div>
+            <div className="fp-level-desc">{card.desc}</div>
 
-            {/* ── Letter preview tags ─────────────────────────────────── */}
-            <div className="tt-level-letters">
-              {card.letters.map((letter) => (
-                <span key={letter} className="tt-level-letter-tag">
-                  {letter}
+            {/* ── Finger preview tags ──────────────────────────────────── */}
+            <div className="fp-level-fingers">
+              {card.fingers.map((f) => (
+                <span key={f} className="fp-level-finger-tag">
+                  {FINGER_NAMES[f]?.emoji} {FINGER_NAMES[f]?.name}
                 </span>
               ))}
             </div>
 
             {/* ── Play button ──────────────────────────────────────────── */}
             <button
-              className="tt-level-play-btn"
+              className="fp-level-play-btn"
               style={{ background: card.gradient }}
               onClick={(e) => {
                 e.stopPropagation();

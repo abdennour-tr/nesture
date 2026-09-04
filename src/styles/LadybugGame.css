@@ -1,0 +1,1007 @@
+/**
+ * LadybugGame.css
+ * Premium styling for "Follow the Ladybug".
+ *
+ * Design notes:
+ *  - The nature scene is an inline SVG data-URI: sharp at any resolution,
+ *    no network request, no external asset to ship.
+ *  - Everything that moves per-frame (ladybug, pointer) is driven from JS via
+ *    transforms/canvas; CSS animations here are decorative only and are all
+ *    disabled under prefers-reduced-motion.
+ */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOKENS
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lb-page {
+  --lb-red:      #E53E3E;
+  --lb-red-dk:   #B32424;
+  --lb-green:    #38A169;
+  --lb-green-dk: #2F7F3C;
+  --lb-gold:     #F6E05E;
+  --lb-amber:    #F59E0B;
+  --lb-ink:      #1A202C;
+  --lb-glass:    rgba(12, 22, 18, 0.46);
+  --lb-glass-br: rgba(255, 255, 255, 0.22);
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #7FCB74;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER — glassmorphism over the scene
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lb-header {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  background: var(--lb-glass);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border-bottom: 1px solid var(--lb-glass-br);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+
+.lb-header-left,
+.lb-header-center,
+.lb-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.lb-header-center { flex: 1; justify-content: center; }
+
+.lb-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.16);
+  color: #FFFFFF;
+  cursor: pointer;
+  transition: transform 0.16s cubic-bezier(0.34, 1.56, 0.64, 1),
+              background 0.16s ease, box-shadow 0.16s ease;
+}
+.lb-icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
+}
+.lb-icon-btn:active:not(:disabled) { transform: translateY(0) scale(0.96); }
+.lb-icon-btn:disabled { opacity: 0.42; cursor: not-allowed; }
+.lb-icon-btn:focus-visible { outline: 3px solid var(--lb-gold); outline-offset: 2px; }
+
+.lb-home-btn  { background: rgba(255, 255, 255, 0.92); color: var(--lb-green-dk); }
+.lb-home-btn:hover { background: #FFFFFF; }
+.lb-pause-btn { background: rgba(246, 224, 94, 0.92); color: #7A5B00; border-color: rgba(255,255,255,0.5); }
+.lb-pause-btn:hover:not(:disabled) { background: var(--lb-gold); }
+
+.lb-level-chip {
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+}
+.lb-level-easy   { background: rgba(56, 161, 105, 0.85); }
+.lb-level-medium { background: rgba(221, 107, 32, 0.85); }
+.lb-level-hard   { background: rgba(229, 62, 62, 0.85); }
+
+/* ── Stat pills ── */
+.lb-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.93);
+  color: var(--lb-ink);
+  font-weight: 800;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+.lb-stat-ico { color: var(--lb-amber); flex-shrink: 0; }
+.lb-stat-score .lb-stat-ico { color: #EAB308; }
+.lb-stat-score.is-earning .lb-stat-val { animation: lbScoreBump 0.42s ease-out; }
+
+@keyframes lbScoreBump {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.16); color: var(--lb-amber); }
+  100% { transform: scale(1); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   STAGE + FIELD
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lb-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 14px 18px 18px;
+  gap: 12px;
+  position: relative;
+  z-index: 5;
+}
+
+.lb-field {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: 26px;
+  overflow: hidden;
+  cursor: crosshair;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20560%22%20preserveAspectRatio%3D%22xMidYMid%20slice%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22sky%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%235FC4EC%22%2F%3E%3Cstop%20offset%3D%2245%25%22%20stop-color%3D%22%2393DAF3%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23C7EDF9%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22hillFar%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%238FD48A%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%236FBF74%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22hillMid%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%237FCB74%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%235EAF5E%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22grass%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%238AD173%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2363B357%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22trail%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23E3CBA0%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23D2B487%22%2F%3E%3C%2FlinearGradient%3E%3CradialGradient%20id%3D%22sun%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FFF9D0%22%20stop-opacity%3D%22.95%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23FFF3B0%22%20stop-opacity%3D%220%22%2F%3E%3C%2FradialGradient%3E%3ClinearGradient%20id%3D%22trunk%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%220%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%239A6B45%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%237A5133%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%221000%22%20height%3D%22560%22%20fill%3D%22url(%23sky)%22%2F%3E%3Ccircle%20cx%3D%22835%22%20cy%3D%2280%22%20r%3D%22150%22%20fill%3D%22url(%23sun)%22%2F%3E%3Cg%20fill%3D%22%23FFFFFF%22%20opacity%3D%22.92%22%3E%3Cg%3E%3Cellipse%20cx%3D%22150%22%20cy%3D%2292%22%20rx%3D%2258%22%20ry%3D%2227%22%2F%3E%3Cellipse%20cx%3D%22196%22%20cy%3D%2286%22%20rx%3D%2242%22%20ry%3D%2232%22%2F%3E%3Cellipse%20cx%3D%22108%22%20cy%3D%2298%22%20rx%3D%2238%22%20ry%3D%2221%22%2F%3E%3C%2Fg%3E%3Cg%20opacity%3D%22.8%22%3E%3Cellipse%20cx%3D%22470%22%20cy%3D%2262%22%20rx%3D%2250%22%20ry%3D%2223%22%2F%3E%3Cellipse%20cx%3D%22508%22%20cy%3D%2258%22%20rx%3D%2236%22%20ry%3D%2227%22%2F%3E%3Cellipse%20cx%3D%22434%22%20cy%3D%2268%22%20rx%3D%2232%22%20ry%3D%2218%22%2F%3E%3C%2Fg%3E%3Cg%20opacity%3D%22.7%22%3E%3Cellipse%20cx%3D%22790%22%20cy%3D%22118%22%20rx%3D%2246%22%20ry%3D%2221%22%2F%3E%3Cellipse%20cx%3D%22824%22%20cy%3D%22112%22%20rx%3D%2233%22%20ry%3D%2225%22%2F%3E%3C%2Fg%3E%3Cg%20opacity%3D%22.55%22%3E%3Cellipse%20cx%3D%22640%22%20cy%3D%22150%22%20rx%3D%2240%22%20ry%3D%2217%22%2F%3E%3Cellipse%20cx%3D%22670%22%20cy%3D%22146%22%20rx%3D%2228%22%20ry%3D%2220%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3Cpath%20d%3D%22M0%20300%20Q120%20252%20250%20282%20T520%20268%20T780%20288%20T1000%20262%20L1000%20560%20L0%20560%20Z%22%20fill%3D%22url(%23hillFar)%22%2F%3E%3Cg%3E%3Cg%20transform%3D%22translate(70%2C250)%22%3E%3Crect%20x%3D%22-6%22%20y%3D%2214%22%20width%3D%2212%22%20height%3D%2246%22%20rx%3D%225%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%224%22%20r%3D%2230%22%20fill%3D%22%235CAE5C%22%2F%3E%3Ccircle%20cx%3D%22-20%22%20cy%3D%2218%22%20r%3D%2222%22%20fill%3D%22%2369BC66%22%2F%3E%3Ccircle%20cx%3D%2220%22%20cy%3D%2218%22%20r%3D%2222%22%20fill%3D%22%234F9E52%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(215%2C262)%22%3E%3Crect%20x%3D%22-5%22%20y%3D%2212%22%20width%3D%2210%22%20height%3D%2240%22%20rx%3D%224%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%222%22%20r%3D%2226%22%20fill%3D%22%2363B663%22%2F%3E%3Ccircle%20cx%3D%22-17%22%20cy%3D%2215%22%20r%3D%2219%22%20fill%3D%22%2371C36E%22%2F%3E%3Ccircle%20cx%3D%2217%22%20cy%3D%2215%22%20r%3D%2219%22%20fill%3D%22%2354A557%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(392%2C248)%22%3E%3Crect%20x%3D%22-6%22%20y%3D%2216%22%20width%3D%2213%22%20height%3D%2250%22%20rx%3D%225%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%222%22%20r%3D%2233%22%20fill%3D%22%2359B159%22%2F%3E%3Ccircle%20cx%3D%22-23%22%20cy%3D%2219%22%20r%3D%2224%22%20fill%3D%22%2368BF66%22%2F%3E%3Ccircle%20cx%3D%2223%22%20cy%3D%2219%22%20r%3D%2224%22%20fill%3D%22%234B9B4F%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(560%2C266)%22%3E%3Crect%20x%3D%22-5%22%20y%3D%2212%22%20width%3D%2210%22%20height%3D%2238%22%20rx%3D%224%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%222%22%20r%3D%2225%22%20fill%3D%22%2365B865%22%2F%3E%3Ccircle%20cx%3D%22-16%22%20cy%3D%2214%22%20r%3D%2218%22%20fill%3D%22%2373C570%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2214%22%20r%3D%2218%22%20fill%3D%22%2356A758%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(742%2C254)%22%3E%3Crect%20x%3D%22-6%22%20y%3D%2214%22%20width%3D%2212%22%20height%3D%2246%22%20rx%3D%225%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%223%22%20r%3D%2230%22%20fill%3D%22%235DAF5D%22%2F%3E%3Ccircle%20cx%3D%22-20%22%20cy%3D%2217%22%20r%3D%2222%22%20fill%3D%22%236BBD68%22%2F%3E%3Ccircle%20cx%3D%2220%22%20cy%3D%2217%22%20r%3D%2222%22%20fill%3D%22%234F9E52%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(905%2C244)%22%3E%3Crect%20x%3D%22-6%22%20y%3D%2217%22%20width%3D%2213%22%20height%3D%2252%22%20rx%3D%225%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%220%22%20r%3D%2234%22%20fill%3D%22%2357AF57%22%2F%3E%3Ccircle%20cx%3D%22-23%22%20cy%3D%2218%22%20r%3D%2225%22%20fill%3D%22%2366BD64%22%2F%3E%3Ccircle%20cx%3D%2223%22%20cy%3D%2218%22%20r%3D%2225%22%20fill%3D%22%234A9A4E%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3Cpath%20d%3D%22M0%20352%20Q160%20318%20330%20344%20T650%20332%20T1000%20350%20L1000%20560%20L0%20560%20Z%22%20fill%3D%22url(%23hillMid)%22%2F%3E%3Cpath%20d%3D%22M0%20408%20Q200%20372%20420%20400%20T760%20388%20T1000%20404%20L1000%20560%20L0%20560%20Z%22%20fill%3D%22url(%23grass)%22%2F%3E%3Cpath%20d%3D%22M985%20400%20C820%20412%20700%20448%20560%20470%20C420%20492%20250%20500%2090%20560%20L360%20560%20C470%20508%20610%20492%20730%20470%20C840%20450%20930%20428%201000%20416%20Z%22%20fill%3D%22url(%23trail)%22%20opacity%3D%22.9%22%2F%3E%3Cg%20opacity%3D%22.35%22%20stroke%3D%22%233F8C46%22%20stroke-width%3D%223%22%20stroke-linecap%3D%22round%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M60%20470%20l6%20-22%20M74%20476%20l3%20-26%20M88%20470%20l-5%20-22%22%2F%3E%3Cpath%20d%3D%22M300%20500%20l6%20-24%20M316%20506%20l2%20-28%20M330%20500%20l-6%20-24%22%2F%3E%3Cpath%20d%3D%22M620%20520%20l6%20-22%20M636%20526%20l2%20-26%20M650%20520%20l-6%20-22%22%2F%3E%3Cpath%20d%3D%22M860%20470%20l6%20-22%20M876%20476%20l2%20-26%20M890%20470%20l-6%20-22%22%2F%3E%3C%2Fg%3E%3Cg%3E%3Cg%20transform%3D%22translate(48%2C486)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-13%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%22-12%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20r%3D%226%22%20fill%3D%22%23FFE066%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(140%2C530)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-12%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%22-11%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20r%3D%225.5%22%20fill%3D%22%23F59E0B%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(258%2C466)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-12%22%20r%3D%226.5%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%22-11%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20r%3D%225.5%22%20fill%3D%22%23FFE066%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(470%2C540)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-13%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%22-12%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20r%3D%226%22%20fill%3D%22%23FFE066%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(700%2C516)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-12%22%20r%3D%226.5%22%20fill%3D%22%23A8D8F0%22%2F%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23A8D8F0%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23A8D8F0%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23A8D8F0%22%2F%3E%3Ccircle%20cx%3D%22-11%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23A8D8F0%22%2F%3E%3Ccircle%20r%3D%225.5%22%20fill%3D%22%23FFE066%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(930%2C500)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-13%22%20r%3D%227%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%22-12%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20r%3D%226%22%20fill%3D%22%23FFE066%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(830%2C556)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-12%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%22-11%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20r%3D%225.5%22%20fill%3D%22%23F59E0B%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3Cellipse%20cx%3D%22180%22%20cy%3D%22452%22%20rx%3D%2226%22%20ry%3D%228%22%20fill%3D%22%234E9E52%22%20opacity%3D%22.35%22%2F%3E%3Cellipse%20cx%3D%22540%22%20cy%3D%22486%22%20rx%3D%2232%22%20ry%3D%229%22%20fill%3D%22%234E9E52%22%20opacity%3D%22.3%22%2F%3E%3Cellipse%20cx%3D%22880%22%20cy%3D%22452%22%20rx%3D%2224%22%20ry%3D%227%22%20fill%3D%22%234E9E52%22%20opacity%3D%22.35%22%2F%3E%3C%2Fsvg%3E");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 3px rgba(255, 255, 255, 0.35);
+  transition: box-shadow 0.28s ease;
+}
+
+/* Bottom vignette so the progress bar and dotted path stay readable. */
+.lb-field::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.06) 0%,
+    rgba(0, 0, 0, 0) 26%,
+    rgba(0, 0, 0, 0) 68%,
+    rgba(0, 0, 0, 0.20) 100%
+  );
+  z-index: 3;
+}
+
+/* Off-path feedback: the field rims red and pulses gently. */
+.lb-field.lb-off-path {
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 4px rgba(229, 62, 62, 0.9),
+    inset 0 0 70px rgba(229, 62, 62, 0.22);
+  animation: lbOffPulse 1s ease-in-out infinite;
+}
+@keyframes lbOffPulse {
+  0%, 100% { filter: saturate(1); }
+  50%      { filter: saturate(0.82) brightness(0.97); }
+}
+
+/* ── SVG layer (path + goal) ── */
+.lb-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.lb-band {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.20);
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.lb-off-path .lb-band { stroke: rgba(229, 62, 62, 0.20); }
+
+.lb-path-glow {
+  fill: none;
+  stroke: rgba(0, 0, 0, 0.18);
+  stroke-width: 12;
+  stroke-linecap: round;
+  filter: blur(4px);
+}
+
+.lb-path {
+  fill: none;
+  stroke: #FFFFFF;
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-dasharray: 22 26;
+  animation: lbDash 1.4s linear infinite;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
+}
+@keyframes lbDash { to { stroke-dashoffset: -48; } }
+
+/* ── Leaf goal (HTML layer, so it never stretches with the path SVG) ── */
+.lb-leaf {
+  position: absolute;
+  width: 124px;
+  height: 134px;
+  margin-left: -62px;
+  margin-top: -67px;
+  z-index: 4;
+  pointer-events: none;
+  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.3));
+}
+
+.lb-leaf-halo {
+  fill: rgba(246, 224, 94, 0.32);
+  animation: lbHalo 2.2s ease-in-out infinite;
+}
+@keyframes lbHalo {
+  0%, 100% { r: 46; opacity: 0.30; }
+  50%      { r: 62; opacity: 0.62; }
+}
+.lb-leaf-blade {
+  transform-origin: 4px -4px;
+  animation: lbLeafSway 3.4s ease-in-out infinite;
+}
+@keyframes lbLeafSway {
+  0%, 100% { transform: rotate(-3deg); }
+  50%      { transform: rotate(4deg); }
+}
+.lb-flag {
+  transform-origin: 6px -88px;
+  animation: lbFlag 1.8s ease-in-out infinite;
+}
+@keyframes lbFlag {
+  0%, 100% { transform: skewY(0deg) scaleX(1); }
+  50%      { transform: skewY(-5deg) scaleX(0.9); }
+}
+
+/* ── Pointer canvas ── */
+.lb-pointer-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 6;
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LADYBUG
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lb-bug {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 82px;
+  height: 82px;
+  margin-left: -41px;
+  margin-top: -41px;
+  z-index: 7;
+  pointer-events: none;
+  /* left/top/transform are written every frame from the game loop */
+  will-change: left, top, transform;
+  transition: none;
+}
+
+/* ── Grab affordance ──────────────────────────────────────────────────────
+   Idle: a golden pulse says "point at me". While carried it turns green
+   (or red off the path) and stops pulsing so it reads as "held". */
+.lb-bug-halo {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 118px;
+  height: 118px;
+  margin: -59px 0 0 -59px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle,
+    rgba(246, 224, 94, 0.60) 0%,
+    rgba(246, 224, 94, 0.22) 45%,
+    rgba(246, 224, 94, 0) 72%);
+  animation: lbBugHalo 1.5s ease-in-out infinite;
+}
+@keyframes lbBugHalo {
+  0%, 100% { transform: scale(0.78); opacity: 0.55; }
+  50%      { transform: scale(1.22); opacity: 0.95; }
+}
+
+.lb-carrying .lb-bug-halo {
+  animation: none;
+  transform: scale(1);
+  opacity: 0.75;
+  background: radial-gradient(circle,
+    rgba(72, 187, 120, 0.55) 0%,
+    rgba(72, 187, 120, 0.2) 45%,
+    rgba(72, 187, 120, 0) 72%);
+}
+
+.lb-carrying.lb-off-path .lb-bug-halo {
+  background: radial-gradient(circle,
+    rgba(229, 62, 62, 0.6) 0%,
+    rgba(229, 62, 62, 0.22) 45%,
+    rgba(229, 62, 62, 0) 72%);
+}
+
+/* ── Flying back to the last good point after straying off the path ─────── */
+.lb-bug.lb-bug-returning .lb-bug-svg {
+  filter: drop-shadow(0 0 18px rgba(99, 179, 237, 0.95))
+          drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+  opacity: 0.9;
+}
+.lb-bug.lb-bug-returning .lb-bug-halo {
+  animation: none;
+  transform: scale(1.15);
+  opacity: 0.85;
+  background: radial-gradient(circle,
+    rgba(99, 179, 237, 0.6) 0%,
+    rgba(99, 179, 237, 0.22) 45%,
+    rgba(99, 179, 237, 0) 72%);
+}
+.lb-bug.lb-bug-returning .lb-bug-shadow { opacity: 0.12; }
+
+/* ── Contextual hint ── */
+.lb-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 9;
+  padding: 11px 22px;
+  border-radius: 999px;
+  background: rgba(12, 22, 18, 0.74);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  color: #FFFFFF;
+  font-size: 0.95rem;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.34);
+}
+
+.lb-bug-svg {
+  display: block;
+  animation: lbFloat 2.1s ease-in-out infinite;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.35));
+}
+@keyframes lbFloat {
+  0%, 100% { transform: translateY(-4px) rotate(-2deg); }
+  50%      { transform: translateY(4px) rotate(2deg); }
+}
+
+.lb-bug-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 52px;
+  height: 12px;
+  margin-left: -26px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.24);
+  filter: blur(4px);
+  animation: lbShadow 2.1s ease-in-out infinite;
+}
+@keyframes lbShadow {
+  0%, 100% { transform: scale(0.86); opacity: 0.34; }
+  50%      { transform: scale(1.08); opacity: 0.2; }
+}
+
+.lb-antenna {
+  fill: none;
+  stroke: #161616;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+}
+
+.lb-pupil { animation: lbBlinkLook 4.2s ease-in-out infinite; }
+@keyframes lbBlinkLook {
+  0%, 44%, 100% { transform: translateX(0); }
+  50%, 62%      { transform: translateX(1.6px); }
+}
+
+/* Panic state while the child is off the path. */
+.lb-off-path .lb-bug-svg {
+  animation: lbFloat 2.1s ease-in-out infinite, lbShake 0.42s ease-in-out infinite;
+}
+@keyframes lbShake {
+  0%, 100% { filter: drop-shadow(0 6px 10px rgba(0,0,0,0.35)); }
+  50%      { filter: drop-shadow(0 0 16px rgba(229, 62, 62, 0.95))
+                     drop-shadow(0 6px 10px rgba(0,0,0,0.35)); }
+}
+
+/* ── Camera status pill ── */
+.lb-cam-status {
+  position: absolute;
+  left: 50%;
+  top: 14px;
+  transform: translateX(-50%);
+  z-index: 8;
+  padding: 7px 16px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+}
+.lb-cam-status.ok   { background: rgba(56, 161, 105, 0.82); }
+.lb-cam-status.wait { background: rgba(221, 107, 32, 0.86); animation: lbBlink 1.5s ease-in-out infinite; }
+@keyframes lbBlink { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+.lb-cam-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  left: -9999px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PROGRESS BAR
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lb-progress { padding: 0 6px; }
+
+.lb-progress-track {
+  position: relative;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.16),
+              0 3px 10px rgba(0, 0, 0, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+}
+
+.lb-progress-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #63B3ED 0%, #48BB78 55%, #38A169 100%);
+  transition: width 0.2s linear;
+}
+
+.lb-progress-bug {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.35));
+  will-change: left;
+}
+
+.lb-progress-goal {
+  position: absolute;
+  right: -2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  line-height: 0;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.3));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OVERLAYS
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lb-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(10, 20, 16, 0.62);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.lb-overlay-soft { background: rgba(10, 20, 16, 0.34); backdrop-filter: blur(4px); }
+
+.lb-countdown {
+  font-size: clamp(5rem, 18vw, 11rem);
+  font-weight: 900;
+  color: #FFFFFF;
+  line-height: 1;
+  text-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+.lb-countdown-hint {
+  margin-top: 14px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+/* ── Shared card shell ── */
+.lb-rules-card,
+.lb-pause-card,
+.lb-results-card {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: 28px;
+  padding: 30px;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  position: relative;
+}
+.lb-rules-card   { max-width: 560px; }
+.lb-pause-card   { max-width: 440px; text-align: center; }
+.lb-results-card { max-width: 720px; text-align: center; overflow: hidden; }
+
+/* ── Rules modal ── */
+.lb-rules-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.lb-rules-badge {
+  width: 66px;
+  height: 66px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #FFF5F5, #FED7D7);
+  border: 2px solid rgba(229, 62, 62, 0.25);
+  flex-shrink: 0;
+  animation: lbFloat 2.6s ease-in-out infinite;
+}
+.lb-rules-title {
+  margin: 0;
+  font-size: 1.62rem;
+  font-weight: 900;
+  color: var(--lb-ink);
+  letter-spacing: -0.02em;
+}
+.lb-rules-sub {
+  margin: 4px 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #718096;
+}
+
+.lb-rules-list {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.lb-rules-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 12px 15px;
+  border-radius: 15px;
+  background: #F7FAFC;
+  border: 1px solid #EDF2F7;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #2D3748;
+  line-height: 1.45;
+}
+.lb-rule-icon { font-size: 1.25rem; line-height: 1.2; flex-shrink: 0; }
+.lb-rules-start { width: 100%; justify-content: center; font-size: 1.08rem; padding: 15px; }
+
+/* ── Pause card ── */
+.lb-pause-ico {
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 18px;
+  border-radius: 24px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #FEF3C7, #FDE68A);
+  color: #B45309;
+}
+.lb-pause-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.7rem;
+  font-weight: 900;
+  color: var(--lb-ink);
+}
+.lb-pause-card p { margin: 0 0 24px; color: #718096; font-weight: 600; }
+.lb-pause-actions,
+.lb-results-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ── Buttons ── */
+.lb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 24px;
+  border-radius: 16px;
+  border: none;
+  font-family: inherit;
+  font-size: 0.98rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.16s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.16s ease;
+}
+.lb-btn:hover  { transform: translateY(-2px); }
+.lb-btn:active { transform: translateY(0) scale(0.97); }
+.lb-btn:focus-visible { outline: 3px solid var(--lb-amber); outline-offset: 2px; }
+
+.lb-btn-primary {
+  background: linear-gradient(135deg, #48BB78, #2F855A);
+  color: #FFFFFF;
+  box-shadow: 0 6px 18px rgba(47, 133, 90, 0.4);
+}
+.lb-btn-primary:hover { box-shadow: 0 10px 26px rgba(47, 133, 90, 0.5); }
+
+.lb-btn-ghost {
+  background: #EDF2F7;
+  color: #4A5568;
+}
+.lb-btn-ghost:hover { background: #E2E8F0; }
+
+/* ── Results ── */
+.lb-results-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 0 4px;
+  font-size: 1.72rem;
+  font-weight: 900;
+  color: #2F855A;
+  letter-spacing: -0.02em;
+}
+.lb-results-sub {
+  margin: 0 0 22px;
+  color: #718096;
+  font-weight: 700;
+  font-size: 0.92rem;
+}
+
+.lb-perf-ring {
+  width: 156px;
+  height: 156px;
+  margin: 0 auto 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(
+    #48BB78 calc(var(--pct) * 1%),
+    #E2E8F0 0
+  );
+  box-shadow: 0 10px 30px rgba(72, 187, 120, 0.28);
+}
+.lb-perf-inner {
+  width: 124px;
+  height: 124px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+.lb-perf-val {
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: #2F855A;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.lb-perf-lbl {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #A0AEC0;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.lb-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 26px;
+  text-align: left;
+}
+.lb-metric {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 12px;
+  border-radius: 15px;
+  background: #F7FAFC;
+  border: 1px solid #EDF2F7;
+}
+.lb-metric-ico {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: #FFFFFF;
+  color: #48BB78;
+  flex-shrink: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+.lb-metric-body { display: flex; flex-direction: column; min-width: 0; }
+.lb-metric-label {
+  font-size: 0.66rem;
+  font-weight: 800;
+  color: #A0AEC0;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lb-metric-value {
+  font-size: 1.02rem;
+  font-weight: 900;
+  color: var(--lb-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Confetti burst ── */
+.lb-results-confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: 28px;
+}
+.lb-results-confetti span {
+  position: absolute;
+  top: -14px;
+  left: calc(var(--i) * 7.1%);
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: lbConfetti 2.4s ease-in forwards;
+  animation-delay: calc(var(--i) * 0.09s);
+}
+.lb-results-confetti span:nth-child(3n)   { background: #E53E3E; }
+.lb-results-confetti span:nth-child(3n+1) { background: #F6E05E; }
+.lb-results-confetti span:nth-child(3n+2) { background: #48BB78; }
+
+@keyframes lbConfetti {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(560px) rotate(620deg); opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DIFFICULTY PAGE
+   ═══════════════════════════════════════════════════════════════════════════ */
+.lb-diff-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 34px 24px 60px;
+  font-family: 'Inter', system-ui, sans-serif;
+  background-image:
+    linear-gradient(rgba(8, 18, 14, 0.55), rgba(8, 18, 14, 0.68)),
+    url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20560%22%20preserveAspectRatio%3D%22xMidYMid%20slice%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22sky%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%235FC4EC%22%2F%3E%3Cstop%20offset%3D%2245%25%22%20stop-color%3D%22%2393DAF3%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23C7EDF9%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22hillFar%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%238FD48A%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%236FBF74%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22hillMid%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%237FCB74%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%235EAF5E%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22grass%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%238AD173%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2363B357%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22trail%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23E3CBA0%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23D2B487%22%2F%3E%3C%2FlinearGradient%3E%3CradialGradient%20id%3D%22sun%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23FFF9D0%22%20stop-opacity%3D%22.95%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23FFF3B0%22%20stop-opacity%3D%220%22%2F%3E%3C%2FradialGradient%3E%3ClinearGradient%20id%3D%22trunk%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%220%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%239A6B45%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%237A5133%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%221000%22%20height%3D%22560%22%20fill%3D%22url(%23sky)%22%2F%3E%3Ccircle%20cx%3D%22835%22%20cy%3D%2280%22%20r%3D%22150%22%20fill%3D%22url(%23sun)%22%2F%3E%3Cg%20fill%3D%22%23FFFFFF%22%20opacity%3D%22.92%22%3E%3Cg%3E%3Cellipse%20cx%3D%22150%22%20cy%3D%2292%22%20rx%3D%2258%22%20ry%3D%2227%22%2F%3E%3Cellipse%20cx%3D%22196%22%20cy%3D%2286%22%20rx%3D%2242%22%20ry%3D%2232%22%2F%3E%3Cellipse%20cx%3D%22108%22%20cy%3D%2298%22%20rx%3D%2238%22%20ry%3D%2221%22%2F%3E%3C%2Fg%3E%3Cg%20opacity%3D%22.8%22%3E%3Cellipse%20cx%3D%22470%22%20cy%3D%2262%22%20rx%3D%2250%22%20ry%3D%2223%22%2F%3E%3Cellipse%20cx%3D%22508%22%20cy%3D%2258%22%20rx%3D%2236%22%20ry%3D%2227%22%2F%3E%3Cellipse%20cx%3D%22434%22%20cy%3D%2268%22%20rx%3D%2232%22%20ry%3D%2218%22%2F%3E%3C%2Fg%3E%3Cg%20opacity%3D%22.7%22%3E%3Cellipse%20cx%3D%22790%22%20cy%3D%22118%22%20rx%3D%2246%22%20ry%3D%2221%22%2F%3E%3Cellipse%20cx%3D%22824%22%20cy%3D%22112%22%20rx%3D%2233%22%20ry%3D%2225%22%2F%3E%3C%2Fg%3E%3Cg%20opacity%3D%22.55%22%3E%3Cellipse%20cx%3D%22640%22%20cy%3D%22150%22%20rx%3D%2240%22%20ry%3D%2217%22%2F%3E%3Cellipse%20cx%3D%22670%22%20cy%3D%22146%22%20rx%3D%2228%22%20ry%3D%2220%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3Cpath%20d%3D%22M0%20300%20Q120%20252%20250%20282%20T520%20268%20T780%20288%20T1000%20262%20L1000%20560%20L0%20560%20Z%22%20fill%3D%22url(%23hillFar)%22%2F%3E%3Cg%3E%3Cg%20transform%3D%22translate(70%2C250)%22%3E%3Crect%20x%3D%22-6%22%20y%3D%2214%22%20width%3D%2212%22%20height%3D%2246%22%20rx%3D%225%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%224%22%20r%3D%2230%22%20fill%3D%22%235CAE5C%22%2F%3E%3Ccircle%20cx%3D%22-20%22%20cy%3D%2218%22%20r%3D%2222%22%20fill%3D%22%2369BC66%22%2F%3E%3Ccircle%20cx%3D%2220%22%20cy%3D%2218%22%20r%3D%2222%22%20fill%3D%22%234F9E52%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(215%2C262)%22%3E%3Crect%20x%3D%22-5%22%20y%3D%2212%22%20width%3D%2210%22%20height%3D%2240%22%20rx%3D%224%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%222%22%20r%3D%2226%22%20fill%3D%22%2363B663%22%2F%3E%3Ccircle%20cx%3D%22-17%22%20cy%3D%2215%22%20r%3D%2219%22%20fill%3D%22%2371C36E%22%2F%3E%3Ccircle%20cx%3D%2217%22%20cy%3D%2215%22%20r%3D%2219%22%20fill%3D%22%2354A557%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(392%2C248)%22%3E%3Crect%20x%3D%22-6%22%20y%3D%2216%22%20width%3D%2213%22%20height%3D%2250%22%20rx%3D%225%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%222%22%20r%3D%2233%22%20fill%3D%22%2359B159%22%2F%3E%3Ccircle%20cx%3D%22-23%22%20cy%3D%2219%22%20r%3D%2224%22%20fill%3D%22%2368BF66%22%2F%3E%3Ccircle%20cx%3D%2223%22%20cy%3D%2219%22%20r%3D%2224%22%20fill%3D%22%234B9B4F%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(560%2C266)%22%3E%3Crect%20x%3D%22-5%22%20y%3D%2212%22%20width%3D%2210%22%20height%3D%2238%22%20rx%3D%224%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%222%22%20r%3D%2225%22%20fill%3D%22%2365B865%22%2F%3E%3Ccircle%20cx%3D%22-16%22%20cy%3D%2214%22%20r%3D%2218%22%20fill%3D%22%2373C570%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2214%22%20r%3D%2218%22%20fill%3D%22%2356A758%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(742%2C254)%22%3E%3Crect%20x%3D%22-6%22%20y%3D%2214%22%20width%3D%2212%22%20height%3D%2246%22%20rx%3D%225%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%223%22%20r%3D%2230%22%20fill%3D%22%235DAF5D%22%2F%3E%3Ccircle%20cx%3D%22-20%22%20cy%3D%2217%22%20r%3D%2222%22%20fill%3D%22%236BBD68%22%2F%3E%3Ccircle%20cx%3D%2220%22%20cy%3D%2217%22%20r%3D%2222%22%20fill%3D%22%234F9E52%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(905%2C244)%22%3E%3Crect%20x%3D%22-6%22%20y%3D%2217%22%20width%3D%2213%22%20height%3D%2252%22%20rx%3D%225%22%20fill%3D%22url(%23trunk)%22%2F%3E%3Ccircle%20cx%3D%220%22%20cy%3D%220%22%20r%3D%2234%22%20fill%3D%22%2357AF57%22%2F%3E%3Ccircle%20cx%3D%22-23%22%20cy%3D%2218%22%20r%3D%2225%22%20fill%3D%22%2366BD64%22%2F%3E%3Ccircle%20cx%3D%2223%22%20cy%3D%2218%22%20r%3D%2225%22%20fill%3D%22%234A9A4E%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3Cpath%20d%3D%22M0%20352%20Q160%20318%20330%20344%20T650%20332%20T1000%20350%20L1000%20560%20L0%20560%20Z%22%20fill%3D%22url(%23hillMid)%22%2F%3E%3Cpath%20d%3D%22M0%20408%20Q200%20372%20420%20400%20T760%20388%20T1000%20404%20L1000%20560%20L0%20560%20Z%22%20fill%3D%22url(%23grass)%22%2F%3E%3Cpath%20d%3D%22M985%20400%20C820%20412%20700%20448%20560%20470%20C420%20492%20250%20500%2090%20560%20L360%20560%20C470%20508%20610%20492%20730%20470%20C840%20450%20930%20428%201000%20416%20Z%22%20fill%3D%22url(%23trail)%22%20opacity%3D%22.9%22%2F%3E%3Cg%20opacity%3D%22.35%22%20stroke%3D%22%233F8C46%22%20stroke-width%3D%223%22%20stroke-linecap%3D%22round%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M60%20470%20l6%20-22%20M74%20476%20l3%20-26%20M88%20470%20l-5%20-22%22%2F%3E%3Cpath%20d%3D%22M300%20500%20l6%20-24%20M316%20506%20l2%20-28%20M330%20500%20l-6%20-24%22%2F%3E%3Cpath%20d%3D%22M620%20520%20l6%20-22%20M636%20526%20l2%20-26%20M650%20520%20l-6%20-22%22%2F%3E%3Cpath%20d%3D%22M860%20470%20l6%20-22%20M876%20476%20l2%20-26%20M890%20470%20l-6%20-22%22%2F%3E%3C%2Fg%3E%3Cg%3E%3Cg%20transform%3D%22translate(48%2C486)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-13%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%22-12%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20r%3D%226%22%20fill%3D%22%23FFE066%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(140%2C530)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-12%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%22-11%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20r%3D%225.5%22%20fill%3D%22%23F59E0B%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(258%2C466)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-12%22%20r%3D%226.5%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%22-11%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20r%3D%225.5%22%20fill%3D%22%23FFE066%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(470%2C540)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-13%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20cx%3D%22-12%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23F5A9C8%22%2F%3E%3Ccircle%20r%3D%226%22%20fill%3D%22%23FFE066%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(700%2C516)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-12%22%20r%3D%226.5%22%20fill%3D%22%23A8D8F0%22%2F%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23A8D8F0%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23A8D8F0%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23A8D8F0%22%2F%3E%3Ccircle%20cx%3D%22-11%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23A8D8F0%22%2F%3E%3Ccircle%20r%3D%225.5%22%20fill%3D%22%23FFE066%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(930%2C500)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-13%22%20r%3D%227%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%2210%22%20r%3D%227%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20cx%3D%22-12%22%20cy%3D%22-4%22%20r%3D%227%22%20fill%3D%22%23C4A8F0%22%2F%3E%3Ccircle%20r%3D%226%22%20fill%3D%22%23FFE066%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(830%2C556)%22%3E%3Ccircle%20cx%3D%220%22%20cy%3D%22-12%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%2211%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%227%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%22-7%22%20cy%3D%229%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20cx%3D%22-11%22%20cy%3D%22-4%22%20r%3D%226.5%22%20fill%3D%22%23FFD966%22%2F%3E%3Ccircle%20r%3D%225.5%22%20fill%3D%22%23F59E0B%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3Cellipse%20cx%3D%22180%22%20cy%3D%22452%22%20rx%3D%2226%22%20ry%3D%228%22%20fill%3D%22%234E9E52%22%20opacity%3D%22.35%22%2F%3E%3Cellipse%20cx%3D%22540%22%20cy%3D%22486%22%20rx%3D%2232%22%20ry%3D%229%22%20fill%3D%22%234E9E52%22%20opacity%3D%22.3%22%2F%3E%3Cellipse%20cx%3D%22880%22%20cy%3D%22452%22%20rx%3D%2224%22%20ry%3D%227%22%20fill%3D%22%234E9E52%22%20opacity%3D%22.35%22%2F%3E%3C%2Fsvg%3E");
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+.lb-diff-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.14);
+  color: #FFFFFF;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.16s ease, transform 0.16s ease;
+}
+.lb-diff-back:hover { background: rgba(255, 255, 255, 0.26); transform: translateX(-3px); }
+
+.lb-diff-head { text-align: center; margin: 26px 0 30px; }
+.lb-diff-title {
+  margin: 0;
+  font-size: clamp(1.9rem, 5vw, 2.7rem);
+  font-weight: 900;
+  color: #FFFFFF;
+  letter-spacing: -0.03em;
+  text-shadow: 0 6px 26px rgba(0, 0, 0, 0.5);
+}
+.lb-diff-sub {
+  margin: 10px auto 0;
+  max-width: 560px;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 1.02rem;
+  font-weight: 600;
+}
+
+/* ── Mode toggle ── */
+.lb-mode-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 auto 34px;
+}
+.lb-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 26px;
+  border-radius: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  color: #FFFFFF;
+  font-family: inherit;
+  font-weight: 800;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.lb-mode-btn:hover { background: rgba(255, 255, 255, 0.22); }
+.lb-mode-btn.active {
+  background: #FFFFFF;
+  color: var(--lb-green-dk, #2F7F3C);
+  border-color: #FFFFFF;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+.lb-mode-btn:focus-visible { outline: 3px solid #F6E05E; outline-offset: 3px; }
+
+/* ── Level cards ── */
+.lb-diff-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 22px;
+  max-width: 1060px;
+  margin: 0 auto;
+}
+
+.lb-diff-card {
+  position: relative;
+  padding: 30px 26px 26px;
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  overflow: hidden;
+  text-align: center;
+}
+.lb-diff-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 5px;
+  background: var(--lvl);
+}
+.lb-diff-card:focus-visible { outline: 3px solid var(--lvl); outline-offset: 4px; }
+
+.lb-diff-emoji {
+  font-size: 2.7rem;
+  line-height: 1;
+  margin-bottom: 12px;
+  display: block;
+}
+.lb-diff-name {
+  margin: 0 0 8px;
+  font-size: 1.3rem;
+  font-weight: 900;
+  color: var(--lb-ink, #1A202C);
+}
+.lb-diff-desc {
+  margin: 0 0 20px;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: #718096;
+  font-weight: 500;
+}
+
+.lb-diff-specs {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+.lb-diff-spec {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #F7FAFC;
+  border: 1px solid #EDF2F7;
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: #4A5568;
+}
+
+.lb-diff-play {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 14px;
+  border-radius: 16px;
+  border: none;
+  background: var(--lvl);
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: filter 0.16s ease, transform 0.16s ease;
+}
+.lb-diff-play:hover  { filter: brightness(1.08); transform: translateY(-2px); }
+.lb-diff-play:active { transform: translateY(0) scale(0.98); }
+
+/* Little animated preview of the path inside each card. */
+.lb-diff-preview {
+  width: 100%;
+  height: 54px;
+  margin-bottom: 18px;
+}
+.lb-diff-preview path {
+  fill: none;
+  stroke: var(--lvl);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-dasharray: 9 11;
+  animation: lbDash 1.4s linear infinite;
+  opacity: 0.75;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (max-width: 860px) {
+  .lb-metrics { grid-template-columns: repeat(2, 1fr); }
+  .lb-header-center { order: 3; flex-basis: 100%; justify-content: center; }
+  .lb-header { flex-wrap: wrap; }
+}
+
+@media (max-width: 560px) {
+  .lb-stage { padding: 10px 10px 14px; }
+  .lb-field { border-radius: 20px; }
+  .lb-bug { width: 62px; height: 62px; margin-left: -31px; margin-top: -31px; }
+  .lb-stat { padding: 6px 13px; font-size: 0.92rem; }
+  .lb-icon-btn { width: 38px; height: 38px; }
+  .lb-rules-card, .lb-pause-card, .lb-results-card { padding: 22px; border-radius: 22px; }
+  .lb-perf-ring { width: 130px; height: 130px; }
+  .lb-perf-inner { width: 104px; height: 104px; }
+  .lb-perf-val { font-size: 2.05rem; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ACCESSIBILITY — kill every decorative animation
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .lb-page *,
+  .lb-page *::before,
+  .lb-page *::after,
+  .lb-diff-page *,
+  .lb-overlay * {
+    animation: none !important;
+    transition: none !important;
+  }
+  .lb-path { stroke-dasharray: 22 26; }
+  .lb-field.lb-off-path { animation: none !important; }
+}
