@@ -33,6 +33,53 @@ const TYPE_REQUIRED      = 3;   // Must type the letter 3 times
 const TRACE_WAYPOINT_RADIUS = 25; // px radius to count as "reached"
 const POINTS_PER_STEP    = 10;
 
+// ── OT scoring constants ───────────────────────────────────────────────────
+const RULES_FLAG = 'tracetype_rules_seen';
+/* Reference time (seconds) for one full Trace -> Find -> Type cycle at each
+   level. Used for the Speed sub-score: finishing at the reference pace = 100%. */
+const LEVEL_REF_SEC = { 1: 16, 2: 22, 3: 28 };
+/* Distance (in 300x300 SVG units) beyond which the fingertip counts as
+   "off path" while tracing. Slightly wider than the waypoint radius so a
+   normal, slightly wobbly stroke is not punished. */
+const TRACE_TOLERANCE = 34;
+/* Mean jerk (SVG units / s^3) that maps to a Smoothness score of 0. Generous:
+   a fast but controlled stroke stays well below it. */
+const JERK_CAP = 4200;
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+/** Shortest distance from point (px,py) to segment a-b. */
+function distToSegment(px, py, a, b) {
+  const vx = b.x - a.x, vy = b.y - a.y;
+  const len2 = vx * vx + vy * vy;
+  if (!len2) return Math.hypot(px - a.x, py - a.y);
+  let t = ((px - a.x) * vx + (py - a.y) * vy) / len2;
+  t = clamp01(t);
+  return Math.hypot(px - (a.x + t * vx), py - (a.y + t * vy));
+}
+
+/** Fresh OT accumulator. One per session. */
+function makeOTAccumulator() {
+  return {
+    startedAt: null,
+    firstMoveAt: null,
+    // Trace
+    traceSamples: 0,
+    traceOnPath: 0,
+    traceDistSum: 0,
+    // Same three, reset after every letter, for the per-letter star rating
+    letterSamples: 0, letterOnPath: 0, letterDistSum: 0,
+    // Smoothness (jerk)
+    lastPos: null, lastVel: null, lastAcc: null, lastT: null,
+    jerkSum: 0, jerkCount: 0,
+    // Find / Type keyboard
+    findTaps: 0, findWrong: 0,
+    typeTaps: 0, typeWrong: 0,
+    // Pauses
+    pauses: 0, pauseMs: 0, pauseStartedAt: null,
+  };
+}
+
 // ── Letters per level ──────────────────────────────────────────────────────
 const LEVEL_LETTERS = {
   1: 'LVXTIFEH'.split(''), // Simple straight lines, fewer points
@@ -55,14 +102,6 @@ const ENCOURAGEMENTS = [
   '🚀 Incredible!', '💎 Superstar!',
 ];
 
-// ── Tips ───────────────────────────────────────────────────────────────────
-const TIPS = [
-  '💡 Go slow, be accurate, and use your index finger!',
-  '💡 Follow the numbered dots in order for best results.',
-  '💡 Listen to the letter sound to remember it better!',
-  '💡 Take your time on the keyboard — accuracy beats speed!',
-  '💡 Try saying the letter out loud as you trace it.',
-];
 
 // ── QWERTY Layout ──────────────────────────────────────────────────────────
 const QWERTY_ROWS = [
@@ -333,7 +372,68 @@ function VirtualKeyboard({ targetLetter, onKeyPress, highlightTarget, keyStates 
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════// ════════════════════════════════════════════════════════════════════════════
+//                              RULES MODAL
+// ════════════════════════════════════════════════════════════════════════════
+const RULES = [
+  { icon: '✏️', text: 'TRACE — follow the numbered dots in order with your index finger.' },
+  { icon: '⚡', text: 'Stay close to the line: the further you drift, the lower your accuracy.' },
+  { icon: '🔍', text: 'FIND — spot the same letter on the keyboard and press it.' },
+  { icon: '⌨️', text: 'TYPE — press that letter 3 times on your own, without the hint.' },
+  { icon: '❌', text: 'Wrong keys do not end the round, but they cost you accuracy points.' },
+  { icon: '⏱️', text: 'Work at a calm, steady pace — smoothness counts as much as speed.' },
+  { icon: '⏸️', text: 'You can pause at any time; pauses are tracked, not punished.' },
+];
+
+function RulesModal({ level, onStart }) {
+  return (
+    <motion.div
+      className="tt-rules-overlay"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+    >
+      <motion.div
+        className="tt-rules-card"
+        initial={{ scale: 0.88, y: 30, opacity: 0 }}
+        animate={{ scale: 1, y: 0, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 240, damping: 22 }}
+      >
+        <div className="tt-rules-head">
+          <div className="tt-rules-badge">✏️</div>
+          <div>
+            <h2 className="tt-rules-title">Trace → Find → Type</h2>
+            <p className="tt-rules-sub">Level {level} · 3 steps for every letter</p>
+          </div>
+        </div>
+
+        <ul className="tt-rules-list">
+          {RULES.map((r, i) => (
+            <motion.li
+              key={i}
+              initial={{ opacity: 0, x: -18 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.12 + i * 0.07 }}
+            >
+              <span className="tt-rule-icon">{r.icon}</span>
+              <span>{r.text}</span>
+            </motion.li>
+          ))}
+        </ul>
+
+        <div className="tt-rules-ot">
+          <strong>OT Score</strong> = Trace accuracy 30% · Smoothness 20% ·
+          Letter search 20% · Typing accuracy 20% · Speed 10%
+        </div>
+
+        <button className="tt-rules-start" onClick={onStart}>
+          <Play size={20} /> Let&apos;s go!
+        </button>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 export default function TraceTypeGame() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -348,7 +448,9 @@ export default function TraceTypeGame() {
   const [sessionSaved, setSessionSaved] = useState(false);
 
   // ── Game State ──────────────────────────────────────────────────────────
-  const [gamePhase, setGamePhase]       = useState('inputSelection'); // inputSelection | waiting | playing | letterSuccess | results
+  const [gamePhase, setGamePhase]       = useState(
+    () => (sessionStorage.getItem(RULES_FLAG) ? 'inputSelection' : 'rules')
+  ); // rules | inputSelection | waiting | playing | letterSuccess | results
   const [inputMethod, setInputMethod]   = useState(null); // 'camera' | 'touch' | null
   const [countdown, setCountdown]       = useState(0);
   const [currentLetterIdx, setCurrentLetterIdx] = useState(0);
@@ -360,7 +462,6 @@ export default function TraceTypeGame() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [encourageMsg, setEncourageMsg] = useState('');
   const [feedbackMsg, setFeedbackMsg]   = useState(null); // { text, type: 'success'|'error', points }
-  const [tip, setTip]                   = useState(TIPS[0]);
 
   // ── Hand Tracking refs ──────────────────────────────────────────────────
   const videoRef  = useRef(null);
@@ -381,6 +482,28 @@ export default function TraceTypeGame() {
 
   // ── Timer ───────────────────────────────────────────────────────────────
   const [elapsedTime, setElapsedTime] = useState(0);
+  // ── OT: pause accounting ──────────────────────────────────────────
+  useEffect(() => {
+    const ot = otRef.current;
+    if (isPaused) {
+      ot.pauses += 1;
+      ot.pauseStartedAt = Date.now();
+      /* Drop the motion history: the gap across a pause is not real movement
+         and would otherwise register as one huge jerk spike. */
+      ot.lastPos = ot.lastVel = ot.lastAcc = ot.lastT = null;
+    } else if (ot.pauseStartedAt) {
+      ot.pauseMs += Date.now() - ot.pauseStartedAt;
+      ot.pauseStartedAt = null;
+    }
+  }, [isPaused]);
+
+  // ── OT: session clock starts with the first playing frame ───────────────
+  useEffect(() => {
+    if (gamePhase === 'playing' && otRef.current.startedAt == null) {
+      otRef.current.startedAt = Date.now();
+    }
+  }, [gamePhase]);
+
   const timerRef = useRef(null);
 
   // ── Per-letter metrics ──────────────────────────────────────────────────
@@ -421,6 +544,12 @@ export default function TraceTypeGame() {
   // ── Star ratings per letter ─────────────────────────────────────────────
   const [starRatings, setStarRatings] = useState({});
 
+  // ── OT scoring ─────────────────────────────────────────────────
+  /* Every raw measurement lives in a ref so the per-frame tracing loop never
+     triggers a re-render. It is turned into scores once, at the end. */
+  const otRef = useRef(makeOTAccumulator());
+  const [otResults, setOtResults] = useState(null);
+
   // ── Current letter ──────────────────────────────────────────────────────
   const currentLetter = letters[currentLetterIdx];
   const letterData = LETTER_DATA[currentLetter] || LETTER_DATA.A;
@@ -454,23 +583,39 @@ export default function TraceTypeGame() {
         ? Math.round(sessionStats.tracingAccuracies.reduce((a, b) => a + b, 0) / sessionStats.tracingAccuracies.length)
         : 100;
 
+      /* The OT composite is the headline number for therapists; the raw
+         tracing average is kept as the fallback if scoring never ran. */
+      const otScore = otResults?.composite ?? avgAcc;
+
       api.post('/sessions/end', {
         session_id: currentSessionId,
         duration_seconds: durationSeconds,
-        accuracy_score: parseFloat((avgAcc / 100).toFixed(2)),
-        accuracy: avgAcc,
+        accuracy_score: parseFloat((otScore / 100).toFixed(2)),
+        accuracy: otScore,
         perfect_grabs: sessionStats.lettersCompleted,
         total_attempts: letters.length,
         game_name: 'Trace Find Type',
+        metrics: otResults ? {
+          otScore: otResults.composite,
+          traceAccuracy: otResults.traceAccuracy,
+          smoothness: otResults.smoothness,
+          findEfficiency: otResults.findEfficiency,
+          typingAccuracy: otResults.typingAccuracy,
+          speedScore: otResults.speedScore,
+          meanDeviation: otResults.meanDeviation,
+          wrongKeys: otResults.wrongKeys,
+          reactionMs: otResults.reactionMs,
+          pauses: otResults.pauses,
+        } : undefined,
       }).then(() => {
         storeEndSession({
           duration: durationSeconds,
-          accuracy: avgAcc,
+          accuracy: otScore,
           perfectGrabs: sessionStats.lettersCompleted,
         });
       }).catch((err) => console.error('[TraceTypeGame] Failed to save session:', err));
     }
-  }, [gamePhase, currentSessionId, sessionSaved, sessionStats, letters.length, gameStartTime, storeEndSession]);
+  }, [gamePhase, currentSessionId, sessionSaved, sessionStats, letters.length, gameStartTime, storeEndSession, otResults]);
 
   // ── Global timer ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -486,14 +631,6 @@ export default function TraceTypeGame() {
       speak(currentLetter);
     }
   }, [currentLetterIdx, step, gamePhase]);
-
-  // ── Update tip periodically ─────────────────────────────────────────────
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTip(TIPS[Math.floor(Math.random() * TIPS.length)]);
-    }, 12000);
-    return () => clearInterval(interval);
-  }, []);
 
   // ── Init sound manager ──────────────────────────────────────────────────
   useEffect(() => {
@@ -521,6 +658,7 @@ export default function TraceTypeGame() {
     if (step !== 'find' || gamePhase !== 'playing' || isPaused) return;
 
     setKeyTaps((t) => t + 1);
+    otRef.current.findTaps += 1;
 
     if (key === currentLetter) {
       setKeyStates((prev) => ({ ...prev, [key]: 'correct' }));
@@ -528,6 +666,7 @@ export default function TraceTypeGame() {
       const findTime = findStartTime ? (Date.now() - findStartTime) / 1000 : 1;
       handleStepComplete('find', { findTime, keyTaps: keyTaps + 1 });
     } else {
+      otRef.current.findWrong += 1;
       setKeyStates((prev) => ({ ...prev, [key]: 'wrong' }));
       if (soundEnabled) soundManager.playOffPath();
       setTimeout(() => setKeyStates((prev) => ({ ...prev, [key]: '' })), 600);
@@ -541,6 +680,8 @@ export default function TraceTypeGame() {
   const handleTypeKeyPress = useCallback((key) => {
     if (step !== 'type' || gamePhase !== 'playing' || isPaused) return;
 
+    otRef.current.typeTaps += 1;
+
     if (key === currentLetter) {
       const newCount = typedCount + 1;
       setTypedCount(newCount);
@@ -553,6 +694,7 @@ export default function TraceTypeGame() {
         handleStepComplete('type', { typeTime, accuracy: 100 });
       }
     } else {
+      otRef.current.typeWrong += 1;
       setKeyStates((prev) => ({ ...prev, [key]: 'wrong' }));
       if (soundEnabled) soundManager.playOffPath();
       setTimeout(() => setKeyStates((prev) => ({ ...prev, [key]: '' })), 600);
@@ -619,6 +761,60 @@ export default function TraceTypeGame() {
   // ══════════════════════════════════════════════════════════════════════════
   // Step Completion Handler
   // ══════════════════════════════════════════════════════════════════════════
+
+  /* Turns the raw accumulators into the five OT sub-scores and the composite.
+     Called once, when the last letter is finished. */
+  const computeOTResults = useCallback(() => {
+    const ot = otRef.current;
+    // Paused time is excluded so a child who stops for a drink is not penalised.
+    const activeMs = Math.max(1, Date.now() - (ot.startedAt || Date.now()) - ot.pauseMs);
+
+    // 1. Trace accuracy — how close to the letter the fingertip stayed.
+    const meanDist    = ot.traceSamples ? ot.traceDistSum / ot.traceSamples : 0;
+    const onPathRatio = ot.traceSamples ? ot.traceOnPath  / ot.traceSamples : 1;
+    const traceAccuracy = clamp01(
+      onPathRatio * 0.6 + clamp01(1 - meanDist / TRACE_TOLERANCE) * 0.4
+    ) * 100;
+
+    // 2. Smoothness — low mean jerk means controlled, non-shaky movement.
+    const meanJerk  = ot.jerkCount ? ot.jerkSum / ot.jerkCount : 0;
+    const smoothness = clamp01(1 - meanJerk / JERK_CAP) * 100;
+
+    // 3. Letter search — one tap per letter is a perfect visual search.
+    const findEfficiency = ot.findTaps
+      ? clamp01(letters.length / ot.findTaps) * 100 : 100;
+
+    // 4. Typing accuracy — share of correct key presses in the TYPE step.
+    const typingAccuracy = ot.typeTaps
+      ? clamp01((ot.typeTaps - ot.typeWrong) / ot.typeTaps) * 100 : 100;
+
+    // 5. Speed — measured against a per-level reference pace, never above 100.
+    const refMs = (LEVEL_REF_SEC[level] || 20) * 1000 * letters.length;
+    const speedScore = clamp01(refMs / activeMs) * 100;
+
+    const composite = Math.round(
+      traceAccuracy   * 0.30 +
+      smoothness      * 0.20 +
+      findEfficiency  * 0.20 +
+      typingAccuracy  * 0.20 +
+      speedScore      * 0.10
+    );
+
+    return {
+      composite,
+      traceAccuracy:  Math.round(traceAccuracy),
+      smoothness:     Math.round(smoothness),
+      findEfficiency: Math.round(findEfficiency),
+      typingAccuracy: Math.round(typingAccuracy),
+      speedScore:     Math.round(speedScore),
+      meanDeviation:  Math.round(meanDist),
+      wrongKeys:      ot.findWrong + ot.typeWrong,
+      reactionMs: (ot.firstMoveAt && ot.startedAt) ? ot.firstMoveAt - ot.startedAt : null,
+      activeSec: activeMs / 1000,
+      pauses:    ot.pauses,
+      pauseMs:   ot.pauseMs,
+    };
+  }, [letters.length, level]);
 
   const handleStepComplete = useCallback((completedStep, metrics = {}) => {
     const points = POINTS_PER_STEP;
@@ -690,11 +886,65 @@ export default function TraceTypeGame() {
         } else {
           // All letters done
           if (soundEnabled) soundManager.playCelebration();
+          setOtResults(computeOTResults());
           setGamePhase('results');
         }
       }, 2200);
     }
-  }, [currentLetter, currentLetterIdx, letters.length, soundEnabled]);
+  }, [currentLetter, currentLetterIdx, letters.length, soundEnabled, computeOTResults]);
+
+  /* Feeds one fingertip position into the OT accumulators: how far it sits
+     from the stroke being traced, and how jerky the movement is. Runs on every
+     tracked frame, so it only touches refs — never state. */
+  const recordTraceSample = useCallback((sx, sy, waypoints, nextIdx) => {
+    const ot = otRef.current;
+    const now = performance.now();
+    if (ot.firstMoveAt == null) ot.firstMoveAt = Date.now();
+
+    /* Path error. Segments flagged in BAD_JUMPS are pen lifts between strokes
+       (the crossbar of A, the tail of Q): the child is *supposed* to travel off
+       the letter there, so those frames are not scored. */
+    const isJump = (BAD_JUMPS[currentLetter] || []).includes(nextIdx - 1);
+    if (nextIdx < waypoints.length && !isJump) {
+      const target = waypoints[nextIdx];
+      const prev   = nextIdx > 0 ? waypoints[nextIdx - 1] : target;
+      const d = distToSegment(sx, sy, prev, target);
+      ot.traceSamples  += 1;
+      ot.traceDistSum  += d;
+      ot.letterSamples  = (ot.letterSamples || 0) + 1;
+      ot.letterDistSum  = (ot.letterDistSum || 0) + d;
+      if (d <= TRACE_TOLERANCE) {
+        ot.traceOnPath += 1;
+        ot.letterOnPath = (ot.letterOnPath || 0) + 1;
+      }
+    }
+
+    /* Smoothness: jerk is the third derivative of position. Frame gaps that are
+       implausibly short (duplicate frame) or long (tracking stall) would produce
+       meaningless spikes, so they reset the motion history instead. */
+    const dt = ot.lastT == null ? null : (now - ot.lastT) / 1000;
+    if (dt == null || dt >= 0.25) {
+      ot.lastPos = { x: sx, y: sy };
+      ot.lastT = now;
+      ot.lastVel = null;
+      ot.lastAcc = null;
+      return;
+    }
+    if (dt <= 0.008) return;
+
+    const vel = { x: (sx - ot.lastPos.x) / dt, y: (sy - ot.lastPos.y) / dt };
+    if (ot.lastVel) {
+      const acc = { x: (vel.x - ot.lastVel.x) / dt, y: (vel.y - ot.lastVel.y) / dt };
+      if (ot.lastAcc) {
+        ot.jerkSum += Math.hypot((acc.x - ot.lastAcc.x) / dt, (acc.y - ot.lastAcc.y) / dt);
+        ot.jerkCount += 1;
+      }
+      ot.lastAcc = acc;
+    }
+    ot.lastVel = vel;
+    ot.lastPos = { x: sx, y: sy };
+    ot.lastT = now;
+  }, [currentLetter]);
 
   const processTracePosition = useCallback((sx, sy) => {
     if (step !== 'trace' || gamePhase !== 'playing' || isPaused) return;
@@ -707,6 +957,8 @@ export default function TraceTypeGame() {
 
     const newReached = [...reachedWaypoints];
     const nextIdx = newReached.length;
+
+    recordTraceSample(sx, sy, waypoints, nextIdx);
 
     if (nextIdx < waypoints.length) {
       const target = waypoints[nextIdx];
@@ -721,12 +973,22 @@ export default function TraceTypeGame() {
 
         // All waypoints reached
         if (newReached.length === waypoints.length) {
-          const accuracy = Math.min(100, Math.round(80 + Math.random() * 20));
+          /* Real accuracy for THIS letter, from the frames just recorded. */
+          const ot = otRef.current;
+          const n  = ot.letterSamples || 0;
+          const accuracy = n
+            ? Math.round(clamp01(
+                (ot.letterOnPath / n) * 0.6 +
+                clamp01(1 - (ot.letterDistSum / n) / TRACE_TOLERANCE) * 0.4
+              ) * 100)
+            : 100;
+          ot.letterSamples = 0; ot.letterOnPath = 0; ot.letterDistSum = 0;
           handleStepComplete('trace', { accuracy });
         }
       }
     }
-  }, [step, gamePhase, isPaused, letterData, reachedWaypoints, soundEnabled, handleStepComplete]);
+  }, [step, gamePhase, isPaused, letterData, reachedWaypoints, soundEnabled,
+      handleStepComplete, recordTraceSample]);
 
   // Touch/Mouse Support for Trace Phase
   const handlePointerEvent = (e) => {
@@ -1167,6 +1429,41 @@ export default function TraceTypeGame() {
                 ))}
               </div>
 
+              {otResults && (
+                <div className="tt-ot-block">
+                  <div className="tt-perf-ring" style={{ '--pct': otResults.composite }}>
+                    <div className="tt-perf-inner">
+                      <span className="tt-perf-val">{otResults.composite}</span>
+                      <span className="tt-perf-lbl">OT Score</span>
+                    </div>
+                  </div>
+                  <div className="tt-ot-bars">
+                    {[
+                      ['Trace accuracy', otResults.traceAccuracy, '30%'],
+                      ['Smoothness',     otResults.smoothness,     '20%'],
+                      ['Letter search',  otResults.findEfficiency, '20%'],
+                      ['Typing accuracy',otResults.typingAccuracy, '20%'],
+                      ['Speed',          otResults.speedScore,     '10%'],
+                    ].map(([label, value, weight]) => (
+                      <div className="tt-ot-bar" key={label}>
+                        <div className="tt-ot-bar-head">
+                          <span>{label} <em>{weight}</em></span>
+                          <strong>{value}%</strong>
+                        </div>
+                        <div className="tt-ot-bar-track">
+                          <motion.div
+                            className="tt-ot-bar-fill"
+                            initial={{ width: 0 }}
+                            animate={{ width: `${value}%` }}
+                            transition={{ duration: 0.7, delay: 0.3 }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="tt-results-stats">
                 <div className="tt-results-stat">
                   <div className="tt-results-stat-icon">🏆</div>
@@ -1202,6 +1499,36 @@ export default function TraceTypeGame() {
                   <div className="tt-results-stat-value">Level {level}</div>
                   <div className="tt-results-stat-label">Difficulty</div>
                 </div>
+                {otResults && (
+                  <>
+                    <div className="tt-results-stat">
+                      <div className="tt-results-stat-icon">〰️</div>
+                      <div className="tt-results-stat-value">{otResults.meanDeviation}px</div>
+                      <div className="tt-results-stat-label">Avg. deviation</div>
+                    </div>
+                    <div className="tt-results-stat">
+                      <div className="tt-results-stat-icon">❌</div>
+                      <div className="tt-results-stat-value">{otResults.wrongKeys}</div>
+                      <div className="tt-results-stat-label">Wrong keys</div>
+                    </div>
+                    <div className="tt-results-stat">
+                      <div className="tt-results-stat-icon">⚡</div>
+                      <div className="tt-results-stat-value">
+                        {otResults.reactionMs == null
+                          ? '—'
+                          : `${(otResults.reactionMs / 1000).toFixed(2)}s`}
+                      </div>
+                      <div className="tt-results-stat-label">Reaction time</div>
+                    </div>
+                    <div className="tt-results-stat">
+                      <div className="tt-results-stat-icon">⏸️</div>
+                      <div className="tt-results-stat-value">
+                        {otResults.pauses} · {(otResults.pauseMs / 1000).toFixed(0)}s
+                      </div>
+                      <div className="tt-results-stat-label">Pauses</div>
+                    </div>
+                  </>
+                )}
               </div>
 
               <div className="tt-results-actions">
@@ -1210,7 +1537,7 @@ export default function TraceTypeGame() {
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => {
-                    setGamePhase('waiting');
+                    setGamePhase(inputMethod === 'touch' ? 'playing' : 'waiting');
                     setCountdown(0);
                     setCurrentLetterIdx(0);
                     setStep('trace');
@@ -1228,6 +1555,8 @@ export default function TraceTypeGame() {
                     });
                     setCurrentSessionId(null);
                     setSessionSaved(false);
+                    otRef.current = makeOTAccumulator();
+                    setOtResults(null);
                   }}
                 >
                   <RotateCcw size={18} />
@@ -1256,6 +1585,21 @@ export default function TraceTypeGame() {
   return (
     <div className={`tt-page ${isLightMode ? 'tt-light-mode' : ''}`}>
       {/* ── Screens & Overlays ── */}
+      <AnimatePresence>
+        {gamePhase === 'rules' && (
+          <RulesModal
+            key="rules"
+            level={level}
+            onStart={() => {
+              /* Remembered per tab: replaying does not re-show the rules,
+                 but a fresh visit always does. */
+              sessionStorage.setItem(RULES_FLAG, '1');
+              if (soundEnabled) soundManager.playProgress();
+              setGamePhase('inputSelection');
+            }}
+          />
+        )}
+      </AnimatePresence>
       {renderInputSelection()}
       {renderCountdown()}
       {renderHandDetection()}
@@ -1560,14 +1904,7 @@ export default function TraceTypeGame() {
               {step === 'find' && (
                 <>
                   <motion.div
-                    style={{
-                      textAlign: 'center',
-                      fontSize: '4rem',
-                      fontWeight: 900,
-                      color: '#fff',
-                      marginBottom: 20,
-                      textShadow: '0 0 30px rgba(99, 102, 241, 0.3)',
-                    }}
+                    className="tt-find-target"
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{ type: 'spring', stiffness: 300, damping: 15 }}
@@ -1727,12 +2064,6 @@ export default function TraceTypeGame() {
             </div>
           </div>
         </aside>
-      </div>
-
-      {/* ── Tip Bar ──────────────────────────────────────────────── */}
-      <div className="tt-tip-bar">
-        <span className="tip-icon">💡</span>
-        {tip}
       </div>
 
       {/* ── Global Pointer Overlay ────────────────────────────────── */}

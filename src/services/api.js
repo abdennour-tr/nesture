@@ -263,7 +263,7 @@ async function handlePost(url, body) {
 
   // POST /sessions/end
   if (url === '/sessions/end') {
-    return localDB.endSession(body.session_id, body.gestures || []);
+    return localDB.endSession(body.session_id, body.gestures || [], null, body);
   }
 
   // POST /exercises

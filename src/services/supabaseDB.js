@@ -393,7 +393,7 @@ export async function startSession(learnerId, difficulty, gameName = 'LetterQues
   return { session_id: data.id };
 }
 
-export async function endSession(sessionId, gestures, reflexEngineOutput = null) {
+export async function endSession(sessionId, gestures, reflexEngineOutput = null, clientPayload = null) {
   const { analyseSession } = await import('./aiEngine.js');
 
   const { data: session, error: fetchErr } = await supabase
@@ -406,19 +406,38 @@ export async function endSession(sessionId, gestures, reflexEngineOutput = null)
   const duration = Math.round((endTime - startTime) / 1000);
 
   if (!gestures || gestures.length === 0) {
-    const total = session.total_attempts ? Number(session.total_attempts) : 1;
-    const perfect = session.perfect_grabs ? Number(session.perfect_grabs) : 1;
-    const accuracy = perfect / total;
-    await supabase.from('sessions').update({
+    const total = (clientPayload && clientPayload.total_attempts !== undefined) 
+      ? Number(clientPayload.total_attempts) 
+      : (reflexEngineOutput && reflexEngineOutput.totalAttempts !== undefined ? Number(reflexEngineOutput.totalAttempts) : (session.total_attempts ? Number(session.total_attempts) : 100));
+    
+    const perfect = (clientPayload && clientPayload.perfect_grabs !== undefined)
+      ? Number(clientPayload.perfect_grabs)
+      : (reflexEngineOutput && reflexEngineOutput.perfectGrabs !== undefined ? Number(reflexEngineOutput.perfectGrabs) : (session.perfect_grabs ? Number(session.perfect_grabs) : 0));
+    
+    const accuracy = (clientPayload && clientPayload.accuracy_score !== undefined)
+      ? Number(clientPayload.accuracy_score)
+      : (reflexEngineOutput && reflexEngineOutput.accuracy !== undefined ? Number(reflexEngineOutput.accuracy) : (total > 0 ? perfect / total : 0));
+
+    const actualAccuracyScore = parseFloat(accuracy.toFixed(4));
+    const actualAccuracyInt = Math.round(actualAccuracyScore * 100);
+
+    const updatePayload = {
       end_time: endTime.toISOString(),
-      duration_seconds: Math.max(1, duration),
+      duration_seconds: (clientPayload && clientPayload.duration_seconds !== undefined) 
+                        ? Number(clientPayload.duration_seconds) 
+                        : (reflexEngineOutput && reflexEngineOutput.duration !== undefined ? Number(reflexEngineOutput.duration) : Math.max(1, duration)),
       scenario: 'Completed Session',
-      accuracy_score: parseFloat(accuracy.toFixed(4)),
-      accuracy: Math.round(accuracy * 100),
+      accuracy_score: actualAccuracyScore,
+      accuracy: actualAccuracyInt,
       total_attempts: total,
       perfect_grabs: perfect,
       lpi_score: 85,
-    }).eq('id', sessionId);
+    };
+    if (clientPayload && clientPayload.notes !== undefined) {
+      updatePayload.notes = clientPayload.notes;
+    }
+
+    await supabase.from('sessions').update(updatePayload).eq('id', sessionId);
     return { session_id: sessionId, narrative: 'Session completed successfully.', lpi_score: 85, scenario: 'Completed Session', reflex_scores: [], recommendations: [], metrics: {} };
   }
 

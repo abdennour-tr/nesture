@@ -32,61 +32,6 @@ function useCountUp(target, duration = 1200) {
 /* ─── game catalogue ─────────────────────────────────── */
 const GAMES = [
   {
-    id: 'letterquest',
-    title: 'LetterQuest',
-    desc: 'Practice spelling words visually with hand gestures',
-    emoji: '🔤',
-    accent: '#1A8FA0',
-    bg: 'linear-gradient(135deg, #EEF6F8 0%, #D1ECF0 100%)',
-    enabled: true,
-    route: '/play/difficulty',
-    badge: 'ACTIVE',
-  },
-  {
-    id: 'fingercopy',
-    title: 'Magic Finger Copy',
-    desc: 'Imitate hand gestures using your webcam',
-    emoji: '🖐️',
-    accent: '#8B5CF6',
-    bg: 'linear-gradient(135deg, #F3E8FF 0%, #DDD6FE 100%)',
-    enabled: true,
-    route: '/play/finger-copy-difficulty',
-    badge: 'NEW',
-  },
-  {
-    id: 'tracetype',
-    title: 'Trace → Find → Type',
-    desc: 'Learn letters by tracing, finding & typing them',
-    emoji: '✏️',
-    accent: '#6366F1',
-    bg: 'linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%)',
-    enabled: true,
-    route: '/play/trace-type-difficulty',
-    badge: 'NEW',
-  },
-  {
-    id: 'fingerpiano',
-    title: 'Finger Piano',
-    desc: 'Play piano keys using the correct fingers!',
-    emoji: '🎹',
-    accent: '#7C3AED',
-    bg: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)',
-    enabled: true,
-    route: '/play/finger-piano-difficulty',
-    badge: 'NEW',
-  },
-  {
-    id: 'pinchcoin',
-    title: 'Pinch the Coin',
-    desc: 'Pinch the coin and drop it in the piggy bank!',
-    emoji: '🪙',
-    accent: '#F59E0B',
-    bg: 'linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)',
-    enabled: true,
-    route: '/play/pinch-coin-difficulty',
-    badge: 'NEW',
-  },
-  {
     id: 'ladybug',
     title: 'Follow the Ladybug',
     desc: 'Trace the moving ladybug with your index finger!',
@@ -109,32 +54,100 @@ const GAMES = [
     badge: 'NEW',
   },
   {
-    id: 'math',
-    title: 'Number / Math',
-    desc: 'Count and solve simple equations',
-    emoji: '🔢',
-    accent: '#6B7280',
-    bg: '#F9FAFB',
-    enabled: false,
+    id: 'tracetype',
+    title: 'Trace → Find → Type',
+    desc: 'Learn letters by tracing, finding & typing them',
+    emoji: '✏️',
+    accent: '#6366F1',
+    bg: 'linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%)',
+    enabled: true,
+    route: '/play/trace-type-difficulty',
+    badge: 'NEW',
   },
   {
-    id: 'tracing',
-    title: 'PathTracer',
-    desc: 'Trace des formes et lettres avec ton doigt !',
-    emoji: '🐾',
-    accent: '#6B7280',
-    bg: '#F9FAFB',
-    enabled: false,
+    id: 'pinchcoin',
+    title: 'Pinch the Coin',
+    desc: 'Pinch the coin and drop it in the piggy bank!',
+    emoji: '🪙',
+    accent: '#F59E0B',
+    bg: 'linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)',
+    enabled: true,
+    route: '/play/pinch-coin-difficulty',
+    badge: 'NEW',
   },
   {
-    id: 'lifeskills',
-    title: 'Life Skills',
-    desc: 'Learn everyday practical activities',
-    emoji: '🌟',
-    accent: '#6B7280',
-    bg: '#F9FAFB',
-    enabled: false,
+    id: 'fingerpiano',
+    title: 'Finger Piano',
+    desc: 'Play piano keys using the correct fingers!',
+    emoji: '🎹',
+    accent: '#7C3AED',
+    bg: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)',
+    enabled: true,
+    route: '/play/finger-piano-difficulty',
+    badge: 'NEW',
   },
+  {
+    id: 'letterquest',
+    title: 'LetterQuest',
+    desc: 'Practice spelling words visually with hand gestures',
+    emoji: '🔤',
+    accent: '#1A8FA0',
+    bg: 'linear-gradient(135deg, #EEF6F8 0%, #D1ECF0 100%)',
+    enabled: true,
+    route: '/play/difficulty',
+    badge: 'ACTIVE',
+  },
+  {
+    id: 'fingercopy',
+    title: 'Magic Finger Copy',
+    desc: 'Imitate hand gestures using your webcam',
+    emoji: '🖐️',
+    accent: '#8B5CF6',
+    bg: 'linear-gradient(135deg, #F3E8FF 0%, #DDD6FE 100%)',
+    enabled: true,
+    route: '/play/finger-copy-difficulty',
+    badge: 'NEW',
+  },
+  {
+    id: 'touchstar',
+    title: 'Touch the Star',
+    desc: 'Reach out and touch the glowing stars!',
+    emoji: '⭐',
+    accent: '#F59E0B',
+    bg: '#FFFBEB',
+    enabled: false,
+    badge: 'Under construction'
+  },
+  {
+    id: 'dottodot',
+    title: 'Dot-to-Dot',
+    desc: 'Connect the dots to reveal a hidden picture!',
+    emoji: '🖍️',
+    accent: '#F59E0B',
+    bg: '#FFFBEB',
+    enabled: false,
+    badge: 'Under construction'
+  },
+  {
+    id: 'dragapple',
+    title: 'Drag the Apple',
+    desc: 'Drag and drop the apples into the basket!',
+    emoji: '🍎',
+    accent: '#F59E0B',
+    bg: '#FFFBEB',
+    enabled: false,
+    badge: 'Under construction'
+  },
+  {
+    id: 'fingerzone',
+    title: 'Finger Zone',
+    desc: 'Keep your fingers inside the safe zones!',
+    emoji: '🎯',
+    accent: '#F59E0B',
+    bg: '#FFFBEB',
+    enabled: false,
+    badge: 'Under construction'
+  }
 ];
 
 /* ════════════════════════════════════════════════════════ */
@@ -211,13 +224,35 @@ export default function LearnerHome() {
     fetchStats();
   }, [user?.id, profile?.learner_id]);
 
+  /* ── helper to get real accuracy from notes for past sessions ── */
+  const getAccuracyScore = (sess) => {
+    let acc = parseFloat(sess.accuracy_score) || 0;
+    try {
+      if (sess.notes) {
+        const notes = typeof sess.notes === 'string' ? JSON.parse(sess.notes) : sess.notes;
+        if (sess.game_name?.toLowerCase().includes('ladybug')) {
+          if (notes.performanceScore !== undefined) {
+            acc = notes.performanceScore / 100;
+          } else if (notes.score !== undefined) {
+            acc = notes.score / 100;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to parse notes for session", sess.id, e);
+    }
+    // Safety fallback if something is drastically wrong
+    if (acc > 1 && acc <= 100) acc = acc / 100;
+    return acc;
+  };
+
   /* ── computed stats ── */
   const totalGames = sessions.length;
   const level = Math.max(1, Math.floor(totalGames / 2) + 1);
   const totalMinutes = Math.round(
     sessions.reduce((a, s) => a + (parseFloat(s.duration_seconds) || 0), 0) / 60
   );
-  const totalAcc = sessions.reduce((a, s) => a + (parseFloat(s.accuracy_score) || 0), 0);
+  const totalAcc = sessions.reduce((a, s) => a + getAccuracyScore(s), 0);
   const avgAccuracy = totalGames > 0 ? Math.round((totalAcc / totalGames) * 100) : 0;
 
   /* animated values */
@@ -244,7 +279,7 @@ export default function LearnerHome() {
   /* ── chart data (last 10 sessions reversed chronologically) ── */
   const chartData = [...sessions].reverse().slice(-10).map((s, i) => ({
     session: `S${i + 1}`,
-    accuracy: Math.round(parseFloat(s.accuracy_score || 0) * 100),
+    accuracy: Math.round(getAccuracyScore(s) * 100),
     duration: Math.round(parseFloat(s.duration_seconds || 0) / 60),
   }));
 
@@ -607,28 +642,31 @@ export default function LearnerHome() {
                     </tr>
                   </thead>
                   <tbody>
-                    {pagedHistory.map((sess, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #F0F5F7' }}>
-                        <td data-label="Date" style={s.progTd}>{sess.start_time?.slice(0, 10) || '—'}</td>
-                        <td data-label="Game" style={{ ...s.progTd, fontWeight: 600 }}>
-                          {sess.game_name === 'LetterQuest' ? 'LetterQuest' : (sess.game_name || 'LetterQuest')}
-                        </td>
-                        <td data-label="Duration" style={s.progTd}>{Math.round((parseFloat(sess.duration_seconds) || 0) / 60)} min</td>
-                        <td data-label="Accuracy" style={s.progTd}>
-                          <span style={{ fontWeight: 700, color: parseFloat(sess.accuracy_score) > 0.7 ? '#22C55E' : '#F59E0B' }}>
-                            {Math.round(parseFloat(sess.accuracy_score || 0) * 100)}%
-                          </span>
-                        </td>
-                        <td data-label="Difficulty" style={s.progTd}>
-                          <span style={{
-                            ...s.diffBadge,
-                            background: sess.difficulty === 'hard' ? '#FEE2E2' : sess.difficulty === 'medium' ? '#FEF9C3' : '#D1FAE5',
-                            color: sess.difficulty === 'hard' ? '#991B1B' : sess.difficulty === 'medium' ? '#92400E' : '#065F46',
-                          }}>{sess.difficulty || '—'}</span>
-                        </td>
-                        <td data-label="Perfect Actions" style={s.progTd}>{parseInt(sess.perfect_grabs, 10) || 0}</td>
-                      </tr>
-                    ))}
+                    {pagedHistory.map((sess, i) => {
+                      const finalAcc = getAccuracyScore(sess);
+                      return (
+                        <tr key={i} style={{ borderBottom: '1px solid #F0F5F7' }}>
+                          <td data-label="Date" style={s.progTd}>{sess.start_time?.slice(0, 10) || '—'}</td>
+                          <td data-label="Game" style={{ ...s.progTd, fontWeight: 600 }}>
+                            {sess.game_name === 'LetterQuest' ? 'LetterQuest' : (sess.game_name || 'LetterQuest')}
+                          </td>
+                          <td data-label="Duration" style={s.progTd}>{Math.round((parseFloat(sess.duration_seconds) || 0) / 60)} min</td>
+                          <td data-label="Accuracy" style={s.progTd}>
+                            <span style={{ fontWeight: 700, color: finalAcc > 0.7 ? '#22C55E' : '#F59E0B' }}>
+                              {Math.round(finalAcc * 100)}%
+                            </span>
+                          </td>
+                          <td data-label="Difficulty" style={s.progTd}>
+                            <span style={{
+                              ...s.diffBadge,
+                              background: sess.difficulty === 'hard' ? '#FEE2E2' : sess.difficulty === 'medium' ? '#FEF9C3' : '#D1FAE5',
+                              color: sess.difficulty === 'hard' ? '#991B1B' : sess.difficulty === 'medium' ? '#92400E' : '#065F46',
+                            }}>{sess.difficulty || '—'}</span>
+                          </td>
+                          <td data-label="Perfect Actions" style={s.progTd}>{parseInt(sess.perfect_grabs, 10) || 0}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
 

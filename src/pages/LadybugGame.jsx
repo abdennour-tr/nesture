@@ -933,8 +933,8 @@ export default function LadybugGame() {
     api.post('/sessions/end', {
       session_id: sessionId,
       duration_seconds: durationSeconds,
-      accuracy_score: parseFloat((results.accuracy / 100).toFixed(2)),
-      accuracy: results.accuracy,
+      accuracy_score: parseFloat((results.composite / 100).toFixed(2)),
+      accuracy: results.composite,
       perfect_grabs: results.composite,
       total_attempts: 100,
       game_name: 'Follow the Ladybug',
@@ -959,7 +959,7 @@ export default function LadybugGame() {
     }).then(() => {
       storeEndSession({
         duration: durationSeconds,
-        accuracy: results.accuracy,
+        accuracy: parseFloat((results.composite / 100).toFixed(2)),
         perfectGrabs: results.composite,
       });
     }).catch((err) => console.error('[LadybugGame] Failed to save session:', err));
