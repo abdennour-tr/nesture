@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Star, Trophy, Clock, LogOut, ArrowLeft, AlertTriangle, Info } from 'lucide-react';
+import { Play, Star, Trophy, Clock, LogOut, ArrowLeft, AlertTriangle, Info, Video, Hand } from 'lucide-react';
 import { useAuthStore } from '../store';
 import api from '../services/api';
 import toast from 'react-hot-toast';
@@ -90,12 +90,42 @@ const DIFFICULTY_KB_DEFAULTS = {
   self_expression: 'standard',
 };
 
+/* ── Input modes ───────────────────────────────────────────────────────────
+   Camera is the therapeutic exercise; touch is the way the same exercise stays
+   reachable when the camera is not. Touch is not a lesser mode — it opens no
+   webcam at all, so it works on a machine that has none. */
+const INPUT_MODES = [
+  {
+    key: 'camera',
+    label: 'Hand in air',
+    desc: 'Point your finger and hold the position',
+    icon: Video,
+    color: '#0D5E6B',
+    tintBg: '#EEF6F8',
+    ring: 'rgba(13,94,107,0.12)',
+  },
+  {
+    key: 'touch',
+    label: 'Touch',
+    desc: 'Tap the keys directly, no camera',
+    icon: Hand,
+    color: '#7C3AED',
+    tintBg: '#F5F1FE',
+    ring: 'rgba(124,58,237,0.12)',
+  },
+];
+
 export default function DifficultySelection() {
   const { user, profile, logout } = useAuthStore();
   const userId = profile?.id || user?.id;
   const navigate = useNavigate();
   const [difficulty, setDifficulty] = useState('easy');
   const [keyboardSize, setKeyboardSize] = useState('big');
+  /* How the child will select letters. Camera by default — holding the finger
+     in the air IS the exercise — but a session on a device with no webcam, in
+     a room too dark to track, or with a child whose arm cannot be held up, is
+     still a session worth having. */
+  const [inputMode, setInputMode] = useState('camera');
 
   // Learner stats (dynamic)
   const [learnerSessions, setLearnerSessions] = useState([]);
@@ -204,6 +234,7 @@ export default function DifficultySelection() {
 
   const currentLevel = LEVELS.find(l => l.key === difficulty);
   const currentKb = KEYBOARD_SIZES.find(k => k.key === keyboardSize);
+  const currentMode = INPUT_MODES.find(m => m.key === inputMode);
   const isSelfExpression = difficulty === 'self_expression';
 
   // Compute dynamic stats from current learner's sessions
@@ -329,6 +360,35 @@ export default function DifficultySelection() {
           </div>
         </div>
 
+        {/* ── Input mode picker ── */}
+        <div style={styles.section}>
+          <div style={styles.sectionTitle}>Input Mode</div>
+          <div style={styles.sectionHint}>How the child selects letters</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            {INPUT_MODES.map((m) => {
+              const isActive = inputMode === m.key;
+              const Icon = m.icon;
+              return (
+                <motion.button
+                  key={m.key}
+                  onClick={() => setInputMode(m.key)}
+                  whileHover={{ y: -2 }}
+                  whileTap={{ scale: 0.97 }}
+                  style={{
+                    ...styles.kbBtn,
+                    ...(isActive ? { background: m.tintBg, borderColor: m.color, boxShadow: `0 0 0 3px ${m.ring}` } : {}),
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                  }}
+                >
+                  <Icon size={22} color={isActive ? m.color : '#9CA3AF'} />
+                  <div style={{ ...styles.levelLabel, color: isActive ? m.color : '#374151' }}>{m.label}</div>
+                  <div style={{ ...styles.levelDesc, marginTop: 0 }}>{m.desc}</div>
+                </motion.button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* ── Keyboard size picker (3 sizes) ── */}
         <div style={styles.section}>
           <div style={styles.sectionTitle}>Keyboard Size</div>
@@ -412,11 +472,20 @@ export default function DifficultySelection() {
           <span style={styles.configBadge}>
             ⌨️ {currentKb?.label} ({currentKb?.visibleKeys} keys)
           </span>
+          <span style={styles.configPlus}>+</span>
+          <span style={{
+            ...styles.configBadge,
+            color: currentMode?.color,
+            background: currentMode?.tintBg,
+            borderColor: currentMode?.color,
+          }}>
+            {inputMode === 'camera' ? '✋' : '👆'} {currentMode?.label}
+          </span>
         </div>
 
         {/* Start button */}
         <motion.button
-          onClick={() => navigate(`/play/game?difficulty=${difficulty}&keyboardSize=${keyboardSize}`)}
+          onClick={() => navigate(`/play/game?difficulty=${difficulty}&keyboardSize=${keyboardSize}&mode=${inputMode}`)}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           style={styles.startBtn}

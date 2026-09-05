@@ -8,7 +8,13 @@
  * Détection de patrons développementaux (non diagnostique)
  */
 
-import { pearsonCorrelation, indexExtension, clamp, mean } from '../mathUtils.js';
+import { pearsonCorrelation, indexExtension, clamp, mean, hasVariation } from '../mathUtils.js';
+
+/* A reflex the data could not support is reported as `not_measured`, never as
+   `none` with a score of 0. "none" means measured and integrated; before this
+   distinction existed, a camera that saw nothing produced a clean bill of
+   health, and `toAiEngineFormat` sent Supabase a score of 100 — "perfectly
+   integrated" — for a reflex nobody had observed. */
 
 /**
  * @param {Array} frames - Buffer de frames récentes
@@ -16,7 +22,7 @@ import { pearsonCorrelation, indexExtension, clamp, mean } from '../mathUtils.js
  */
 export function detectSTNR(frames) {
   if (!frames || frames.length < 5) {
-    return { score: 0, label: 'none', confidence: 0, detail: 'Insufficient data' };
+    return { score: null, label: 'not_measured', confidence: 0, detail: 'Insufficient data' };
   }
 
   const pitchSeries  = [];
@@ -40,7 +46,21 @@ export function detectSTNR(frames) {
   }
 
   if (pitchSeries.length < 5) {
-    return { score: 0, label: 'none', confidence: 0, detail: 'Insufficient data' };
+    return { score: null, label: 'not_measured', confidence: 0, detail: 'Insufficient data' };
+  }
+
+  /* Sans variation du pitch, il n'y a rien à corréler : le score de 0 qui en
+     sortait se lisait comme « intégré ». */
+  if (!hasVariation(pitchSeries) || !hasVariation(avgExtSeries)) {
+    return {
+      score: null, label: 'not_measured', confidence: 0,
+      detail: {
+        reason: !hasVariation(pitchSeries)
+          ? 'Head pitch did not vary — nothing to correlate'
+          : 'Arm extension did not vary — nothing to correlate',
+        frames_analyzed: pitchSeries.length,
+      },
+    };
   }
 
   // STNR : tête en extension (pitch+) → bras s'étendent

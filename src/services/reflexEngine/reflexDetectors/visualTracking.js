@@ -17,16 +17,41 @@ import {
   mean,
 } from '../mathUtils.js';
 
+/* A reflex the data could not support is reported as `not_measured`, never as
+   `none` with a score of 0. "none" means measured and integrated; before this
+   distinction existed, a camera that saw nothing produced a clean bill of
+   health, and `toAiEngineFormat` sent Supabase a score of 100 — "perfectly
+   integrated" — for a reflex nobody had observed. */
+
 const LATENCY_TEST_OFFSETS = [0, 1, 2, 3, 4, 5]; // frames de décalage à tester
 
 /**
  * @param {Array} frames
  * @returns {Object}
  */
+/* ── Suspended ─────────────────────────────────────────────────────────────
+   This detector reported "strong" on essentially every session — 96 to 99 out
+   of 100 even on clean synthetic data where the eyes tracked the hand. Two
+   reasons, both structural:
+
+     1. It correlates finger SPEED with eye SPEED. Two signals that both rise
+        and fall but not in lockstep correlate near zero, so `1 - corr` lands
+        near 1 whatever the child does.
+     2. "Eye speed" comes from the iris centre in absolute image coordinates,
+        which moves when the head moves even if the gaze is perfectly still.
+        It cannot separate gaze from head translation.
+
+   Reporting it would put "Attention Required" on every session report and bury
+   the reflexes that ARE measured. It is suspended rather than deleted: the
+   measurement below still runs and is returned in `detail`, so the correlation
+   can be reviewed against real recordings before the scoring is redesigned
+   with the occupational therapist.  */
+const SUSPENDED = true;
+
 export function detectVisualTracking(frames) {
   if (!frames || frames.length < 10) {
     return {
-      score: 0, label: 'none', confidence: 0,
+      score: null, label: 'not_measured', confidence: 0,
       detail: 'Insufficient data'
     };
   }
@@ -77,7 +102,7 @@ export function detectVisualTracking(frames) {
 
   if (fingerSpeedSeries.length < 8) {
     return {
-      score: 0, label: 'none', confidence: 0,
+      score: null, label: 'not_measured', confidence: 0,
       detail: 'Insufficient complete frames'
     };
   }
@@ -114,10 +139,12 @@ export function detectVisualTracking(frames) {
   const latencyMs  = Math.round(bestOffset * avgFrameMs);
 
   return {
-    score: retentionScore,
-    label,
-    confidence: clamp(fingerSpeedSeries.length / frames.length, 0, 1),
+    score: SUSPENDED ? null : retentionScore,
+    label: SUSPENDED ? 'not_measured' : label,
+    confidence: SUSPENDED ? 0 : clamp(fingerSpeedSeries.length / frames.length, 0, 1),
     detail: {
+      suspended: SUSPENDED ? 'Scoring suspended pending redesign — see file header' : undefined,
+      would_have_scored: retentionScore,
       best_correlation: bestCorr.toFixed(3),
       latency_frames: bestOffset,
       latency_ms: latencyMs,

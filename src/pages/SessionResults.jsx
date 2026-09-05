@@ -38,6 +38,11 @@ export default function SessionResults() {
   const accuracyPct = Math.round((metrics.accuracy || 0) * 100);
   const rtSec = ((metrics.avg_response_time_ms || 0) / 1000).toFixed(1);
   const isHappyPath = analysis?.scenario === 'happy_path';
+  /* How many reflexes rest on a real observation. Older sessions carry no
+     `measured` flag; there, a numeric score means it was measured. */
+  const reflexesMeasured = analysis?.reflexes_measured ?? (
+    analysis?.reflex_scores?.filter(r => r.measured !== false && typeof r.score === 'number').length ?? 0
+  );
 
   return (
     <div style={styles.root} className="sr-root">
@@ -91,13 +96,43 @@ export default function SessionResults() {
         {/* Reflex scores */}
         {analysis?.reflex_scores?.length > 0 && (
           <div>
-            <div style={styles.sectionTitle}>Reflex Patterns Detected</div>
+            <div style={styles.sectionTitle}>
+              {reflexesMeasured === 0 ? 'Reflex Patterns — Not Measured' : 'Reflex Patterns Detected'}
+            </div>
+
+            {/* Why there is nothing to show. Without this, an empty or greyed
+                grid reads as a malfunction — and a touch-mode session, where no
+                camera ever ran, looks identical to a webcam failure. */}
+            {reflexesMeasured === 0 && (
+              <div style={styles.reflexNotice}>
+                <span style={{ fontSize: '1.3rem' }}>{analysis?.camera_used === false ? '👆' : '📷'}</span>
+                <div>
+                  <div style={styles.reflexNoticeTitle}>
+                    {analysis?.camera_used === false
+                      ? 'Played in touch mode — reflexes not applicable'
+                      : 'No reflex could be observed this session'}
+                  </div>
+                  <div style={styles.reflexNoticeText}>
+                    {analysis?.reflex_not_measured_reason
+                      || 'Reflex patterns need the camera. Play in “Hand in air” mode to measure them.'}
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div style={styles.reflexGrid} className="sr-reflex-grid">
               {analysis.reflex_scores.map((r) => (
                 <ReflexScoreCard
                   key={r.reflex}
                   reflex={r.reflex}
                   score={r.score}
+                  /* `label` and `measured` were never passed, so the card fell
+                     back to its own threshold — which read the integration
+                     score backwards and printed "STRONG" in red on every good
+                     result. The engine's own verdict travels with the score
+                     now. */
+                  label={r.label}
+                  measured={r.measured}
                   confidence={r.confidence}
                   trend="stable"
                   compact
@@ -266,6 +301,18 @@ const styles = {
     fontWeight: 700, fontSize: '0.9rem',
     color: '#0D5E6B', textTransform: 'uppercase',
     letterSpacing: '0.05em', marginBottom: 12,
+  },
+  reflexNotice: {
+    display: 'flex', gap: 12, alignItems: 'flex-start',
+    background: '#F1F5F9', border: '1px solid #E2E8F0',
+    borderRadius: 12, padding: '14px 16px', marginBottom: 14,
+  },
+  reflexNoticeTitle: {
+    fontFamily: 'Inter, sans-serif', fontWeight: 700,
+    fontSize: '0.88rem', color: '#334155',
+  },
+  reflexNoticeText: {
+    fontSize: '0.8rem', color: '#64748B', marginTop: 3, lineHeight: 1.5,
   },
   reflexGrid: {
     display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10,

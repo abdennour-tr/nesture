@@ -71,6 +71,28 @@ export default function PathTracingGame() {
   const { startTracking, stopTracking, pushFrame } = useReflexEngine({ analyzeEveryMs: 4000 });
   const reflexEngineOutputRef = useRef(null);
 
+  /* ── What the reflex engine is fed ──────────────────────────────────────
+     The game loop below is a useCallback whose dependency list does not
+     include multiHandData, faceLandmarks or headPose, so it captured them from
+     the render in which it was created and never saw another value: the engine
+     spent every session correlating against a frozen null face and a head pose
+     of {pitch:0, yaw:0}. A constant series has zero variance, so Pearson
+     returns 0 and every head- and face-based reflex reads as "none".
+
+     Refs, updated by their own effects, are what a 60 Hz loop can safely read.
+     The face mesh is additionally computed on one camera frame in five, so a
+     frame carries it only when it is genuinely a new observation — repeating
+     the same landmarks four times told the engine the eyes were motionless. */
+  const multiHandDataRef  = useRef(null);
+  const faceLandmarksRef  = useRef(null);
+  const headPoseRef       = useRef({ pitch: 0, yaw: 0 });
+  const lastPushedFaceRef = useRef(null);
+  const pushFrameRef      = useRef(pushFrame);
+  useEffect(() => { multiHandDataRef.current = multiHandData; }, [multiHandData]);
+  useEffect(() => { faceLandmarksRef.current = faceLandmarks; }, [faceLandmarks]);
+  useEffect(() => { headPoseRef.current = headPose || { pitch: 0, yaw: 0 }; }, [headPose]);
+  useEffect(() => { pushFrameRef.current = pushFrame; }, [pushFrame]);
+
   // ── Game state ───────────────────────────────────────────────────
   const [phase, setPhase]                     = useState('countdown'); // countdown | waiting | tracing | celebration | complete
   const [countdownVal, setCountdownVal]       = useState(COUNTDOWN_SECS);
@@ -283,14 +305,18 @@ export default function PathTracingGame() {
         }
       }
 
-      // Push frame to reflex engine
+      // Push frame to reflex engine — see the refs above for why none of this
+      // reads React state directly any more.
       if (lm) {
-        pushFrame({
-          leftHand:  multiHandData?.left  || null,
-          rightHand: multiHandData?.right || lm,
-          faceMesh:  faceLandmarks || null,
-          headPitch: headPose?.pitch ?? 0,
-          headYaw:   headPose?.yaw   ?? 0,
+        const face = faceLandmarksRef.current;
+        const faceIsNew = face && face !== lastPushedFaceRef.current;
+        if (faceIsNew) lastPushedFaceRef.current = face;
+        pushFrameRef.current({
+          leftHand:  multiHandDataRef.current?.left  || null,
+          rightHand: multiHandDataRef.current?.right || lm,
+          faceMesh:  faceIsNew ? face : null,
+          headPitch: headPoseRef.current?.pitch ?? 0,
+          headYaw:   headPoseRef.current?.yaw   ?? 0,
         });
       }
 
@@ -376,7 +402,7 @@ export default function PathTracingGame() {
     };
 
     rafRef.current = requestAnimationFrame(tick);
-  }, [config.tolerance, pushFrame]);
+  }, [config.tolerance]);
 
   // Start game loop
   useEffect(() => {

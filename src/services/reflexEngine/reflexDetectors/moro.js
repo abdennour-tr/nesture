@@ -10,6 +10,12 @@
 
 import { distance3D, speed, clamp } from '../mathUtils.js';
 
+/* A reflex the data could not support is reported as `not_measured`, never as
+   `none` with a score of 0. "none" means measured and integrated; before this
+   distinction existed, a camera that saw nothing produced a clean bill of
+   health, and `toAiEngineFormat` sent Supabase a score of 100 — "perfectly
+   integrated" — for a reflex nobody had observed. */
+
 const OUTWARD_THRESHOLD  = 0.04; // vitesse min pour mouvement vers l'extérieur
 const INWARD_THRESHOLD   = 0.03; // vitesse min pour mouvement vers l'intérieur
 const TIME_WINDOW_MS     = 1200; // la séquence doit se produire dans ce délai
@@ -21,7 +27,7 @@ const TIME_WINDOW_MS     = 1200; // la séquence doit se produire dans ce délai
  */
 export function detectMoro(frames) {
   if (!frames || frames.length < 6) {
-    return { score: 0, label: 'none', confidence: 0, events: 0, detail: 'Insufficient data' };
+    return { score: null, label: 'not_measured', confidence: 0, events: 0, detail: 'Insufficient data' };
   }
 
   let moroEvents = 0;
@@ -33,6 +39,23 @@ export function detectMoro(frames) {
     const right = f.rightHand ? f.rightHand[0] : null;
     return { left, right, ts: f.timestamp };
   }).filter(p => p.left && p.right);
+
+  /* Moro is a BILATERAL pattern: it needs both wrists. With one hand in view —
+     which is Letter Quest's normal case — the old code found zero events and
+     reported score 0 / "none", i.e. "integrated". Finding no evidence of a
+     reflex you had no way to observe is not the same as observing its absence. */
+  const MIN_BILATERAL_FRAMES = 15;
+  if (wristPositions.length < MIN_BILATERAL_FRAMES) {
+    return {
+      score: null, label: 'not_measured', confidence: 0, events: 0,
+      detail: {
+        reason: 'Both hands were not in view long enough — Moro is bilateral',
+        frames_with_both_hands: wristPositions.length,
+        required: MIN_BILATERAL_FRAMES,
+        frames_analyzed: frames.length,
+      },
+    };
+  }
 
   for (let i = 1; i < wristPositions.length; i++) {
     const prev = wristPositions[i - 1];

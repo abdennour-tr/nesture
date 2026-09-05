@@ -19,21 +19,57 @@ const REFLEX_META = {
 
 // ── Label → couleur badge ──────────────────────────────────────────────────────
 const LABEL_COLORS = {
-  'strong':   { bg: '#FEE2E2', text: '#EF4444' },
-  'moderate': { bg: '#FEF3C7', text: '#D97706' },
-  'weak': { bg: '#ECFCCB', text: '#65A30D' },
-  'none':  { bg: '#F3F4F6', text: '#6B7280' },
+  'strong':       { bg: '#FEE2E2', text: '#EF4444' },
+  'moderate':     { bg: '#FEF3C7', text: '#D97706' },
+  'weak':         { bg: '#ECFCCB', text: '#65A30D' },
+  'none':         { bg: '#DCFCE7', text: '#16A34A' },
+  'not_measured': { bg: '#F3F4F6', text: '#6B7280' },
 };
 
-export default function ReflexScoreCard({ reflex, score, confidence, label, trend, compact }) {
-  const meta     = REFLEX_META[reflex] || { color: '#6B7280', bg: '#F3F4F6', icon: '🧠', desc: '', category: '' };
-  const numScore = Number(score) || 0;
+const LABEL_TEXT = {
+  'strong':       'Strong',
+  'moderate':     'Moderate',
+  'weak':         'Mild',
+  'none':         'Integrated',
+  'not_measured': 'Not measured',
+};
 
-  const resolvedLabel = label || (
-    numScore >= 65 ? 'strong' : numScore >= 40 ? 'moderate' : numScore >= 20 ? 'weak' : 'none'
-  );
-  const lblStyle  = LABEL_COLORS[resolvedLabel] || LABEL_COLORS['none'];
-  const confColor = confidence === 'High' ? '#EF4444' : confidence === 'Medium' ? '#F59E0B' : '#10B981';
+/* ── The score scale, stated once ───────────────────────────────────────────
+   The number this card receives is an INTEGRATION score: 100 means the reflex
+   is well integrated, 10 means strongly retained. The card's own fallback used
+   to read it the other way round — `score >= 65 ? 'strong'` — so a child who
+   scored 89, an excellent result, had every card on the results screen labelled
+   "STRONG" in red. The panel read as an alarming finding when it was in fact
+   the opposite, and because SessionResults never passed `label`, this fallback
+   was what every parent actually saw.
+
+   The thresholds below are the ones aiEngine itself uses, in the same
+   direction. */
+function labelFromIntegrationScore(score) {
+  if (typeof score !== 'number') return 'not_measured';
+  return score < 35 ? 'strong'
+    : score < 55 ? 'moderate'
+    : score < 75 ? 'weak'
+    : 'none';
+}
+
+export default function ReflexScoreCard({ reflex, score, confidence, label, trend, compact, measured }) {
+  const meta     = REFLEX_META[reflex] || { color: '#6B7280', bg: '#F3F4F6', icon: '🧠', desc: '', category: '' };
+
+  /* A reflex with nothing behind it is rendered as such — not as a 0, which
+     the scale above would read as "strongly retained". */
+  const isMeasured = measured !== false && score !== null && score !== undefined && !Number.isNaN(Number(score));
+  const numScore = isMeasured ? Number(score) : null;
+
+  const resolvedLabel = !isMeasured
+    ? 'not_measured'
+    : (label && label !== 'not_measured' ? label : labelFromIntegrationScore(numScore));
+  const lblStyle  = LABEL_COLORS[resolvedLabel] || LABEL_COLORS['not_measured'];
+  const labelText = LABEL_TEXT[resolvedLabel] || resolvedLabel;
+  /* Confidence is how much the measurement can be trusted — high confidence is
+     good news about the measurement, whatever the finding. It was coloured red
+     for "High" and green for "Low", which reads as the opposite. */
+  const confColor = confidence === 'High' ? '#16A34A' : confidence === 'Medium' ? '#D97706' : '#9CA3AF';
 
   const TrendIcon  = trend === 'improving' ? TrendingUp : trend === 'declining' ? TrendingDown : Minus;
   const trendColor = trend === 'improving' ? '#10B981'  : trend === 'declining' ? '#EF4444'    : '#9CA3AF';
@@ -46,14 +82,15 @@ export default function ReflexScoreCard({ reflex, score, confidence, label, tren
         animate={{ opacity: 1, y: 0 }}
         whileHover={{ y: -3, boxShadow: `0 10px 28px ${meta.color}30` }}
         style={{
-          background: meta.bg,
+          background: isMeasured ? meta.bg : '#F8FAFC',
+          opacity: isMeasured ? 1 : 0.85,
           borderRadius: 12,
           padding: '12px 14px',
           display: 'flex',
           flexDirection: 'column',
           gap: 7,
-          borderLeft: `4px solid ${meta.color}`,
-          boxShadow: `0 2px 10px ${meta.color}18`,
+          borderLeft: `4px solid ${isMeasured ? meta.color : '#CBD5E1'}`,
+          boxShadow: isMeasured ? `0 2px 10px ${meta.color}18` : 'none',
         }}
       >
         {/* Name + label badge */}
@@ -72,7 +109,7 @@ export default function ReflexScoreCard({ reflex, score, confidence, label, tren
             textTransform: 'uppercase', letterSpacing: '0.04em',
             whiteSpace: 'nowrap',
           }}>
-            {resolvedLabel}
+            {labelText}
           </span>
         </div>
 
@@ -83,20 +120,30 @@ export default function ReflexScoreCard({ reflex, score, confidence, label, tren
 
         {/* Score */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
-          <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 800, fontSize: '1.4rem', color: meta.color }}>
-            {numScore}
-          </span>
-          <span style={{ fontSize: '0.7rem', color: '#9CA3AF' }}>/100</span>
+          {isMeasured ? (
+            <>
+              <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 800, fontSize: '1.4rem', color: meta.color }}>
+                {numScore}
+              </span>
+              <span style={{ fontSize: '0.7rem', color: '#9CA3AF' }}>/100</span>
+            </>
+          ) : (
+            <span style={{ fontSize: '0.78rem', color: '#9CA3AF', fontWeight: 600, fontStyle: 'italic' }}>
+              No observation this session
+            </span>
+          )}
         </div>
 
-        {/* Progress bar */}
+        {/* Progress bar — a bar at 0% would read as a measured floor. */}
         <div style={{ height: 5, background: 'rgba(0,0,0,0.08)', borderRadius: 99, overflow: 'hidden' }}>
-          <motion.div
-            initial={{ width: 0 }}
-            animate={{ width: `${numScore}%` }}
-            transition={{ duration: 0.7, ease: 'easeOut' }}
-            style={{ height: '100%', background: meta.color, borderRadius: 99 }}
-          />
+          {isMeasured && (
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${numScore}%` }}
+              transition={{ duration: 0.7, ease: 'easeOut' }}
+              style={{ height: '100%', background: meta.color, borderRadius: 99 }}
+            />
+          )}
         </div>
       </motion.div>
     );
@@ -126,28 +173,40 @@ export default function ReflexScoreCard({ reflex, score, confidence, label, tren
       </div>
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 2 }}>
-        <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 800, fontSize: '2rem', color: meta.color }}>
-          {numScore}
-        </span>
-        <span style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>/100</span>
+        {isMeasured ? (
+          <>
+            <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 800, fontSize: '2rem', color: meta.color }}>
+              {numScore}
+            </span>
+            <span style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>/100</span>
+          </>
+        ) : (
+          <span style={{ fontSize: '0.85rem', color: '#9CA3AF', fontWeight: 600, fontStyle: 'italic' }}>
+            No observation this session
+          </span>
+        )}
       </div>
 
       <div style={{ height: 6, background: 'rgba(0,0,0,0.08)', borderRadius: 3, overflow: 'hidden' }}>
-        <motion.div
-          initial={{ width: 0 }}
-          animate={{ width: `${numScore}%` }}
-          transition={{ duration: 0.8, ease: 'easeOut' }}
-          style={{ height: '100%', borderRadius: 3, background: meta.color }}
-        />
+        {isMeasured && (
+          <motion.div
+            initial={{ width: 0 }}
+            animate={{ width: `${numScore}%` }}
+            transition={{ duration: 0.8, ease: 'easeOut' }}
+            style={{ height: '100%', borderRadius: 3, background: meta.color }}
+          />
+        )}
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ padding: '2px 9px', borderRadius: 99, background: lblStyle.bg, color: lblStyle.text, fontSize: '0.7rem', fontWeight: 700 }}>
-          {resolvedLabel}
+          {labelText}
         </span>
-        <span style={{ padding: '2px 8px', borderRadius: 99, background: confColor + '22', color: confColor, fontSize: '0.7rem', fontWeight: 600 }}>
-          {confidence} confidence
-        </span>
+        {isMeasured && (
+          <span style={{ padding: '2px 8px', borderRadius: 99, background: confColor + '22', color: confColor, fontSize: '0.7rem', fontWeight: 600 }}>
+            {confidence} confidence
+          </span>
+        )}
       </div>
     </motion.div>
   );

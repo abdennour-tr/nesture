@@ -9,7 +9,13 @@
  * Détection de patrons développementaux (non diagnostique)
  */
 
-import { pearsonCorrelation, getIrisCenter, speed2D, clamp } from '../mathUtils.js';
+import { pearsonCorrelation, getIrisCenter, speed2D, clamp, hasVariation } from '../mathUtils.js';
+
+/* A reflex the data could not support is reported as `not_measured`, never as
+   `none` with a score of 0. "none" means measured and integrated; before this
+   distinction existed, a camera that saw nothing produced a clean bill of
+   health, and `toAiEngineFormat` sent Supabase a score of 100 — "perfectly
+   integrated" — for a reflex nobody had observed. */
 
 /**
  * @param {Array} frames
@@ -17,7 +23,7 @@ import { pearsonCorrelation, getIrisCenter, speed2D, clamp } from '../mathUtils.
  */
 export function detectVOR(frames) {
   if (!frames || frames.length < 8) {
-    return { score: 0, label: 'none', confidence: 0, detail: 'Insufficient data' };
+    return { score: null, label: 'not_measured', confidence: 0, detail: 'Insufficient data' };
   }
 
   const headYawSeries  = [];
@@ -42,7 +48,17 @@ export function detectVOR(frames) {
   }
 
   if (headYawSeries.length < 8) {
-    return { score: 0, label: 'none', confidence: 0, detail: 'Insufficient iris data' };
+    return { score: null, label: 'not_measured', confidence: 0, detail: 'Insufficient iris data' };
+  }
+
+  if (!hasVariation(headYawSeries) && !hasVariation(headPitchSeries)) {
+    return {
+      score: null, label: 'not_measured', confidence: 0,
+      detail: {
+        reason: 'Head did not move — a VOR cannot be observed without head motion',
+        frames_analyzed: headYawSeries.length,
+      },
+    };
   }
 
   // VOR horizontal : tête droite → yeux gauche (corrélation négative)
@@ -65,10 +81,16 @@ export function detectVOR(frames) {
     : retentionScore >= 20 ? 'weak'
     : 'none';
 
+  /* Confidence is the share of the frames that COULD have carried this signal,
+     not of every camera frame. The face mesh is deliberately computed on one
+     frame in five, so denominating against all frames capped every face-based
+     reflex at 0.20 confidence — permanently below any reporting threshold, which
+     would have quietly excluded the eye reflexes from every session report. */
+  const faceFrames = frames.filter(f => f.faceMesh).length || frames.length;
   return {
     score: retentionScore,
     label,
-    confidence: clamp(headYawSeries.length / frames.length, 0, 1),
+    confidence: clamp(headYawSeries.length / faceFrames, 0, 1),
     detail: {
       horizontal_vor_correlation: corrHorizontal.toFixed(3),
       vertical_vor_correlation: corrVertical.toFixed(3),

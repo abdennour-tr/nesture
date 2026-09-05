@@ -94,6 +94,22 @@ export function useReflexEngine({
     engineRef.current.pushFrame(frameData);
   }, [isRunning]);
 
+  // ── Changement de mode de saisie en cours de séance ─────────────────────────
+
+  /**
+   * Signale au moteur que l'enfant est passé de « main en l'air » à « tactile »
+   * ou l'inverse. En tactile la caméra n'est pas ouverte : sans cette
+   * information, une séance tactile ressort « Not Measured » exactement comme
+   * une séance caméra dont la webcam a lâché.
+   *
+   * Volontairement sans dépendance sur `isRunning` : la garde a déjà coûté à ce
+   * hook une session entière de données quand un appelant a capturé cette
+   * fonction dans une boucle d'animation qui ne se recréait jamais.
+   */
+  const setInputMode = useCallback((mode) => {
+    engineRef.current?.setInputMode?.(mode);
+  }, []);
+
   // ── Convertir pour aiEngine ──────────────────────────────────────────────────
 
   /**
@@ -112,6 +128,8 @@ export function useReflexEngine({
     stopTracking,
     /** Pousser une frame depuis MediaPipe */
     pushFrame,
+    /** Signaler un changement de mode de saisie ('camera' | 'touch') */
+    setInputMode,
     /** Résultats JSON courants (mis à jour périodiquement) */
     results,
     /** Nombre de frames collectées */

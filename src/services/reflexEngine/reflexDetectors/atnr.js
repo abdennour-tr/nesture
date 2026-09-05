@@ -8,7 +8,13 @@
  * Détection de patrons développementaux (non diagnostique)
  */
 
-import { pearsonCorrelation, indexExtension, clamp } from '../mathUtils.js';
+import { pearsonCorrelation, indexExtension, clamp, hasVariation } from '../mathUtils.js';
+
+/* A reflex the data could not support is reported as `not_measured`, never as
+   `none` with a score of 0. "none" means measured and integrated; before this
+   distinction existed, a camera that saw nothing produced a clean bill of
+   health, and `toAiEngineFormat` sent Supabase a score of 100 — "perfectly
+   integrated" — for a reflex nobody had observed. */
 
 /**
  * @param {Array} frames - Buffer de frames récentes
@@ -16,7 +22,7 @@ import { pearsonCorrelation, indexExtension, clamp } from '../mathUtils.js';
  */
 export function detectATNR(frames) {
   if (!frames || frames.length < 5) {
-    return { score: 0, label: 'none', confidence: 0, detail: 'Insufficient data' };
+    return { score: null, label: 'not_measured', confidence: 0, detail: 'Insufficient data' };
   }
 
   const yawSeries     = [];
@@ -37,7 +43,18 @@ export function detectATNR(frames) {
   }
 
   if (yawSeries.length < 5) {
-    return { score: 0, label: 'none', confidence: 0, detail: 'Insufficient bimanual data' };
+    return { score: null, label: 'not_measured', confidence: 0, detail: 'Insufficient bimanual data' };
+  }
+
+  /* Sans rotation de tête, l'asymétrie ne mesure rien. */
+  if (!hasVariation(yawSeries)) {
+    return {
+      score: null, label: 'not_measured', confidence: 0,
+      detail: {
+        reason: 'Head yaw did not vary — nothing to correlate',
+        frames_analyzed: yawSeries.length,
+      },
+    };
   }
 
   // Quand tête tourne à droite (yaw+), le bras droit devrait s'étendre (ATNR)

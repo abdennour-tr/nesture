@@ -11,6 +11,12 @@
 
 import { getIrisCenter, pearsonCorrelation, clamp } from '../mathUtils.js';
 
+/* A reflex the data could not support is reported as `not_measured`, never as
+   `none` with a score of 0. "none" means measured and integrated; before this
+   distinction existed, a camera that saw nothing produced a clean bill of
+   health, and `toAiEngineFormat` sent Supabase a score of 100 — "perfectly
+   integrated" — for a reflex nobody had observed. */
+
 /**
  * @param {Array} frames
  * @returns {Object}
@@ -18,7 +24,7 @@ import { getIrisCenter, pearsonCorrelation, clamp } from '../mathUtils.js';
 export function detectEyeCoordination(frames) {
   if (!frames || frames.length < 8) {
     return {
-      score: 0, label: 'none', confidence: 0,
+      score: null, label: 'not_measured', confidence: 0,
       detail: 'Insufficient data'
     };
   }
@@ -43,7 +49,7 @@ export function detectEyeCoordination(frames) {
 
   if (leftXSeries.length < 8) {
     return {
-      score: 0, label: 'none', confidence: 0,
+      score: null, label: 'not_measured', confidence: 0,
       detail: 'Insufficient iris data'
     };
   }
@@ -66,10 +72,16 @@ export function detectEyeCoordination(frames) {
     : retentionScore >= 20 ? 'weak'
     : 'none';
 
+  /* Confidence is the share of the frames that COULD have carried this signal,
+     not of every camera frame. The face mesh is deliberately computed on one
+     frame in five, so denominating against all frames capped every face-based
+     reflex at 0.20 confidence — permanently below any reporting threshold, which
+     would have quietly excluded the eye reflexes from every session report. */
+  const faceFrames = frames.filter(f => f.faceMesh).length || frames.length;
   return {
     score: retentionScore,
     label,
-    confidence: clamp(leftXSeries.length / frames.length, 0, 1),
+    confidence: clamp(leftXSeries.length / faceFrames, 0, 1),
     detail: {
       horizontal_correlation: corrX.toFixed(3),
       vertical_correlation: corrY.toFixed(3),

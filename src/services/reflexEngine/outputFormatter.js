@@ -191,10 +191,34 @@ export const REFLEX_EDUCATION = {
  * @param {Object} sessionMeta - { sessionId, learnerId, timestamp }
  * @returns {Object} final JSON output
  */
+/* The reflexes this engine knows how to look for. `formatOutput` emits an entry
+   for every one of them, measured or not: with an empty `rawResults` the output
+   used to carry no reflexes at all, so a dashboard iterating the list rendered
+   an empty panel with nothing to explain why. */
+export const KNOWN_REFLEXES = [
+  'ATNR', 'STNR', 'TLR', 'Moro', 'VOR',
+  'Palmar Grasp', 'Babkin', 'Hand-to-Mouth',
+  'Eye Coordination', 'Visual Tracking',
+];
+
 export function formatOutput(rawResults, sessionMeta = {}) {
   const formatted = {};
 
-  for (const [reflexKey, result] of Object.entries(rawResults)) {
+  const complete = { ...rawResults };
+  for (const key of KNOWN_REFLEXES) {
+    if (!complete[key]) {
+      complete[key] = {
+        score: null, label: 'not_measured', confidence: 0,
+        /* The reason travels with the reflex. "Not measured" on its own reads
+           the same whether the camera failed, the child was out of frame, or
+           the session was deliberately played on the touch screen with no
+           camera at all — and those call for very different responses. */
+        detail: { reason: sessionMeta.noDataReason || 'Detector produced no result for this session' },
+      };
+    }
+  }
+
+  for (const [reflexKey, result] of Object.entries(complete)) {
     const education = REFLEX_EDUCATION[reflexKey] || {};
 
     formatted[reflexKey] = {
@@ -203,9 +227,15 @@ export function formatOutput(rawResults, sessionMeta = {}) {
       reflex_name: education.fullName || reflexKey,
       category:    education.category || 'Unknown',
 
-      // ── Scores ────────────────────────────────────────────────────────────
-      score:      result.score ?? 0,
-      label:      result.label ?? 'none',       // strong | moderate | weak | none
+      /* ── Scores ───────────────────────────────────────────────────────
+         `score` is null when the reflex could not be measured — NOT 0. The old
+         `result.score ?? 0` turned every unmeasurable reflex into a score of
+         zero with the label "none", which downstream reads as "integrated". A
+         reflex nobody observed and a reflex that is genuinely integrated are
+         not the same statement about a child. */
+      score:      result.score ?? null,
+      label:      result.label ?? 'none',       // strong | moderate | weak | none | not_measured
+      measured:   result.label !== 'not_measured' && result.score !== null,
       confidence: result.confidence ?? 0,
       events:     result.events ?? null,
 
@@ -227,31 +257,66 @@ export function formatOutput(rawResults, sessionMeta = {}) {
     };
   }
 
+  const inputModes = sessionMeta.inputModes || ['camera'];
   return {
     system:   'Nesture AI — Developmental patterns detection (non-diagnostic)',
     version:  '2.0.0',
     timestamp: sessionMeta.timestamp || new Date().toISOString(),
     session_id:  sessionMeta.sessionId  || null,
     learner_id:  sessionMeta.learnerId  || null,
+    /* How the child played. A touch-only session cannot produce reflex data by
+       design, and a report should say so rather than leave a blank panel that
+       looks like a malfunction. */
+    input_modes:  inputModes,
+    camera_used:  inputModes.includes('camera'),
+    windows_analyzed: sessionMeta.windows ?? 0,
+    frames_received:  sessionMeta.totalFrames ?? 0,
     reflexes:    formatted,
-    summary: _generateSummary(formatted),
+    summary: _generateSummary(formatted, sessionMeta),
   };
 }
 
 // ── Global Summary ─────────────────────────────────────────────────────────────
 
-function _generateSummary(formatted) {
+/* Below this, a score rests on too little data to be worth putting in front of
+   a parent. It is still returned in `reflexes` with its confidence attached —
+   it just does not drive the session's headline status. */
+export const MIN_REPORTABLE_CONFIDENCE = 0.35;
+
+function _generateSummary(formatted, sessionMeta = {}) {
   const reflexList = Object.values(formatted);
 
-  const strong   = reflexList.filter(r => r.label === 'strong').map(r => r.reflex_key);
-  const moderate = reflexList.filter(r => r.label === 'moderate').map(r => r.reflex_key);
-  const mild     = reflexList.filter(r => r.label === 'weak').map(r => r.reflex_key);
-  const none     = reflexList.filter(r => r.label === 'none').map(r => r.reflex_key);
+  /* Three states, not two. `not_measured` used to be indistinguishable from
+     `none`, so a session in which the engine received no frames at all
+     reported "Integrated" — a clean bill of health from zero observations. */
+  const notMeasured = reflexList.filter(r => !r.measured);
+  const measured    = reflexList.filter(r => r.measured);
 
-  let overallStatus = 'Integrated';
-  if (strong.length > 0)   overallStatus = 'Attention Required';
-  else if (moderate.length > 0) overallStatus = 'Monitor';
-  else if (mild.length > 0)     overallStatus = 'Mild';
+  /* Confidence was computed by every detector and then thrown away here: a
+     reflex scored on a tenth of the frames drove the headline exactly like one
+     scored on all of them. */
+  const reportable = measured.filter(r => (r.confidence ?? 0) >= MIN_REPORTABLE_CONFIDENCE);
+  const lowConf    = measured.filter(r => (r.confidence ?? 0) <  MIN_REPORTABLE_CONFIDENCE);
+
+  const strong   = reportable.filter(r => r.label === 'strong').map(r => r.reflex_key);
+  const moderate = reportable.filter(r => r.label === 'moderate').map(r => r.reflex_key);
+  const mild     = reportable.filter(r => r.label === 'weak').map(r => r.reflex_key);
+  const none     = reportable.filter(r => r.label === 'none').map(r => r.reflex_key);
+
+  const inputModes = sessionMeta.inputModes || ['camera'];
+  const touchOnly  = inputModes.length === 1 && inputModes[0] === 'touch';
+
+  let overallStatus;
+  if (reportable.length === 0) {
+    /* Nothing usable was measured. Saying "Integrated" here is the single most
+       misleading thing this engine could output. A touch-only session is
+       called out separately: nothing went wrong, the exercise simply was not
+       the kind that observes reflexes. */
+    overallStatus = touchOnly ? 'Not Applicable (touch mode)' : 'Not Measured';
+  } else if (strong.length > 0)        overallStatus = 'Attention Required';
+  else if (moderate.length > 0)        overallStatus = 'Monitor';
+  else if (mild.length > 0)            overallStatus = 'Mild';
+  else                                 overallStatus = 'Integrated';
 
   return {
     overall_status:    overallStatus,
@@ -259,7 +324,17 @@ function _generateSummary(formatted) {
     moderate_patterns: moderate,
     mild_patterns:     mild,
     integrated:        none,
+    not_measured:      notMeasured.map(r => r.reflex_key),
+    low_confidence:    lowConf.map(r => r.reflex_key),
     total_analyzed:    reflexList.length,
+    total_measured:    measured.length,
+    total_reportable:  reportable.length,
+    min_confidence:    MIN_REPORTABLE_CONFIDENCE,
+    input_modes:       inputModes,
+    /* True when the session mixed both: part of it is measured, part cannot be,
+       and the coverage figures on each reflex say how much. */
+    partial_camera:    inputModes.length > 1,
+    no_data_reason:    reportable.length === 0 ? (sessionMeta.noDataReason || null) : null,
     disclaimer:        'Developmental patterns detection (non-diagnostic)',
   };
 }

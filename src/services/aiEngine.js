@@ -275,7 +275,17 @@ function _calculateLpi(metrics, reflexScores) {
   const accComponent    = metrics.accuracy * 40;
   const rtComponent     = Math.max(0, (1 - metrics.avg_response_time_ms / 10000)) * 25;
   const smoothComponent = metrics.trajectory_smoothness * 20;
-  const reflexAvg       = reflexScores.reduce((s, r) => s + r.score, 0) / reflexScores.length;
+  /* Les réflexes non mesurés valent null : les sommer donnait NaN, et le LPI
+     affiché devenait « NaN » ou 0 selon la coercition en aval. */
+  const scored          = reflexScores.filter(r => typeof r.score === 'number');
+  const reflexAvg       = scored.length ? scored.reduce((s, r) => s + r.score, 0) / scored.length : null;
+  /* Sans réflexe mesuré, la composante réflexe est retirée et les 15 points
+     redistribués : un LPI amputé de 15 points par une caméra éteinte serait une
+     pénalité infligée à l'enfant pour un choix de mode de saisie. */
+  if (reflexAvg === null) {
+    const base = accComponent + rtComponent + smoothComponent; // sur 85
+    return Math.min(100, Math.round(base * (100 / 85)));
+  }
   const reflexComponent = (reflexAvg / 100) * 15;
   return Math.min(100, Math.round(accComponent + rtComponent + smoothComponent + reflexComponent));
 }
@@ -290,13 +300,73 @@ function _calculateLpi(metrics, reflexScores) {
  * @param {Object} [reflexEngineOutput] - sortie optionnelle du moteur temps réel
  * @returns {Object} résultat d'analyse structuré
  */
+/**
+ * Y a-t-il eu la moindre observation caméra sur laquelle fonder un réflexe ?
+ *
+ * `_scoreReflexes` dérive les onze réflexes de quatre nombres de séance —
+ * précision, fluidité, temps de réponse, quelques booléens — et ne regarde
+ * jamais la caméra. Il produisait donc onze scores complets pour une partie
+ * jouée entièrement au doigt sur l'écran, caméra éteinte : un bilan de
+ * réflexes primitifs construit sur des données qui n'existaient pas.
+ * `safeFloat(..., 0.5)` y contribuait en remplaçant silencieusement chaque
+ * mesure absente par une valeur médiane plausible.
+ */
+function _hasCameraEvidence(session, reflexEngineOutput) {
+  if (reflexEngineOutput?.reflexes) {
+    const anyMeasured = Object.values(reflexEngineOutput.reflexes)
+      .some(r => r && r.measured === true);
+    if (anyMeasured) return true;
+    // Le moteur a tourné et n'a rien pu mesurer : c'est une réponse, pas un trou.
+    return false;
+  }
+  // Séances plus anciennes, sans sortie du moteur : on se rabat sur les champs
+  // qui n'existent que si la caméra a réellement tourné.
+  return [session?.trajectory_smoothness, session?.head_hand_coupling,
+          session?.midline_crossings]
+    .some(v => v !== null && v !== undefined);
+}
+
+/** Réflexe non mesuré — jamais un score, jamais un label rassurant. */
+function _notMeasured(rule, reason) {
+  const edu = REFLEX_EDUCATION[rule.reflex] || {};
+  return {
+    ...rule,
+    measured:   false,
+    score:      null,
+    label:      'not_measured',
+    confidence: 'Low',
+    actionable: false,
+    indicators_found: [],
+    not_measured_reason: reason,
+    education: rule.education || {
+      full_name: edu.fullName || rule.reflex,
+      explanation: edu.explanation || '',
+      activities: [], podcast: edu.podcast || null, category: edu.category || '',
+    },
+  };
+}
+
 export function analyseSession(session, gestures, reflexEngineOutput = null) {
   const metrics      = _calculateMetrics(session, gestures);
   const indicators   = _detectIndicators(metrics);
-  let reflexScores   = _scoreReflexes(indicators, metrics);
+  let reflexScores   = _scoreReflexes(indicators, metrics)
+    .map(r => ({ ...r, measured: true, source: 'heuristic' }));
 
-  // ── Fusion avec les données temps réel (si disponibles) ───────────────────
-  if (reflexEngineOutput && reflexEngineOutput.reflexes) {
+  const cameraUsed = reflexEngineOutput
+    ? reflexEngineOutput.camera_used !== false
+    : true;
+  const hasEvidence = _hasCameraEvidence(session, reflexEngineOutput);
+
+  if (!hasEvidence) {
+    /* Rien d'observable : les onze réflexes ressortent « non mesurés », avec la
+       raison — « mode tactile » et « caméra en panne » ne se lisent pas pareil. */
+    const reason = reflexEngineOutput?.summary?.no_data_reason
+      || (!cameraUsed
+        ? 'Touch mode — the camera was not opened, so no reflex can be observed'
+        : 'No camera observation was available for this session');
+    reflexScores = reflexScores.map(rs => _notMeasured(rs, reason));
+  } else if (reflexEngineOutput && reflexEngineOutput.reflexes) {
+    // ── Fusion avec les données temps réel ─────────────────────────────────
     reflexScores = reflexScores.map(rs => {
       const realtimeKey = Object.keys(reflexEngineOutput.reflexes).find(
         k => k.toLowerCase() === rs.reflex.toLowerCase()
@@ -304,15 +374,26 @@ export function analyseSession(session, gestures, reflexEngineOutput = null) {
       if (!realtimeKey) return rs;
 
       const rt = reflexEngineOutput.reflexes[realtimeKey];
+      /* Un réflexe que le moteur n'a pas pu mesurer ne peut pas être sauvé par
+         l'heuristique : celle-ci ne regarde pas la caméra non plus. Sans cette
+         garde, `(100 - null) * 0.6` valait 60 et transformait une absence de
+         mesure en un score. */
+      if (!rt || rt.measured === false || typeof rt.score !== 'number') {
+        return _notMeasured(rs, rt?.detail?.reason || 'Not observable in this session');
+      }
+
       // Pondérer : 60% données temps réel, 40% règles post-session
       const blendedScore = Math.round(
         (100 - rt.score) * 0.6 + rs.score * 0.4
       );
       return {
         ...rs,
+        source:     'engine+heuristic',
         score:      Math.max(10, Math.min(100, blendedScore)),
         label:      rt.label || rs.label,
-        realtime:   { score: rt.score, label: rt.label, detail: rt.detail },
+        confidence: rt.confidence >= 0.7 ? 'High' : rt.confidence >= 0.35 ? 'Medium' : 'Low',
+        actionable: (rt.confidence ?? 0) >= 0.35 && (rt.label === 'strong' || rt.label === 'moderate'),
+        realtime:   { score: rt.score, label: rt.label, confidence: rt.confidence, detail: rt.detail },
       };
     });
   }
@@ -321,9 +402,20 @@ export function analyseSession(session, gestures, reflexEngineOutput = null) {
   const narrative       = _generateNarrative(metrics, reflexScores);
   const lpi             = _calculateLpi(metrics, reflexScores);
 
+  const measuredCount = reflexScores.filter(r => r.measured !== false).length;
   return {
     metrics,
     reflex_scores:   reflexScores,
+    /* Ce que l'écran de résultats a besoin de savoir pour ne pas afficher une
+       grille vide qui ressemble à une panne. */
+    reflexes_measured: measuredCount,
+    camera_used:       cameraUsed,
+    input_modes:       reflexEngineOutput?.input_modes || null,
+    reflex_status:     measuredCount === 0
+      ? (cameraUsed ? 'Not Measured' : 'Not Applicable (touch mode)')
+      : (reflexEngineOutput?.summary?.overall_status || null),
+    reflex_not_measured_reason: measuredCount === 0
+      ? (reflexScores[0]?.not_measured_reason || null) : null,
     recommendations,
     narrative,
     lpi_score:       lpi,

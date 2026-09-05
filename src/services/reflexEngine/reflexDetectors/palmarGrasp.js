@@ -18,6 +18,12 @@ import {
   stddev,
 } from '../mathUtils.js';
 
+/* A reflex the data could not support is reported as `not_measured`, never as
+   `none` with a score of 0. "none" means measured and integrated; before this
+   distinction existed, a camera that saw nothing produced a clean bill of
+   health, and `toAiEngineFormat` sent Supabase a score of 100 — "perfectly
+   integrated" — for a reflex nobody had observed. */
+
 const CLOSE_THRESHOLD = 0.05; // variation par seconde pour définir "fermeture rapide"
 
 /**
@@ -27,7 +33,7 @@ const CLOSE_THRESHOLD = 0.05; // variation par seconde pour définir "fermeture 
 export function detectPalmarGrasp(frames) {
   if (!frames || frames.length < 4) {
     return {
-      score: 0, label: 'none', confidence: 0,
+      score: null, label: 'not_measured', confidence: 0,
       left: null, right: null, bilateral: null,
       detail: 'Insufficient data'
     };
@@ -65,15 +71,41 @@ export function detectPalmarGrasp(frames) {
   const leftStdDev    = stddev(leftScores);
   const rightStdDev   = stddev(rightScores);
 
+  /* ── A hand that was never seen is not a closed hand ───────────────────
+     `avgOpen` used to be `(leftMeanOpen + rightMeanOpen) / 2`, and `mean([])`
+     is 0. In a one-handed game — which Letter Quest is — the absent hand
+     therefore entered the average as "completely closed", halving avgOpen and
+     inflating `(1 - avgOpen) * 50` by up to 25 points on every single session.
+     Only hands that were actually observed are averaged. */
+  const seen = [];
+  if (leftScores.length  > 0) seen.push(leftMeanOpen);
+  if (rightScores.length > 0) seen.push(rightMeanOpen);
+
+  if (seen.length === 0) {
+    return {
+      score: null, label: 'not_measured', confidence: 0,
+      left: null, right: null, bilateral: null,
+      detail: { reason: 'No hand observed', frames_analyzed: frames.length },
+    };
+  }
+
   // Symétrie : différence de fermeture entre les deux mains (0 = symétrique)
   const symmetryDiff = leftScores.length > 0 && rightScores.length > 0
     ? Math.abs(leftMeanOpen - rightMeanOpen)
     : 0;
-  const symmetryScore = clamp(1 - symmetryDiff * 4, 0, 1);
+  /* Symmetry is meaningless with one hand: reported as null, not as a perfect
+     score, which is what `1 - 0 * 4 = 1` used to claim. */
+  const symmetryScore = (leftScores.length > 0 && rightScores.length > 0)
+    ? clamp(1 - symmetryDiff * 4, 0, 1)
+    : null;
 
   // Score de rétention = main très fermée avec fermetures rapides répétées
-  const avgOpen = (leftMeanOpen + rightMeanOpen) / 2;
-  const closingRate = (leftClosingEvents.length + rightClosingEvents.length) / Math.max(1, frames.length);
+  const avgOpen = mean(seen);
+  /* The closing rate is per observed hand-frame, not per camera frame: with one
+     hand in view, half the frames could never contribute an event, which
+     silently halved the rate. */
+  const handFrames = leftScores.length + rightScores.length;
+  const closingRate = (leftClosingEvents.length + rightClosingEvents.length) / Math.max(1, handFrames);
   const retentionScore = clamp(Math.round((closingRate * 50) + ((1 - avgOpen) * 50)), 0, 100);
 
   const label = retentionScore >= 65 ? 'strong'
@@ -96,7 +128,8 @@ export function detectPalmarGrasp(frames) {
       variability: rightStdDev.toFixed(3),
     },
     bilateral: {
-      symmetry_score: symmetryScore.toFixed(3),
+      hands_observed: seen.length,
+      symmetry_score: symmetryScore === null ? null : symmetryScore.toFixed(3),
       total_closing_events: leftClosingEvents.length + rightClosingEvents.length,
     },
     detail: {

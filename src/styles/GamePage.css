@@ -410,3 +410,44 @@
 @media (prefers-reduced-motion: reduce) {
   .mobile-settings-btn { transition: none; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Calibration screen
+   The screen is fixed-position and owns the viewport, so it needs its own
+   responsive rules: on a narrow screen the camera + checklist column has to
+   move under the calibration field instead of squeezing it into a strip.
+   ───────────────────────────────────────────────────────────────────────── */
+@media (max-width: 1000px) {
+  .cal-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .cal-side {
+    width: 100% !important;
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 12px !important;
+    order: 2;
+  }
+  .cal-side > .cal-cam,
+  .cal-side > div:nth-child(2) { flex: 1 1 240px; }
+  .cal-main { order: 1; }
+  .cal-field { aspect-ratio: 3 / 2; }
+}
+
+@media (max-width: 640px) {
+  .cal-side { flex-direction: column !important; }
+  .cal-field { aspect-ratio: 1 / 1; }
+}
+
+/* A child who is sensitive to motion should still be able to calibrate. */
+@media (prefers-reduced-motion: reduce) {
+  .cal-root *,
+  .cal-root *::before,
+  .cal-root *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

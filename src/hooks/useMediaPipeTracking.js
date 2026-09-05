@@ -32,6 +32,29 @@ const MOUTH_BOT  = 14;
 // ── Performance : traiter le Face Mesh 1 frame sur N ──────────────────────
 const FACE_THROTTLE = 5; // 30fps → Face Mesh à ~6fps (largement suffisant pour l'analyse de réflexes)
 
+/* ── Coverage grid ─────────────────────────────────────────────────────────
+   The calibration screen asks the child to sweep their whole reach. To know
+   whether they actually did — instead of trusting a timer — the camera frame
+   is divided into a grid and each cell is marked as the hand passes through
+   it. The screen draws this grid, so "move your hand around" stops being an
+   instruction the child has to interpret and becomes a visible target. */
+export const CAL_COLS = 4;
+export const CAL_ROWS = 3;
+/* The sweep is judged over the middle of the frame: the extreme edges are
+   often out of a seated child's comfortable reach and demanding them would
+   punish the children this app exists for. */
+const CAL_GRID_X0 = 0.12, CAL_GRID_X1 = 0.88;
+const CAL_GRID_Y0 = 0.15, CAL_GRID_Y1 = 0.92;
+
+function coverageCellIndex(x, y) {
+  const cx = (x - CAL_GRID_X0) / (CAL_GRID_X1 - CAL_GRID_X0);
+  const cy = (y - CAL_GRID_Y0) / (CAL_GRID_Y1 - CAL_GRID_Y0);
+  if (cx < 0 || cx >= 1 || cy < 0 || cy >= 1) return -1;
+  const col = Math.min(CAL_COLS - 1, Math.floor(cx * CAL_COLS));
+  const row = Math.min(CAL_ROWS - 1, Math.floor(cy * CAL_ROWS));
+  return row * CAL_COLS + col;
+}
+
 // ── Estimation Pitch / Yaw ────────────────────────────────────────────────
 function estimateHeadPose(lm) {
   if (!lm || lm.length < 468) return { pitch: 0, yaw: 0 };
@@ -153,10 +176,30 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
 
   // --- Telemetry States ---
   const [calibrationStatus, setCalibrationStatus] = useState('Calibrating...');
+  /* 0..1 — what the progress bar shows. It is real: it tracks the samples
+     collected and the range actually covered, not a fixed animation. */
+  const [calibrationProgress, setCalibrationProgress] = useState(0);
   const [trackingConfidence, setTrackingConfidence] = useState(100);
   const [gazeDetected, setGazeDetected] = useState(false);
   const [fps, setFps] = useState(30);
   const [smoothedCursorPos, setSmoothedCursorPos] = useState({ x: 0.5, y: 0.5 });
+
+  /* ── Calibration screen support ────────────────────────────────────────
+     The calibration used to be an invisible 3s process running underneath a
+     game that had already started. It is now something a dedicated screen can
+     drive and, above all, SHOW: the raw (uncalibrated, mirrored) hand position
+     so the screen can draw where the hand really is, a coverage grid so the
+     child can see which parts of their reach are still missing, how many hands
+     are in frame, and how far away the child is sitting. */
+  const [rawCursorPos, setRawCursorPos]   = useState({ x: 0.5, y: 0.5 });
+  const [handCount, setHandCount]         = useState(0);
+  const [coverageCells, setCoverageCells] = useState(() => new Array(CAL_COLS * CAL_ROWS).fill(false));
+  const [distanceFactorState, setDistanceFactorState] = useState(1);
+  const coverageRef = useRef(new Array(CAL_COLS * CAL_ROWS).fill(false));
+  const lastDistanceFactor = useRef(1);
+  /* Bounds are mirrored into state only when calibration commits, so a caller
+     can persist them per learner and restore them next session. */
+  const [calibrationBounds, setCalibrationBounds] = useState(null);
 
   // --- Auto-Calibration & Filter Refs ---
   const calibMinX = useRef(0.35);
@@ -164,12 +207,51 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
   const calibMinY = useRef(0.4);
   const calibMaxY = useRef(0.75);
   
-  const calibrationTimer = useRef(null);
   const trackingLossTimer = useRef(null);
   const isCalibrating = useRef(true);
 
+  /* ── Calibration accumulators ──────────────────────────────────────────
+     Calibration used to be a 3-second setTimeout. It declared success after
+     three seconds of WALL CLOCK whether or not a single hand frame had
+     arrived, so `recalibrate()` fired with no hand in view would "finish"
+     against the default bounds and leave the cursor mapped to a tiny box in
+     the middle of the frame. On a slow laptop (the field reports run at
+     10-15 fps) three seconds is barely thirty frames, and the hand often
+     appears only for the last one of them.
+
+     It is now measured, not timed: calibration ends when enough frames WITH
+     a hand have been seen AND the hand has actually swept a usable range.
+     The bounds come from that observed range instead of a fixed window
+     centred on wherever the hand happened to be. */
+  const calibSamples   = useRef(0);
+  const calibStartedAt = useRef(null);
+  const obsMinX = useRef(1);
+  const obsMaxX = useRef(0);
+  const obsMinY = useRef(1);
+  const obsMaxY = useRef(0);
+
   const lastSmoothX = useRef(null);
   const lastSmoothY = useRef(null);
+
+  /* ── Per-frame values live in refs, not in state ────────────────────────
+     The cursor position, the confidence and the frame rate change on EVERY
+     camera frame. Publishing each one through useState made this hook fire
+     three or four re-renders of its consumer thirty times a second — which is
+     what made the calibration dot feel heavy: it was not the dot moving, it
+     was the whole screen re-rendering under it.
+
+     The refs below carry the full-rate signal for anything that reads them
+     from its own animation frame. The matching state is still published, but
+     only a few times a second, so components that render from state keep
+     working without paying for it sixty times a second. */
+  const rawCursorRef      = useRef({ x: 0.5, y: 0.5 });
+  const smoothedCursorRef = useRef({ x: 0.5, y: 0.5 });
+  const confidenceRef     = useRef(100);
+  const lastPublishAt     = useRef(0);
+  const lastPublishedConf = useRef(100);
+  const lastPublishedFps  = useRef(30);
+  const lastFpsPublishAt  = useRef(0);
+  const PUBLISH_INTERVAL_MS = 120;   // ~8 Hz for the state mirrors
   
   const faceLandmarksRef = useRef(null);
   const gazeDetectedRef = useRef(false);
@@ -185,22 +267,110 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
   const fpsRef = useRef(30);
   const lastFrameTime = useRef(performance.now());
 
+  /* Frames WITH a hand that must be collected. At 12 fps this is ~3.5s of
+     actual hand time; at 30 fps, ~1.5s. Time no longer enters into it. */
+  const CALIB_MIN_SAMPLES = 42;
+  /* The hand must sweep at least this much of the camera frame on each axis,
+     otherwise the mapping is built from a point and becomes hypersensitive. */
+  const CALIB_MIN_SPAN = 0.12;
+  /* A child who will not wave should still get to play: after this much time
+     WITH A HAND VISIBLE, accept whatever range was covered and widen it to a
+     sane minimum. */
+  const CALIB_MAX_MS = 12000;
+  /* Never map the screen onto less than this much camera space. */
+  const CALIB_FLOOR_SPAN = 0.20;
+  /* Fraction of the coverage grid the sweep has to visit. Not all twelve
+     cells: the corners of the grid are the hardest to reach and holding a
+     child there is how a calibration screen becomes a wall. */
+  const CAL_MIN_COVERAGE = 0.75;
+
   // --- Manual Recalibrate function ---
   const recalibrate = useCallback(() => {
     isCalibrating.current = true;
     setCalibrationStatus('Calibrating...');
-    // Reset limits slightly to snap to new coordinates
+    setCalibrationProgress(0);
+
+    // Reset limits so the new sweep is not blended with the old one.
     calibMinX.current = 0.35;
     calibMaxX.current = 0.65;
     calibMinY.current = 0.4;
     calibMaxY.current = 0.75;
     lastSmoothX.current = null;
     lastSmoothY.current = null;
-    if (calibrationTimer.current) clearTimeout(calibrationTimer.current);
-    calibrationTimer.current = setTimeout(() => {
-      isCalibrating.current = false;
-      setCalibrationStatus('Calibrated');
-    }, 3000);
+
+    /* Inverted extremes: the first sample sets both ends. Nothing is timed
+       here -- with no hand in front of the camera, calibration simply waits
+       instead of quietly "succeeding" on the defaults. */
+    calibSamples.current = 0;
+    calibStartedAt.current = null;
+    obsMinX.current = 1; obsMaxX.current = 0;
+    obsMinY.current = 1; obsMaxY.current = 0;
+
+    coverageRef.current = new Array(CAL_COLS * CAL_ROWS).fill(false);
+    setCoverageCells(coverageRef.current.slice());
+    setCalibrationBounds(null);
+  }, []);
+
+  /* ── Commit the calibration on demand ───────────────────────────────────
+     Two callers need this. The calibration screen calls it when the child has
+     swept enough, so the transition into the game is a deliberate, visible
+     event rather than something that happens silently mid-word. A therapist
+     or parent calls it through "use it as is" for a child who will not or
+     cannot sweep the full area — they still get to play, with the mapping
+     honestly limited to the reach that was actually observed. */
+  const finalizeCalibration = useCallback(() => {
+    if (!isCalibrating.current) return calibrationBounds;
+    /* Nothing was ever seen: refuse rather than commit the default box, which
+       is the failure mode that made the cursor unusable in the first place. */
+    if (calibSamples.current < 5) return null;
+
+    const spanX = Math.max(0, obsMaxX.current - obsMinX.current);
+    const spanY = Math.max(0, obsMaxY.current - obsMinY.current);
+    const padX = Math.max(0.03, spanX * 0.12);
+    const padY = Math.max(0.03, spanY * 0.12);
+    let minX = obsMinX.current - padX;
+    let maxX = obsMaxX.current + padX;
+    let minY = obsMinY.current - padY;
+    let maxY = obsMaxY.current + padY;
+
+    const floor = CALIB_FLOOR_SPAN * lastDistanceFactor.current;
+    if (maxX - minX < floor) { const c = (minX + maxX) / 2; minX = c - floor / 2; maxX = c + floor / 2; }
+    if (maxY - minY < floor) { const c = (minY + maxY) / 2; minY = c - floor / 2; maxY = c + floor / 2; }
+
+    const bounds = {
+      minX: Math.max(0.01, minX), maxX: Math.min(0.99, maxX),
+      minY: Math.max(0.01, minY), maxY: Math.min(0.99, maxY),
+      spanX, spanY,
+      samples: calibSamples.current,
+      coverage: coverageRef.current.filter(Boolean).length / (CAL_COLS * CAL_ROWS),
+      savedAt: Date.now(),
+    };
+
+    calibMinX.current = bounds.minX; calibMaxX.current = bounds.maxX;
+    calibMinY.current = bounds.minY; calibMaxY.current = bounds.maxY;
+    isCalibrating.current = false;
+    setCalibrationProgress(1);
+    setCalibrationStatus('Calibrated');
+    setCalibrationBounds(bounds);
+    return bounds;
+  }, [calibrationBounds]);
+
+  /* Restore a calibration measured in an earlier session. The child sits in
+     roughly the same place every day; making them sweep from scratch each
+     time is friction with no clinical value. The calibration screen still
+     runs, but it starts already satisfied and only has to confirm the hand
+     is tracked. */
+  const applyCalibration = useCallback((bounds) => {
+    if (!bounds || typeof bounds.minX !== 'number') return false;
+    if (!(bounds.maxX > bounds.minX) || !(bounds.maxY > bounds.minY)) return false;
+    calibMinX.current = bounds.minX; calibMaxX.current = bounds.maxX;
+    calibMinY.current = bounds.minY; calibMaxY.current = bounds.maxY;
+    lastSmoothX.current = null; lastSmoothY.current = null;
+    isCalibrating.current = false;
+    setCalibrationProgress(1);
+    setCalibrationStatus('Calibrated');
+    setCalibrationBounds(bounds);
+    return true;
   }, []);
 
   // ── Callback Hands ─────────────────────────────────────────────────────
@@ -213,18 +383,17 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
         trackingLossTimer.current = null;
       }
 
-      // Start calibration timer on first hand tracking
-      if (isCalibrating.current && !calibrationTimer.current) {
+      /* The calibration clock starts on the first frame that actually has a
+         hand in it, not when the hook mounts. */
+      if (isCalibrating.current && calibStartedAt.current === null) {
+        calibStartedAt.current = Date.now();
         setCalibrationStatus('Calibrating...');
-        calibrationTimer.current = setTimeout(() => {
-          isCalibrating.current = false;
-          setCalibrationStatus('Calibrated');
-        }, 3000);
       }
 
       const first = results.multiHandLandmarks[0];
       setLandmarks(first);
       setIsTracking(true);
+      setHandCount(results.multiHandLandmarks.length);
 
       // Track position buffer (index tip)
       const indexTip = first[8];
@@ -236,8 +405,20 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
         const mirroredX = 1 - indexTip.x;
         const mirroredY = indexTip.y;
 
+        /* The uncalibrated position, published so the calibration screen can
+           draw the hand before any mapping exists. During calibration the
+           calibrated position is meaningless by definition, so a screen that
+           drew only that would show the child a cursor that does not follow
+           their hand — the exact confusion the new screen removes.
+           Written to a ref every frame; the state mirror is throttled below. */
+        rawCursorRef.current = { x: mirroredX, y: mirroredY };
+
         // ── Distance Scale Adjustment ──
-        let distanceFactor = 1.0;
+        /* The face mesh runs at a fifth of the hand rate and can be absent for
+           whole seconds. Falling back to 1.0 in those frames made the mapping
+           floor jump between two values within a single calibration; the last
+           good measurement is used instead. */
+        let distanceFactor = lastDistanceFactor.current;
         if (faceLandmarksRef.current) {
           const faceLm = faceLandmarksRef.current;
           const leftEye = faceLm[LEFT_EYE_INNER];
@@ -246,20 +427,103 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
             const eyeDist = Math.hypot(rightEye.x - leftEye.x, rightEye.y - leftEye.y);
             // 0.085 is the standard eye distance in camera space at 50-60cm.
             distanceFactor = Math.max(0.4, Math.min(2.5, eyeDist / 0.085));
+            if (Math.abs(distanceFactor - lastDistanceFactor.current) > 0.02) {
+              setDistanceFactorState(distanceFactor);
+            }
+            lastDistanceFactor.current = distanceFactor;
           }
         }
 
-        // Standard ranges scaled by user distance
-        const targetRangeX = 0.28 * distanceFactor;
-        const targetRangeY = 0.32 * distanceFactor;
-
         // Update bounds
         if (isCalibrating.current) {
-          const rate = 0.25;
-          calibMinX.current = calibMinX.current * (1 - rate) + Math.max(0.02, mirroredX - targetRangeX/2) * rate;
-          calibMaxX.current = calibMaxX.current * (1 - rate) + Math.min(0.98, mirroredX + targetRangeX/2) * rate;
-          calibMinY.current = calibMinY.current * (1 - rate) + Math.max(0.02, mirroredY - targetRangeY/2) * rate;
-          calibMaxY.current = calibMaxY.current * (1 - rate) + Math.min(0.98, mirroredY + targetRangeY/2) * rate;
+          /* Record the reach the child actually has, rather than bracketing a
+             fixed window around wherever the hand is right now. A window
+             centred on a hand held near the edge of the frame maps the whole
+             screen onto that corner for the rest of the session -- which is
+             exactly what "calibration does not work" looked like. */
+          calibSamples.current += 1;
+          obsMinX.current = Math.min(obsMinX.current, mirroredX);
+          obsMaxX.current = Math.max(obsMaxX.current, mirroredX);
+          obsMinY.current = Math.min(obsMinY.current, mirroredY);
+          obsMaxY.current = Math.max(obsMaxY.current, mirroredY);
+
+          /* Mark the cell the hand is passing through. The screen renders this
+             as tiles that light up, which turns the sweep into a small game
+             instead of a vague instruction. */
+          const cell = coverageCellIndex(mirroredX, mirroredY);
+          if (cell >= 0 && !coverageRef.current[cell]) {
+            coverageRef.current[cell] = true;
+            setCoverageCells(coverageRef.current.slice());
+          }
+
+          const spanX = obsMaxX.current - obsMinX.current;
+          const spanY = obsMaxY.current - obsMinY.current;
+
+          /* Progress is the limiting factor of the three requirements, so the
+             bar cannot sit at 100% while the child still has to move. */
+          const bySamples = Math.min(1, calibSamples.current / CALIB_MIN_SAMPLES);
+          const bySpan = Math.min(1, Math.min(spanX, spanY) / CALIB_MIN_SPAN);
+          const byCoverage = coverageRef.current.filter(Boolean).length / (CAL_COLS * CAL_ROWS);
+          setCalibrationProgress(Math.min(bySamples, bySpan, byCoverage / CAL_MIN_COVERAGE));
+
+          /* Provisional mapping while the sweep is in progress, so the cursor
+             is usable rather than frozen. */
+          const provisionalX = Math.max(CALIB_FLOOR_SPAN * distanceFactor, spanX);
+          const provisionalY = Math.max(CALIB_FLOOR_SPAN * distanceFactor, spanY);
+          const cx = (obsMinX.current + obsMaxX.current) / 2;
+          const cy = (obsMinY.current + obsMaxY.current) / 2;
+          calibMinX.current = Math.max(0.01, cx - provisionalX / 2);
+          calibMaxX.current = Math.min(0.99, cx + provisionalX / 2);
+          calibMinY.current = Math.max(0.01, cy - provisionalY / 2);
+          calibMaxY.current = Math.min(0.99, cy + provisionalY / 2);
+
+          const elapsed = Date.now() - (calibStartedAt.current || Date.now());
+          const enough = calibSamples.current >= CALIB_MIN_SAMPLES
+            && spanX >= CALIB_MIN_SPAN && spanY >= CALIB_MIN_SPAN
+            && byCoverage >= CAL_MIN_COVERAGE;
+          /* The escape hatch: a child who will not wave still gets to play.
+             It needs hand frames, so it cannot fire on an empty camera. */
+          const gaveUpWaiting = elapsed >= CALIB_MAX_MS && calibSamples.current >= 15;
+
+          if (enough || gaveUpWaiting) {
+            /* Pad the measured reach a little: the child will drift outside
+               the exact extremes of their own sweep. */
+            const padX = Math.max(0.03, spanX * 0.12);
+            const padY = Math.max(0.03, spanY * 0.12);
+            let minX = obsMinX.current - padX;
+            let maxX = obsMaxX.current + padX;
+            let minY = obsMinY.current - padY;
+            let maxY = obsMaxY.current + padY;
+
+            // Never map the screen onto less camera space than this.
+            const floorX = CALIB_FLOOR_SPAN * distanceFactor;
+            const floorY = CALIB_FLOOR_SPAN * distanceFactor;
+            if (maxX - minX < floorX) {
+              const c = (minX + maxX) / 2;
+              minX = c - floorX / 2; maxX = c + floorX / 2;
+            }
+            if (maxY - minY < floorY) {
+              const c = (minY + maxY) / 2;
+              minY = c - floorY / 2; maxY = c + floorY / 2;
+            }
+
+            calibMinX.current = Math.max(0.01, minX);
+            calibMaxX.current = Math.min(0.99, maxX);
+            calibMinY.current = Math.max(0.01, minY);
+            calibMaxY.current = Math.min(0.99, maxY);
+
+            isCalibrating.current = false;
+            setCalibrationProgress(1);
+            setCalibrationStatus('Calibrated');
+            setCalibrationBounds({
+              minX: calibMinX.current, maxX: calibMaxX.current,
+              minY: calibMinY.current, maxY: calibMaxY.current,
+              spanX, spanY,
+              samples: calibSamples.current,
+              coverage: byCoverage,
+              savedAt: Date.now(),
+            });
+          }
         } else {
           // Slow adaptation rate to follow posture shifts
           const rate = 0.02;
@@ -303,8 +567,8 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
 
         lastSmoothX.current = nextX;
         lastSmoothY.current = nextY;
-        
-        setSmoothedCursorPos({ x: nextX, y: nextY });
+
+        smoothedCursorRef.current = { x: nextX, y: nextY };
 
         // ── Confidence Estimation ──
         let confidence = 50; // hand tracking is active
@@ -317,7 +581,23 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
         // Jitter penalty
         const jitterPenalty = Math.min(1, dist / 0.10);
         confidence += Math.round(15 * (1 - jitterPenalty));
-        setTrackingConfidence(Math.max(0, Math.min(100, confidence)));
+        confidenceRef.current = Math.max(0, Math.min(100, confidence));
+
+        /* ── Throttled state mirrors ──────────────────────────────────────
+           Everything above ran at camera rate and touched only refs. Only
+           here, roughly eight times a second, does anything reach React —
+           and confidence and fps are additionally gated on a change large
+           enough to be worth a render. */
+        const nowMs = performance.now();
+        if (nowMs - lastPublishAt.current >= PUBLISH_INTERVAL_MS) {
+          lastPublishAt.current = nowMs;
+          setRawCursorPos(rawCursorRef.current);
+          setSmoothedCursorPos(smoothedCursorRef.current);
+          if (Math.abs(confidenceRef.current - lastPublishedConf.current) >= 4) {
+            lastPublishedConf.current = confidenceRef.current;
+            setTrackingConfidence(confidenceRef.current);
+          }
+        }
       }
 
       // Séparer gauche / droite
@@ -338,6 +618,7 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
           setMultiHandData(null);
           setIsTracking(false);
           setTrackingConfidence(0);
+          setHandCount(0);
         }, 400); // 400ms grace period keeps cursor active during blips
       }
     }
@@ -459,7 +740,16 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
             if (elapsed > 0) {
               const currentFps = 1000 / elapsed;
               fpsRef.current = Math.round(fpsRef.current * 0.92 + currentFps * 0.08);
-              setFps(fpsRef.current);
+              /* Not setFps on every frame — that was one of the four state
+                 writes per camera frame. Published on a timer instead, and
+                 here rather than in onHandResults so the calibration screen
+                 still gets a frame rate while it is waiting for a hand. */
+              if (now - lastFpsPublishAt.current >= 500
+                  && Math.abs(fpsRef.current - lastPublishedFps.current) >= 2) {
+                lastFpsPublishAt.current = now;
+                lastPublishedFps.current = fpsRef.current;
+                setFps(fpsRef.current);
+              }
             }
 
             // Hands : chaque frame (pour dwell fluide)
@@ -504,7 +794,6 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
 
     return () => {
       cancelled = true;
-      if (calibrationTimer.current) clearTimeout(calibrationTimer.current);
       if (trackingLossTimer.current) clearTimeout(trackingLossTimer.current);
       
       // Stop and release camera tracks directly
@@ -552,6 +841,27 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
     handDetected: isTracking,
     gazeDetected,
     calibrationStatus,
+    calibrationProgress,
     recalibrate,
+
+    /* Full-rate refs. Read these from an animation frame and write straight to
+       the DOM; read the state versions above only if a few updates a second is
+       enough. Mixing them up is the difference between a cursor that glides and
+       one that drags the whole page along behind it. */
+    rawCursorRef,
+    smoothedCursorRef,
+    confidenceRef,
+    fpsRef,
+
+    // ── Calibration screen ──
+    rawCursorPos,
+    handCount,
+    coverageCells,
+    coverageTarget: CAL_MIN_COVERAGE,
+    distanceFactor: distanceFactorState,
+    calibrationBounds,
+    isCalibrating: calibrationStatus !== 'Calibrated',
+    finalizeCalibration,
+    applyCalibration,
   };
 }

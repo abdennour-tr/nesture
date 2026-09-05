@@ -16,6 +16,12 @@ import {
   clamp,
 } from '../mathUtils.js';
 
+/* A reflex the data could not support is reported as `not_measured`, never as
+   `none` with a score of 0. "none" means measured and integrated; before this
+   distinction existed, a camera that saw nothing produced a clean bill of
+   health, and `toAiEngineFormat` sent Supabase a score of 100 — "perfectly
+   integrated" — for a reflex nobody had observed. */
+
 const BABKIN_MIN_MS = 300;
 const BABKIN_MAX_MS = 800;
 const HAND_CLOSE_THRESHOLD = 0.35; // score < threshold → main fermée
@@ -28,7 +34,7 @@ const MOUTH_OPEN_THRESHOLD = 0.02; // distance relative lèvres pour bouche ouve
 export function detectBabkin(frames) {
   if (!frames || frames.length < 6) {
     return {
-      score: 0, label: 'none', confidence: 0,
+      score: null, label: 'not_measured', confidence: 0,
       events: 0, detail: 'Insufficient data'
     };
   }
@@ -82,6 +88,24 @@ export function detectBabkin(frames) {
     }
   }
 
+  /* The Babkin sequence is hands-then-mouth: it needs both hands AND the face
+     in the same frames. Without them the loop simply never fires and the old
+     code returned score 0 / "none" — an integrated reflex, inferred from a
+     sequence that could not have been seen even if it had happened. */
+  const usableFrames = frames.filter(f => f.leftHand && f.rightHand && f.faceMesh).length;
+  const MIN_USABLE = 15;
+  if (usableFrames < MIN_USABLE) {
+    return {
+      score: null, label: 'not_measured', confidence: 0, events: 0,
+      detail: {
+        reason: 'Both hands and the face were not in view together long enough',
+        usable_frames: usableFrames,
+        required: MIN_USABLE,
+        frames_analyzed: frames.length,
+      },
+    };
+  }
+
   const eventScore = clamp(Math.round((babkinEvents / Math.max(1, frames.length / 60)) * 80), 0, 100);
 
   const label = eventScore >= 65 ? 'strong'
@@ -89,12 +113,10 @@ export function detectBabkin(frames) {
     : eventScore >= 20 ? 'weak'
     : 'none';
 
-  const hasValidData = frames.some(f => f.leftHand && f.rightHand && f.faceMesh);
-
   return {
     score: eventScore,
     label,
-    confidence: hasValidData ? 0.7 : 0.1,
+    confidence: clamp(usableFrames / frames.length, 0, 1),
     events: Math.floor(babkinEvents),
     detail: {
       babkin_sequences_detected: babkinEvents,

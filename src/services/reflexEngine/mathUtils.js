@@ -210,6 +210,21 @@ export function stddev(arr) {
   return Math.sqrt(variance(arr));
 }
 
+/**
+ * Une série sans variation ne peut pas porter de corrélation.
+ *
+ * `pearsonCorrelation` renvoie 0 quand un dénominateur est nul, et 0 se lisait
+ * ensuite comme un score de rétention de 0, c'est-à-dire « réflexe intégré ».
+ * Une tête parfaitement immobile — ou, comme c'était le cas, une valeur de
+ * pitch figée à 0 par un bug de fermeture — produisait donc un bilan rassurant.
+ * « Le signal n'a pas varié » et « les deux signaux ne sont pas liés » sont
+ * deux affirmations différentes, et une seule des deux est une mesure.
+ */
+export function hasVariation(arr, minStd = 1e-4) {
+  if (!arr || arr.length < 3) return false;
+  return stddev(arr) > minStd;
+}
+
 /** Clamp une valeur entre min et max */
 export function clamp(val, min, max) {
   return Math.max(min, Math.min(max, val));

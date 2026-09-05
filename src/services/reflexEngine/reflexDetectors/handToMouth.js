@@ -20,6 +20,12 @@ import {
   mean,
 } from '../mathUtils.js';
 
+/* A reflex the data could not support is reported as `not_measured`, never as
+   `none` with a score of 0. "none" means measured and integrated; before this
+   distinction existed, a camera that saw nothing produced a clean bill of
+   health, and `toAiEngineFormat` sent Supabase a score of 100 — "perfectly
+   integrated" — for a reflex nobody had observed. */
+
 const APPROACH_THRESHOLD = 0.30; // distance normalisée main-bouche pour "proche"
 const MOUTH_REACT_THRESHOLD = 0.025; // ouverture minimale pour "bouche réagit"
 
@@ -30,7 +36,7 @@ const MOUTH_REACT_THRESHOLD = 0.025; // ouverture minimale pour "bouche réagit"
 export function detectHandToMouth(frames) {
   if (!frames || frames.length < 4) {
     return {
-      score: 0, label: 'none', confidence: 0,
+      score: null, label: 'not_measured', confidence: 0,
       events: 0, detail: 'Insufficient data'
     };
   }
@@ -81,12 +87,36 @@ export function detectHandToMouth(frames) {
     }
   }
 
+  /* ── The empty-buffer trap ────────────────────────────────────────────
+     `mean([])` returns 0. With no face in frame, `approachDistances` stays
+     empty, so avgDist was 0, so `1 - 0/0.30` was a proximity score of 1 — a
+     hand judged to be resting perfectly on the mouth — and the reflex scored
+     40 out of 100 with the label "moderate". Ten minutes of a camera that
+     never saw a face produced a clinical finding, and toAiEngineFormat marked
+     it `actionable: true`. Nothing can be concluded from no observation. */
+  const MIN_SAMPLES = 8;
+  if (approachDistances.length < MIN_SAMPLES) {
+    return {
+      score: null, label: 'not_measured', confidence: 0, events: 0,
+      detail: {
+        reason: 'No usable hand-and-face observation',
+        samples: approachDistances.length,
+        required: MIN_SAMPLES,
+        frames_analyzed: frames.length,
+      },
+    };
+  }
+
   const avgDist  = mean(approachDistances);
   const avgSpeed = mean(approachSpeeds);
 
   // Score de rétention : approches fréquentes + réaction buccale
   const proximityScore = clamp(1 - avgDist / APPROACH_THRESHOLD, 0, 1);
-  const reactionRate   = approachEvents / Math.max(1, approachSpeeds.length);
+  /* Also guarded: with no approach at all this was 0/1 = 0, which is correct,
+     but the denominator must be the real count, not a floor of 1. */
+  const reactionRate   = approachSpeeds.length > 0
+    ? approachEvents / approachSpeeds.length
+    : 0;
   const retentionScore = clamp(Math.round((proximityScore * 40) + (reactionRate * 60)), 0, 100);
 
   const label = retentionScore >= 65 ? 'strong'
