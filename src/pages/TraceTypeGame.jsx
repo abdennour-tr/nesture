@@ -18,21 +18,36 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LogOut, Volume2, VolumeX, Clock, ArrowLeft, Pause, Play,
   RotateCcw, Home, ChevronRight, CheckCircle, Info, Sun, Moon,
-  Hand, MousePointer2
+  Hand, MousePointer2, HelpCircle
 } from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
 import { soundManager } from '../utils/soundManager';
+import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/TraceTypeGame.css';
+import '../styles/GameShell.css';
 
-import { HandDefs, HandArt, steadyAngle, followHand } from '../components/game/HandPointer';
+import { HandDefs, HandArt, followHand } from '../components/game/HandPointer';
 import { createHandPointerFilter, handDepthScale } from '../utils/handPointerFilter';
+import { buildRound, traceTuning } from './traceTypeWords';
+import { buildLetter } from './letterStrokes';
+import GameRules from '../components/game/GameRules';
+import { getGameTheme, toggleGameTheme, subscribeGameTheme } from '../components/game/gameShell';
 // ── Constants ──────────────────────────────────────────────────────────────
 const COUNTDOWN_SECONDS = 3;
-const TYPE_REQUIRED      = 3;   // Must type the letter 3 times
+/* Client feedback: "Type shows the letter 3 times - why is that?"
+   Because the old build asked for three presses of the same key, which taught
+   nothing and broke the illusion of building a word. One press is enough — the
+   round is now a WORD, and the repetition comes from the word's own letters.
+   See traceTypeWords.js for the round model. */
+const TYPE_REQUIRED      = 1;   // one correct press completes the Type step
+/* Default only — the live value comes from traceTuning(levelKey), so Easy is
+   genuinely easy in the air. Client feedback: "i struggled with the tracing in
+   air... very tricky even with easy level! so had to use the mouse throughout". */
 const TRACE_WAYPOINT_RADIUS = 25; // px radius to count as "reached"
+const WORDS_PER_ROUND = 3;        // a session is 3 complete words
 const POINTS_PER_STEP    = 10;
 
 // ── OT scoring constants ───────────────────────────────────────────────────
@@ -79,6 +94,12 @@ function makeOTAccumulator() {
     typeTaps: 0, typeWrong: 0,
     // Pauses
     pauses: 0, pauseMs: 0, pauseStartedAt: null,
+    /* Letters fully finished (trace + find + type). Mirrors
+       sessionStats.lettersCompleted, but on the ref, because computeOTResults
+       runs outside React state and must know how much was actually attempted:
+       every OT sub-score is scored against what was DONE, never against the
+       whole word. */
+    lettersCompleted: 0,
   };
 }
 
@@ -89,32 +110,14 @@ const LEVEL_LETTERS = {
   3: 'QSRGJWB'.split(''), // High complexity, multiple curves or strokes
 };
 
-/* Explicitly mark waypoint connections that are "pen lifts" (i.e. moving to the
-   start of a NEW stroke) where a segment line should NOT be drawn and the path
-   error should NOT be scored. The index is the index of the DESTINATION
-   waypoint, so `[2]` means "the move from waypoint 1 to waypoint 2 is a lift".
+/* Letter geometry now lives in ./letterStrokes.js.
+   The hand-maintained `BAD_JUMPS` index list and `LETTER_DATA` waypoint arrays
+   that used to sit here were removed: they were three things kept in sync by
+   hand (outline, dots, pen lifts), and the dots for straight strokes were only
+   the endpoints — X had 4 dots with 284px gaps in a 300px box, so a child could
+   "trace" it by touching four corners. buildLetter() derives all three from the
+   letter's path at the level's spacing instead. */
 
-   These follow the standard manuscript stroke sequence for capitals
-   (Handwriting Without Tears / Zaner-Bloser): every capital starts at the top,
-   big lines before little lines, top-to-bottom and left-to-right. */
-const BAD_JUMPS = {
-  A: [2, 4], // back to top for the 2nd slant, then lift to the crossbar
-  B: [2],    // back to the top after the big line down
-  D: [2],
-  E: [2, 4, 6], // top, middle and bottom little lines
-  F: [2, 4],
-  H: [2, 4], // 2nd big line down, then the crossbar
-  I: [2, 4], // top little line, then bottom little line
-  K: [2],
-  M: [2],
-  N: [2],
-  P: [2],
-  Q: [9],    // lift from the O ring to the start of the tail
-  R: [2],
-  T: [2],    // big line down first, then the little line across the top
-  X: [2],    // lift from the end of the 1st slant to the top of the 2nd
-  Y: [2],
-};
 
 // ── Encouraging messages pool ──────────────────────────────────────────────
 const ENCOURAGEMENTS = [
@@ -133,224 +136,7 @@ const QWERTY_ROWS = [
 
 // ── SVG Letter Path Data ───────────────────────────────────────────────────
 // Each letter has waypoints [{x, y}] for tracing in a 300×300 canvas,
-// and a d path string for the guide outline.
-const LETTER_DATA = {
-  // Slant down left, back to the top, slant down right, then the crossbar.
-  A: {
-    waypoints: [
-      { x: 150, y: 40 },   { x: 50, y: 260 },
-      { x: 150, y: 40 },   { x: 250, y: 260 },
-      { x: 100, y: 170 },  { x: 200, y: 170 },
-    ],
-    path: 'M150,40 L50,260 M150,40 L250,260 M100,170 L200,170',
-  },
-  // Big line down, back to the top, top bump, bottom bump.
-  B: {
-    waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 70, y: 40 },   { x: 190, y: 60 },   { x: 190, y: 130 },
-      { x: 70, y: 150 },  { x: 210, y: 170 },  { x: 210, y: 240 },
-      { x: 70, y: 260 },
-    ],
-    path: 'M70,40 L70,260 M70,40 Q230,40 230,100 Q230,150 70,150 Q240,150 240,210 Q240,260 70,260',
-  },
-  C: {
-    waypoints: [
-      { x: 230, y: 80 },   { x: 150, y: 55 },   { x: 70, y: 100 },
-      { x: 60, y: 150 },   { x: 70, y: 210 },   { x: 150, y: 245 },
-      { x: 230, y: 230 },
-    ],
-    path: 'M230,80 Q150,20 70,80 Q40,150 70,220 Q150,280 230,230',
-  },
-  // Big line down, back to the top, curve around to the bottom.
-  D: {
-    waypoints: [
-      { x: 70, y: 40 },    { x: 70, y: 260 },
-      { x: 70, y: 40 },    { x: 215, y: 70 },  { x: 260, y: 150 },
-      { x: 215, y: 230 },  { x: 70, y: 260 },
-    ],
-    path: 'M70,40 L70,260 M70,40 Q260,40 260,150 Q260,260 70,260',
-  },
-  // Big line down, then the top, middle and bottom little lines (left to right).
-  E: {
-    waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 70, y: 40 },   { x: 210, y: 40 },
-      { x: 70, y: 150 },  { x: 180, y: 150 },
-      { x: 70, y: 260 },  { x: 210, y: 260 },
-    ],
-    path: 'M70,40 L70,260 M70,40 L210,40 M70,150 L180,150 M70,260 L210,260',
-  },
-  // Big line down, then the top and middle little lines (left to right).
-  F: {
-    waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 70, y: 40 },   { x: 210, y: 40 },
-      { x: 70, y: 150 },  { x: 180, y: 150 },
-    ],
-    path: 'M70,40 L70,260 M70,40 L210,40 M70,150 L180,150',
-  },
-  G: {
-    waypoints: [
-      { x: 230, y: 80 },   { x: 150, y: 40 },   { x: 70, y: 100 },
-      { x: 60, y: 150 },   { x: 70, y: 210 },   { x: 150, y: 260 },
-      { x: 230, y: 220 },  { x: 230, y: 160 },  { x: 170, y: 160 },
-    ],
-    path: 'M230,80 Q150,20 70,80 Q40,150 70,220 Q150,280 230,220 L230,160 L170,160',
-  },
-  // Big line down, big line down, then the little line across.
-  H: {
-    waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 230, y: 40 },  { x: 230, y: 260 },
-      { x: 70, y: 150 },  { x: 230, y: 150 },
-    ],
-    path: 'M70,40 L70,260 M230,40 L230,260 M70,150 L230,150',
-  },
-  // Big line down, little line across the top, little line across the bottom.
-  I: {
-    waypoints: [
-      { x: 150, y: 40 },  { x: 150, y: 260 },
-      { x: 100, y: 40 },  { x: 200, y: 40 },
-      { x: 100, y: 260 }, { x: 200, y: 260 },
-    ],
-    path: 'M150,40 L150,260 M100,40 L200,40 M100,260 L200,260',
-  },
-  // One stroke: big line down, then turn (hook) to the left.
-  J: {
-    waypoints: [
-      { x: 190, y: 40 },  { x: 190, y: 210 },
-      { x: 150, y: 260 }, { x: 80, y: 230 },
-    ],
-    path: 'M190,40 L190,210 Q190,270 120,250 Q80,240 80,220',
-  },
-  // Big line down, then slant in to the middle and slant out to the bottom.
-  K: {
-    waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 220, y: 40 },  { x: 70, y: 160 },  { x: 220, y: 260 },
-    ],
-    path: 'M70,40 L70,260 M220,40 L70,160 L220,260',
-  },
-  L: {
-    waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },  { x: 220, y: 260 },
-    ],
-    path: 'M70,40 L70,260 L220,260',
-  },
-  // Big line down, back to the top, slant down, slant up, big line down.
-  M: {
-    waypoints: [
-      { x: 50, y: 40 },   { x: 50, y: 260 },
-      { x: 50, y: 40 },   { x: 150, y: 160 },
-      { x: 250, y: 40 },  { x: 250, y: 260 },
-    ],
-    path: 'M50,40 L50,260 M50,40 L150,160 L250,40 L250,260',
-  },
-  // Big line down, back to the top, slant down, big line up.
-  N: {
-    waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 70, y: 40 },   { x: 230, y: 260 },  { x: 230, y: 40 },
-    ],
-    path: 'M70,40 L70,260 M70,40 L230,260 L230,40',
-  },
-  O: {
-    waypoints: [
-      { x: 150, y: 40 },  { x: 70, y: 80 },   { x: 50, y: 150 },
-      { x: 70, y: 220 },  { x: 150, y: 260 },  { x: 230, y: 220 },
-      { x: 250, y: 150 }, { x: 230, y: 80 },   { x: 150, y: 40 },
-    ],
-    path: 'M150,40 Q50,40 50,150 Q50,260 150,260 Q250,260 250,150 Q250,40 150,40 Z',
-  },
-  // Big line down, back to the top, curve around to the middle.
-  P: {
-    waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 70, y: 40 },   { x: 180, y: 50 },
-      { x: 220, y: 100 }, { x: 180, y: 150 },  { x: 70, y: 160 },
-    ],
-    path: 'M70,40 L70,260 M70,40 Q240,40 240,100 Q240,160 70,160',
-  },
-  Q: {
-    waypoints: [
-      { x: 150, y: 40 },  { x: 70, y: 80 },   { x: 50, y: 150 },
-      { x: 70, y: 220 },  { x: 150, y: 260 },  { x: 230, y: 220 },
-      { x: 250, y: 150 }, { x: 230, y: 80 },   { x: 150, y: 40 },
-      { x: 200, y: 210 }, { x: 260, y: 270 },
-    ],
-    path: 'M150,40 Q50,40 50,150 Q50,260 150,260 Q250,260 250,150 Q250,40 150,40 Z M200,210 L260,270',
-  },
-  // Big line down, back to the top, curve to the middle, then slant to the corner.
-  R: {
-    waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 70, y: 40 },   { x: 180, y: 50 },
-      { x: 220, y: 100 }, { x: 180, y: 150 },  { x: 70, y: 160 },
-      { x: 230, y: 260 },
-    ],
-    path: 'M70,40 L70,260 M70,40 Q240,40 240,100 Q240,160 70,160 L230,260',
-  },
-  S: {
-    waypoints: [
-      { x: 220, y: 70 },  { x: 160, y: 40 },   { x: 80, y: 70 },
-      { x: 70, y: 110 },  { x: 150, y: 150 },   { x: 230, y: 190 },
-      { x: 220, y: 230 }, { x: 150, y: 260 },   { x: 70, y: 230 },
-    ],
-    path: 'M220,70 Q150,20 80,70 Q50,120 150,150 Q250,180 220,230 Q170,280 70,230',
-  },
-  // Big line down, then the little line across the top.
-  T: {
-    waypoints: [
-      { x: 150, y: 40 },  { x: 150, y: 260 },
-      { x: 50, y: 40 },   { x: 250, y: 40 },
-    ],
-    path: 'M150,40 L150,260 M50,40 L250,40',
-  },
-  U: {
-    waypoints: [
-      { x: 70, y: 40 },   { x: 70, y: 200 },  { x: 100, y: 245 },
-      { x: 150, y: 260 }, { x: 200, y: 245 },  { x: 230, y: 200 },
-      { x: 230, y: 40 },
-    ],
-    path: 'M70,40 L70,200 Q70,270 150,270 Q230,270 230,200 L230,40',
-  },
-  V: {
-    waypoints: [
-      { x: 50, y: 40 },   { x: 150, y: 260 },  { x: 250, y: 40 },
-    ],
-    path: 'M50,40 L150,260 L250,40',
-  },
-  W: {
-    waypoints: [
-      { x: 30, y: 40 },   { x: 90, y: 260 },   { x: 150, y: 120 },
-      { x: 210, y: 260 }, { x: 270, y: 40 },
-    ],
-    path: 'M30,40 L90,260 L150,120 L210,260 L270,40',
-  },
-  X: {
-    waypoints: [
-      { x: 60, y: 40 },   { x: 240, y: 260 },
-      { x: 240, y: 40 },  { x: 60, y: 260 },
-    ],
-    path: 'M60,40 L240,260 M240,40 L60,260',
-  },
-  // Slant down to the middle, slant down to the middle, then big line down.
-  Y: {
-    waypoints: [
-      { x: 50, y: 40 },   { x: 150, y: 150 },
-      { x: 250, y: 40 },  { x: 150, y: 150 },  { x: 150, y: 260 },
-    ],
-    path: 'M50,40 L150,150 M250,40 L150,150 L150,260',
-  },
-  Z: {
-    waypoints: [
-      { x: 60, y: 40 },   { x: 240, y: 40 },   { x: 60, y: 260 },
-      { x: 240, y: 260 },
-    ],
-    path: 'M60,40 L240,40 L60,260 L240,260',
-  },
-};
+
 
 // ── Trace guidance: hand pointer + direction arrows ────────────────────────
 /* Base size of the hand pointer in SVG units (the canvas is 300x300). The art
@@ -487,51 +273,22 @@ const RULES = [
   { icon: '⏸️', text: 'You can pause at any time; pauses are tracked, not punished.' },
 ];
 
-function RulesModal({ level, onStart }) {
+/* Trace → Find → Type is the REFERENCE design, so its card is now the shared
+   one (GameRules) rather than a private copy of the same markup. Keeping a
+   duplicate here is how the six games drifted apart in the first place. */
+function RulesModal({ level, onStart, resume = false }) {
   return (
-    <motion.div
-      className="tt-rules-overlay"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    >
-      <motion.div
-        className="tt-rules-card"
-        initial={{ scale: 0.88, y: 30, opacity: 0 }}
-        animate={{ scale: 1, y: 0, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        transition={{ type: 'spring', stiffness: 240, damping: 22 }}
-      >
-        <div className="tt-rules-head">
-          <div className="tt-rules-badge">✏️</div>
-          <div>
-            <h2 className="tt-rules-title">Trace → Find → Type</h2>
-            <p className="tt-rules-sub">Level {level} · 3 steps for every letter</p>
-          </div>
-        </div>
-
-        <ul className="tt-rules-list">
-          {RULES.map((r, i) => (
-            <motion.li
-              key={i}
-              initial={{ opacity: 0, x: -18 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.12 + i * 0.07 }}
-            >
-              <span className="tt-rule-icon">{r.icon}</span>
-              <span>{r.text}</span>
-            </motion.li>
-          ))}
-        </ul>
-
-        <div className="tt-rules-ot">
-          <strong>OT Score</strong> = Trace accuracy 30% · Smoothness 20% ·
-          Letter search 20% · Typing accuracy 20% · Speed 10%
-        </div>
-
-        <button className="tt-rules-start" onClick={onStart}>
-          <Play size={20} /> Let&apos;s go!
-        </button>
-      </motion.div>
-    </motion.div>
+    <GameRules
+      emoji="✏️"
+      title="Trace → Find → Type"
+      /* Easy / Medium / Hard everywhere — no more "Level 1/2/3" in one game and
+         "Easy/Medium/Hard" in the next. */
+      subtitle={`${level === 3 ? 'Hard' : level === 2 ? 'Medium' : 'Easy'} · trace, find and type each letter to spell the word`}
+      rules={RULES}
+      note={<><strong>OT Score</strong> = Trace accuracy 30% · Smoothness 20% · Letter search 20% · Typing accuracy 20% · Speed 10%</>}
+      onStart={onStart}
+      resume={resume}
+    />
   );
 }
 
@@ -540,7 +297,25 @@ export default function TraceTypeGame() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const level = parseInt(searchParams.get('level') || '1', 10);
-  const letters = useMemo(() => LEVEL_LETTERS[level] || LEVEL_LETTERS[1], [level]);
+  const levelKey = searchParams.get('difficulty')
+    || (level === 3 ? 'hard' : level === 2 ? 'medium' : 'easy');
+
+  /* ── A ROUND IS A WORD ──────────────────────────────────────────────────
+     Product owner's intent, restated in the client's feedback:
+
+       "say a word like bus is presented where the learner will first start
+        with left with tracing B, then finding B in the middle in the keyboard
+        and then typing B in the right hand side; … So by the end of this 1
+        round they have traced, found and typed all 3 letters and formed a
+        complete word BUS."
+
+     `letters` is therefore the letters OF THE WORD, in order. The existing
+     per-letter trace → find → type cycle then produces exactly that journey,
+     and the word fills in on screen as each letter is typed. */
+  const [word, setWord] = useState(() => buildRound(levelKey).word);
+  const wordsDoneRef = useRef(0);
+  const letters = useMemo(() => word.split(''), [word]);
+  const tuning = useMemo(() => traceTuning(levelKey), [levelKey]);
 
   // ── Auth & Session ──────────────────────────────────────────────────────
   const { user, profile } = useAuthStore();
@@ -559,8 +334,19 @@ export default function TraceTypeGame() {
   const [step, setStep]                 = useState('trace'); // trace | find | type
   const [score, setScore]               = useState(0);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [isLightMode, setIsLightMode]   = useState(false);
+  /* Follows the ONE shared theme instead of keeping a private switch. This
+     game used to own an `isLightMode` of its own, so its toggle and the toggle
+     on every other screen disagreed — the original "this game has an option to
+     toggle the theme but others don't" complaint, in a subtler form. Dark is
+     the default; `.tt-light-mode` is applied only when the shared theme is
+     light. */
+  const [gameTheme, setGameTheme_] = useState(getGameTheme);
+  useEffect(() => subscribeGameTheme(setGameTheme_), []);
+  const isLightMode = gameTheme === 'light';
   const [isPaused, setIsPaused]         = useState(false);
+  /* True while the end-game confirmation is on screen. The round is paused
+     then, but the PAUSE CARD must stay hidden so only one card shows. */
+  const [endAsking, setEndAsking] = useState(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [encourageMsg, setEncourageMsg] = useState('');
   const [feedbackMsg, setFeedbackMsg]   = useState(null); // { text, type: 'success'|'error', points }
@@ -577,7 +363,16 @@ export default function TraceTypeGame() {
     landmarks,
     isTracking,
     error: trackingError,
+    releaseCamera,
   } = useHandTracking(videoRef, canvasRef, trackingEnabled, pauseProcessing, 1);
+
+  /* ── Turn the camera off when the session ends ──────────────────────────
+     Client feedback: "when the game finish the camera need to turn off."
+     `trackingEnabled` already excludes the results screen; this releases the
+     MediaStream explicitly so the webcam light goes out immediately. */
+  useEffect(() => {
+    if (gamePhase === 'results') releaseCamera();
+  }, [gamePhase, releaseCamera]);
 
   // ── TTS ─────────────────────────────────────────────────────────────────
   const { speak } = useTextToSpeech(true);
@@ -632,10 +427,40 @@ export default function TraceTypeGame() {
      time, so sharing it means the reach centre learned while the child traces
      is still there when they move to the keyboard. */
   const handFilterRef = useRef(null);
-  if (!handFilterRef.current) handFilterRef.current = createHandPointerFilter();
+  if (!handFilterRef.current) {
+    /* `fitReach` scales each axis to the child's OBSERVED range of motion.
+       ---------------------------------------------------------------------
+       Client feedback: "the hand pointer still can't roam the whole screen."
+
+       Making the pointer viewport-wide was only half the fix. The fingertip
+       position the filter receives is normalised to the CAMERA FRAME, and a
+       seated child's comfortable reach covers barely half of it — so at the
+       default gain they could only ever get to the middle half of the screen,
+       and the corners stayed physically unreachable however far they stretched.
+       The camera being 4:3 while the screen is 16:9 made it worse on one axis
+       than the other.
+
+       With reach fitting on, the filter measures how far the child actually
+       moves and scales each axis independently so that range covers the whole
+       window. Bounded by `minReach` / `fitMaxGain`, and eased on the same slow
+       time constant as the distance gain, so it never shifts mid-reach.
+
+       Left off for Pop the Bubble and Follow the Ladybug, which the client
+       reported as working well — this is opt-in per screen. */
+    handFilterRef.current = createHandPointerFilter({ fitReach: true });
+  }
   const handTargetRef = useRef({ x: 150, y: 150, rot: 0, scale: HAND_SCALE, flip: 1, on: 0 });
   const handShownRef  = useRef({ x: 150, y: 150, rot: 0, scale: HAND_SCALE, flip: 1, on: 0 });
   const traceAreaRef = useRef(null);
+  /* The 300x300 tracing SVG. The full-screen pointer maps its viewport
+     position back into this element's user space via getScreenCTM(), so the
+     hand can roam the whole window and still trace accurately. */
+  const traceSvgRef  = useRef(null);
+  /* `processTracePosition` is declared further down this component, so the
+     full-screen pointer effect above it cannot list it as a dependency
+     (the deps array is evaluated during render, before the const exists).
+     This always-current ref bridges the gap. */
+  const processTraceRef = useRef(null);
 
   /* ── Global pointer (Find & Type) ────────────────────────────────────────
      The same hand, over the whole viewport this time, so the child points at
@@ -682,7 +507,16 @@ export default function TraceTypeGame() {
 
   // ── Current letter ──────────────────────────────────────────────────────
   const currentLetter = letters[currentLetterIdx];
-  const letterData = LETTER_DATA[currentLetter] || LETTER_DATA.A;
+  /* Waypoints, pen lifts and the outline are all generated from the letter's
+     path at this level's spacing (see letterStrokes.js), so they can never
+     disagree with each other the way the old hand-maintained LETTER_DATA /
+     BAD_JUMPS pair could — and straight strokes get as many dots as curved
+     ones, which they did not before. */
+  const letterData = useMemo(
+    () => buildLetter(currentLetter, tuning.spacing),
+    [currentLetter, tuning.spacing]
+  );
+  const letterJumps = letterData.jumps;
 
   // ── Session API: start ──────────────────────────────────────────────────
   useEffect(() => {
@@ -832,10 +666,21 @@ export default function TraceTypeGame() {
   }, [step, gamePhase, isPaused, currentLetter, typedCount, typeStartTime, soundEnabled]);
 
   // ══════════════════════════════════════════════════════════════════════════
-  // GLOBAL POINTER Logic (Find & Type)
+  // GLOBAL POINTER Logic (Trace, Find & Type)
+  // ──────────────────────────────────────────────────────────────────────────
+  // Client feedback: "The hand pointer should be able to move freely across the
+  // entire screen, not only inside the letter box area. This improvement should
+  // apply to all three activities: Trace, Find, and Type."
+  //
+  // Find and Type already used this viewport-wide pointer. Trace did not: it
+  // mapped the hand with `p.x * 300`, which squeezed the child's ENTIRE range of
+  // motion onto the 300x300 letter box — the pointer physically could not leave
+  // it. All three steps now share this one pointer, drawn on the fixed
+  // full-viewport overlay, and Trace converts the viewport position back into
+  // letter-box coordinates only to decide what has been traced.
   // ══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
-    if ((step !== 'find' && step !== 'type') || gamePhase !== 'playing' || isPaused) {
+    if ((step !== 'trace' && step !== 'find' && step !== 'type') || gamePhase !== 'playing' || isPaused) {
       gHandTargetRef.current.on = 0;
       gDwellRef.current = 0;
       hoverTargetRef.current = null;
@@ -850,11 +695,12 @@ export default function TraceTypeGame() {
       return;
     }
 
+    /* `indexMcp` and `wrist` were only needed for the orientation maths that is
+       now gone; `indexTip` is still the sanity check that this frame has a
+       usable hand before we push it through the filter. */
     const indexTip = landmarks[8];
-    const indexMcp = landmarks[5];
-    const littleMcp = landmarks[17];
     const wrist = landmarks[0];
-    if (!indexTip || !indexMcp) return;
+    if (!indexTip) return;
 
     /* Map to the viewport through the shared filter. This pointer had no
        smoothing at all before, which is why a dwell on a key was hard to hold
@@ -866,28 +712,14 @@ export default function TraceTypeGame() {
     const sx = p.x * window.innerWidth;
     const sy = p.y * window.innerHeight;
 
-    /* Same orientation maths as the tracing pointer: the knuckle→tip vector
-       gives the direction the finger points, and the side the little finger
-       falls on tells us whether to mirror the hand.
-       Measured from the RAW landmarks, not from the filtered position: the
-       filter moves the fingertip and not the knuckle, so mixing the two
-       would swing the drawn hand's heading as the gain changed. */
-    const rx = (1 - indexTip.x) * window.innerWidth;
-    const ry = indexTip.y * window.innerHeight;
-    const kx = (1 - indexMcp.x) * window.innerWidth;
-    const ky = indexMcp.y * window.innerHeight;
-    const dx = rx - kx;
-    const dy = ry - ky;
+    /* Orientation is no longer computed: the pointer is always drawn upright.
+       The angle a fingertip implies swings several degrees on a one-pixel
+       landmark wobble, so the hand rocked constantly, and the little-finger
+       cross product could mirror the whole hand mid-reach. Neither moved the
+       cursor — the cursor IS the fingertip — so both were noise. The
+       touch/mouse pointer was already upright, so the two now match. */
     const gt = gHandTargetRef.current;
 
-    if (Math.hypot(dx, dy) > 8) {
-      gt.rot = steadyAngle(gt.rot, (Math.atan2(dy, dx) * 180) / Math.PI + 90);
-      if (littleMcp) {
-        const cross = dx * (littleMcp.y * window.innerHeight - ky)
-                    - dy * ((1 - littleMcp.x) * window.innerWidth - kx);
-        gt.flip = cross > 0 ? 1 : -1;
-      }
-    }
     if (wrist) {
       /* Depth from the palm measurement the filter already made, which does
          not change meaning with the window's aspect ratio. */
@@ -896,6 +728,39 @@ export default function TraceTypeGame() {
     gt.x = sx;
     gt.y = sy;
     gt.on = 1;
+
+    /* ── TRACE ────────────────────────────────────────────────────────────
+       The pointer roams the whole window (above). To decide what has been
+       traced we convert its viewport position back into the letter's own
+       300x300 user space with getScreenCTM(), which accounts for the element's
+       position, size AND the viewBox's preserveAspectRatio letterboxing — so
+       the mapping stays exact at any window size.
+
+       Outside the letter box nothing is recorded: the hand simply moves freely,
+       which is the point. */
+    if (step === 'trace') {
+      setHandVisible((v) => (v ? v : true));
+
+      const svg = traceSvgRef.current;
+      const ctm = svg && typeof svg.getScreenCTM === 'function' ? svg.getScreenCTM() : null;
+      if (ctm) {
+        const pt = svg.createSVGPoint();
+        pt.x = sx;
+        pt.y = sy;
+        const local = pt.matrixTransform(ctm.inverse());
+        /* A small margin outside the box still counts, so a waypoint sitting on
+           the very edge of the letter is reachable without pixel-perfect aim. */
+        const M = 24;
+        if (local.x >= -M && local.x <= 300 + M && local.y >= -M && local.y <= 300 + M) {
+          processTraceRef.current?.(local.x, local.y);
+        }
+      }
+
+      gDwellRef.current = 0;
+      hoverTargetRef.current = null;
+      hoverStartTimeRef.current = null;
+      return;
+    }
 
     let hoverKey = null;
     let clickProgress = 0;
@@ -937,58 +802,93 @@ export default function TraceTypeGame() {
   // ══════════════════════════════════════════════════════════════════════════
 
   /* Turns the raw accumulators into the five OT sub-scores and the composite.
-     Called once, when the last letter is finished. */
+     ------------------------------------------------------------------------
+     EVERY SUB-SCORE IS `null` WHEN THERE IS NO DATA FOR IT.
+
+     This used to default each one to its BEST value when the accumulator was
+     empty: no trace samples meant `onPathRatio = 1`, no jerk samples meant zero
+     jerk, no taps meant no wrong taps, and an unstarted round beat the speed
+     reference. Pressing "End game" on the very first screen therefore produced
+     a 100/100 OT score next to "You completed 0 letters" — a fabricated
+     perfect result in a report a therapist reads.
+
+     Absence of evidence is not a perfect performance. An unmeasured component
+     is reported as null ("—" in the UI) and is left out of the composite,
+     which is renormalised over the components that DO have data — the same
+     rule Pop the Bubble already applies to its path metrics. If nothing at all
+     was measured, the composite itself is null. */
   const computeOTResults = useCallback(() => {
     const ot = otRef.current;
     // Paused time is excluded so a child who stops for a drink is not penalised.
     const activeMs = Math.max(1, Date.now() - (ot.startedAt || Date.now()) - ot.pauseMs);
+    const lettersDone = ot.lettersCompleted || 0;
 
     // 1. Trace accuracy — how close to the letter the fingertip stayed.
-    const meanDist    = ot.traceSamples ? ot.traceDistSum / ot.traceSamples : 0;
-    const onPathRatio = ot.traceSamples ? ot.traceOnPath  / ot.traceSamples : 1;
-    const traceAccuracy = clamp01(
-      onPathRatio * 0.6 + clamp01(1 - meanDist / TRACE_TOLERANCE) * 0.4
-    ) * 100;
+    const meanDist = ot.traceSamples ? ot.traceDistSum / ot.traceSamples : null;
+    const traceAccuracy = ot.traceSamples
+      ? clamp01(
+          (ot.traceOnPath / ot.traceSamples) * 0.6 +
+          clamp01(1 - meanDist / TRACE_TOLERANCE) * 0.4
+        ) * 100
+      : null;
 
     // 2. Smoothness — low mean jerk means controlled, non-shaky movement.
-    const meanJerk  = ot.jerkCount ? ot.jerkSum / ot.jerkCount : 0;
-    const smoothness = clamp01(1 - meanJerk / JERK_CAP) * 100;
+    const smoothness = ot.jerkCount
+      ? clamp01(1 - (ot.jerkSum / ot.jerkCount) / JERK_CAP) * 100
+      : null;
 
     // 3. Letter search — one tap per letter is a perfect visual search.
-    const findEfficiency = ot.findTaps
-      ? clamp01(letters.length / ot.findTaps) * 100 : 100;
+    //    Scored against the letters actually ATTEMPTED, not the whole word:
+    //    finding 1 letter in 1 tap is 100%, and ending after one letter must
+    //    not be judged against three.
+    const findEfficiency = (ot.findTaps && lettersDone)
+      ? clamp01(lettersDone / ot.findTaps) * 100
+      : null;
 
     // 4. Typing accuracy — share of correct key presses in the TYPE step.
     const typingAccuracy = ot.typeTaps
-      ? clamp01((ot.typeTaps - ot.typeWrong) / ot.typeTaps) * 100 : 100;
+      ? clamp01((ot.typeTaps - ot.typeWrong) / ot.typeTaps) * 100
+      : null;
 
-    // 5. Speed — measured against a per-level reference pace, never above 100.
-    const refMs = (LEVEL_REF_SEC[level] || 20) * 1000 * letters.length;
-    const speedScore = clamp01(refMs / activeMs) * 100;
+    // 5. Speed — against the reference pace for the letters actually finished.
+    //    Meaningless before the first letter is done: an untouched round would
+    //    otherwise "beat" the reference simply by being short.
+    const speedScore = lettersDone
+      ? clamp01(((LEVEL_REF_SEC[level] || 20) * 1000 * lettersDone) / activeMs) * 100
+      : null;
 
-    const composite = Math.round(
-      traceAccuracy   * 0.30 +
-      smoothness      * 0.20 +
-      findEfficiency  * 0.20 +
-      typingAccuracy  * 0.20 +
-      speedScore      * 0.10
-    );
+    /* Weighted mean over the measured components only. */
+    const parts = [
+      [traceAccuracy,  0.30],
+      [smoothness,     0.20],
+      [findEfficiency, 0.20],
+      [typingAccuracy, 0.20],
+      [speedScore,     0.10],
+    ].filter(([v]) => v != null);
+
+    const weight = parts.reduce((a, [, w]) => a + w, 0);
+    const composite = weight > 0
+      ? Math.round(parts.reduce((a, [v, w]) => a + v * w, 0) / weight)
+      : null;
+
+    const round = (v) => (v == null ? null : Math.round(v));
 
     return {
       composite,
-      traceAccuracy:  Math.round(traceAccuracy),
-      smoothness:     Math.round(smoothness),
-      findEfficiency: Math.round(findEfficiency),
-      typingAccuracy: Math.round(typingAccuracy),
-      speedScore:     Math.round(speedScore),
-      meanDeviation:  Math.round(meanDist),
+      traceAccuracy:  round(traceAccuracy),
+      smoothness:     round(smoothness),
+      findEfficiency: round(findEfficiency),
+      typingAccuracy: round(typingAccuracy),
+      speedScore:     round(speedScore),
+      meanDeviation:  round(meanDist),
+      lettersScored:  lettersDone,
       wrongKeys:      ot.findWrong + ot.typeWrong,
       reactionMs: (ot.firstMoveAt && ot.startedAt) ? ot.firstMoveAt - ot.startedAt : null,
       activeSec: activeMs / 1000,
       pauses:    ot.pauses,
       pauseMs:   ot.pauseMs,
     };
-  }, [letters.length, level]);
+  }, [level]);
 
   const handleStepComplete = useCallback((completedStep, metrics = {}) => {
     const points = POINTS_PER_STEP;
@@ -1030,6 +930,8 @@ export default function TraceTypeGame() {
       const starsEarned = 3; // simplified: always 3 stars on completion
       setStarRatings((prev) => ({ ...prev, [currentLetter]: starsEarned }));
 
+      otRef.current.lettersCompleted += 1;
+
       setSessionStats((prev) => ({
         ...prev,
         totalScore: prev.totalScore + POINTS_PER_STEP * 3,
@@ -1057,15 +959,30 @@ export default function TraceTypeGame() {
           setTypedCount(0);
           letterStartTimeRef.current = Date.now();
           setGamePhase('playing');
+        } else if (wordsDoneRef.current + 1 < WORDS_PER_ROUND) {
+          /* The word is complete — start the next one. A session is
+             WORDS_PER_ROUND whole words, so the learner always finishes on a
+             completed word rather than mid-spelling. */
+          wordsDoneRef.current += 1;
+          setWord((prev) => buildRound(levelKey, prev).word);
+          setCurrentLetterIdx(0);
+          setStep('trace');
+          setReachedWaypoints([]);
+          setTraceProgress(0);
+          handTargetRef.current.on = 0;
+          setKeyStates({});
+          setTypedCount(0);
+          letterStartTimeRef.current = Date.now();
+          setGamePhase('playing');
         } else {
-          // All letters done
+          // All words done
           if (soundEnabled) soundManager.playCelebration();
           setOtResults(computeOTResults());
           setGamePhase('results');
         }
       }, 2200);
     }
-  }, [currentLetter, currentLetterIdx, letters.length, soundEnabled, computeOTResults]);
+  }, [currentLetter, currentLetterIdx, letters.length, levelKey, soundEnabled, computeOTResults]);
 
   /* Feeds one fingertip position into the OT accumulators: how far it sits
      from the stroke being traced, and how jerky the movement is. Runs on every
@@ -1075,10 +992,11 @@ export default function TraceTypeGame() {
     const now = performance.now();
     if (ot.firstMoveAt == null) ot.firstMoveAt = Date.now();
 
-    /* Path error. Segments flagged in BAD_JUMPS are pen lifts between strokes
-       (the crossbar of A, the tail of Q): the child is *supposed* to travel off
-       the letter there, so those frames are not scored. */
-    const isJump = (BAD_JUMPS[currentLetter] || []).includes(nextIdx);
+    /* Path error. Waypoints that begin a new stroke are pen LIFTS (the crossbar
+       of A, the tail of Q): the child is *supposed* to travel off the letter
+       there, so those frames are not scored against them. The lift list is
+       derived from the letter's strokes — see letterStrokes.js. */
+    const isJump = letterJumps.includes(nextIdx);
     if (nextIdx < waypoints.length && !isJump) {
       const target = waypoints[nextIdx];
       const prev   = nextIdx > 0 ? waypoints[nextIdx - 1] : target;
@@ -1118,7 +1036,7 @@ export default function TraceTypeGame() {
     ot.lastVel = vel;
     ot.lastPos = { x: sx, y: sy };
     ot.lastT = now;
-  }, [currentLetter]);
+  }, [currentLetter, letterJumps]);
 
   const processTracePosition = useCallback((sx, sy) => {
     if (step !== 'trace' || gamePhase !== 'playing' || isPaused) return;
@@ -1136,12 +1054,24 @@ export default function TraceTypeGame() {
       const target = waypoints[nextIdx];
       const dist = Math.hypot(sx - target.x, sy - target.y);
 
-      if (dist < TRACE_WAYPOINT_RADIUS) {
+      /* Per-level tolerance instead of a fixed 25px. Air tracing with a webcam
+         has a few centimetres of wobble that a fixed radius punished on every
+         level — the client had to abandon the camera and use the mouse even on
+         Easy. Easy now accepts 68px, Hard stays precise at 30px. */
+      if (dist < (tuning.tolerance || TRACE_WAYPOINT_RADIUS)) {
         newReached.push(nextIdx);
         setReachedWaypoints(newReached);
         setTraceProgress(newReached.length / waypoints.length);
 
         if (soundEnabled) soundManager.playProgress();
+
+        /* NO coverage shortcut. An earlier build accepted a letter once ~62%
+           of its waypoints were reached and auto-filled the rest, to make air
+           tracing achievable — but that is what produced "le lettre est
+           terminé même si je ne touche pas tous les points". Every waypoint
+           must be touched, in order. Easiness comes from FEWER, wider-spaced
+           dots and a larger tolerance (see TRACE_TUNING), never from skipping
+           part of the letter. */
 
         // All waypoints reached
         if (newReached.length === waypoints.length) {
@@ -1160,7 +1090,10 @@ export default function TraceTypeGame() {
       }
     }
   }, [step, gamePhase, isPaused, letterData, reachedWaypoints, soundEnabled,
-      handleStepComplete, recordTraceSample]);
+      handleStepComplete, recordTraceSample, tuning]);
+
+  /* Hand the latest version to the full-screen pointer effect above. */
+  processTraceRef.current = processTracePosition;
 
   /* Hide the pointer (it fades out rather than vanishing). */
   const hideHand = useCallback(() => {
@@ -1179,7 +1112,7 @@ export default function TraceTypeGame() {
 
     // Touch input has no hand orientation, so the pointer stays upright.
     const t = handTargetRef.current;
-    t.x = sx; t.y = sy; t.rot = 0; t.scale = HAND_SCALE; t.flip = 1; t.on = 1;
+    t.x = sx; t.y = sy; t.scale = HAND_SCALE; t.on = 1;   // upright, like every pointer now
     setHandVisible((v) => (v ? v : true));
 
     processTracePosition(sx, sy);
@@ -1191,68 +1124,25 @@ export default function TraceTypeGame() {
      the child reaches toward the camera) and the index/little-finger order
      tells us which way round the hand is, so a left hand is not drawn as a
      right one. */
+  /* The in-box hand is now TOUCH/MOUSE ONLY.
+     ---------------------------------------------------------------------
+     It used to map the tracked hand with `p.x * 300`, confining the camera
+     pointer to the letter box — the exact behaviour the client asked us to
+     remove. Camera tracing is handled by the full-screen pointer effect above,
+     which draws on the fixed overlay and maps back into this box only to score
+     the trace.
+
+     Two pointers must never push the shared handPointerFilter on the same
+     frame (it would advance the filter twice per sample and double the gain),
+     so this effect no longer touches landmarks at all. It only clears the
+     in-box hand when we leave the Trace step or when a touch drag ends. */
   useEffect(() => {
     if (step !== 'trace' || gamePhase !== 'playing' || isPaused) {
       hideHand();
-      handFilterRef.current.lost();
       return;
     }
-    if (!landmarks || landmarks.length < 18) {
-      if (!isDrawing) hideHand(); // only clear if not actively using touch
-      handFilterRef.current.lost();
-      return;
-    }
-
-    const indexTip = landmarks[8];   // index fingertip
-    const indexMcp = landmarks[5];   // index knuckle
-    const littleMcp = landmarks[17]; // little-finger knuckle
-    const wrist    = landmarks[0];
-    if (!indexTip || !indexMcp) return;
-
-    /* Position through the shared filter, so the letter is the same size to
-       trace whether the child is close to the camera or sitting back. */
-    const p = handFilterRef.current.push(landmarks);
-    if (!p) return;
-    const sx = p.x * 300;
-    const sy = p.y * 300;
-
-    /* Heading from the RAW landmarks: the filter moves the fingertip and not
-       the knuckle, so measuring the finger direction across the two would
-       swing the drawn hand as the gain changed. */
-    const rx = (1 - indexTip.x) * 300; // mirror
-    const ry = indexTip.y * 300;
-    const kx = (1 - indexMcp.x) * 300;
-    const ky = indexMcp.y * 300;
-
-    const dx = rx - kx;
-    const dy = ry - ky;
-    const t = handTargetRef.current;
-
-    /* The art points along -y, so a finger pointing straight up needs no
-       rotation: atan2 gives -90 there, hence the +90. */
-    if (Math.hypot(dx, dy) > 6) {
-      t.rot = steadyAngle(t.rot, (Math.atan2(dy, dx) * 180) / Math.PI + 90);
-
-      /* Which side is the little finger on, relative to the pointing
-         direction? The art is drawn with the curled fingers on the right, so
-         a negative cross product means we mirror it across the finger. */
-      if (littleMcp) {
-        const cross = dx * (littleMcp.y * 300 - ky) - dy * ((1 - littleMcp.x) * 300 - kx);
-        t.flip = cross > 0 ? 1 : -1;
-      }
-    }
-
-    if (wrist) {
-      t.scale = Math.max(0.24, Math.min(0.44, HAND_SCALE * handDepthScale(p.span)));
-    }
-
-    t.x = sx;
-    t.y = sy;
-    t.on = 1;
-    setHandVisible((v) => (v ? v : true));
-
-    processTracePosition(sx, sy);
-  }, [landmarks, step, gamePhase, isPaused, processTracePosition, isDrawing, hideHand]);
+    if (!isDrawing) hideHand();
+  }, [step, gamePhase, isPaused, isDrawing, hideHand]);
 
   /* Smoothing loop. Tracking arrives at ~30fps and jitters by a pixel or two;
      easing towards the target on every animation frame turns that into the
@@ -1681,7 +1571,14 @@ export default function TraceTypeGame() {
                 ))}
               </div>
 
-              {otResults && (
+              {/* A sub-score of `null` means NOT MEASURED — the child did not do
+                  enough for it to mean anything. It is shown as "—" with an
+                  empty bar, never as 0% (which reads as a failure) and never as
+                  100% (which is what it used to do). If nothing at all was
+                  measured, the whole OT block is replaced by a plain note: a
+                  report a therapist reads must not imply a result it does not
+                  have. */}
+              {otResults && otResults.composite != null && (
                 <div className="tt-ot-block">
                   <div className="tt-perf-ring" style={{ '--pct': otResults.composite }}>
                     <div className="tt-perf-inner">
@@ -1700,19 +1597,26 @@ export default function TraceTypeGame() {
                       <div className="tt-ot-bar" key={label}>
                         <div className="tt-ot-bar-head">
                           <span>{label} <em>{weight}</em></span>
-                          <strong>{value}%</strong>
+                          <strong>{value == null ? '—' : `${value}%`}</strong>
                         </div>
                         <div className="tt-ot-bar-track">
                           <motion.div
                             className="tt-ot-bar-fill"
                             initial={{ width: 0 }}
-                            animate={{ width: `${value}%` }}
+                            animate={{ width: `${value == null ? 0 : value}%` }}
                             transition={{ duration: 0.7, delay: 0.3 }}
                           />
                         </div>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {otResults && otResults.composite == null && (
+                <div className="tt-ot-none">
+                  No OT score for this session — the round ended before any
+                  letter was traced, so there is nothing to measure.
                 </div>
               )}
 
@@ -1860,7 +1764,9 @@ export default function TraceTypeGame() {
 
       {/* ── Pause Overlay ──────────────────────────────────────────── */}
       <AnimatePresence>
-        {isPaused && (
+        {/* `!endAsking`: the end-game dialog pauses the round too, and without
+            this the pause card rendered underneath it — two cards at once. */}
+        {isPaused && !endAsking && (
           <motion.div
             className="tt-pause-overlay"
             initial={{ opacity: 0 }}
@@ -1916,9 +1822,35 @@ export default function TraceTypeGame() {
             <Clock size={16} />
             {formatTime(elapsedTime)}
           </div>
+          {/* "How to play" — available during play in EVERY game, not only on
+              the first visit. Client feedback: "there should be an optional
+              provision for user to see them again if they wish to." */}
+          {/* End the round early and go straight to the report — the same
+              control LetterQuest has. computeOTResults() reads the same
+              accumulators the natural ending does, so a session stopped after
+              one word is scored on that word rather than being discarded. */}
+          <EndGameControl
+            className="tt-icon-btn gs-end-btn"
+            compact
+            disabled={gamePhase !== 'playing'}
+            onAskingChange={(asking) => { setEndAsking(asking); setIsPaused(asking); }}
+            onConfirm={() => {
+              setIsPaused(false);
+              setOtResults(computeOTResults());
+              setGamePhase('results');
+            }}
+          />
           <button
             className="tt-icon-btn"
-            onClick={() => setIsLightMode(!isLightMode)}
+            onClick={() => setGamePhase('rules')}
+            title="How to play"
+            aria-label="How to play"
+          >
+            <HelpCircle size={18} />
+          </button>
+          <button
+            className="tt-icon-btn"
+            onClick={() => toggleGameTheme()}
             title="Toggle Theme"
           >
             {isLightMode ? <Moon size={18} /> : <Sun size={18} />}
@@ -1953,6 +1885,27 @@ export default function TraceTypeGame() {
       {/* ── Main Content ────────────────────────────────────────────── */}
       <div className="tt-main">
         <div className="tt-game-area">
+          {/* ── The word being built ─────────────────────────────────────
+              Always visible, through all three steps, so the child can see
+              why they are tracing this letter and what the round adds up to.
+              (Client feedback: the round should form a complete word.) */}
+          <div className="tt-word-banner" aria-label={`Word ${word}`}>
+            <span className="tt-word-caption">Word {wordsDoneRef.current + 1} of {WORDS_PER_ROUND}</span>
+            <div className="tt-word-letters">
+              {letters.map((ch, i) => (
+                <span
+                  key={`${word}-w-${i}`}
+                  className={`tt-word-letter ${
+                    i < currentLetterIdx ? 'done'
+                      : i === currentLetterIdx ? 'active' : 'todo'
+                  }`}
+                >
+                  {i <= currentLetterIdx ? ch : '_'}
+                </span>
+              ))}
+            </div>
+          </div>
+
           {/* ── Step Indicator ──────────────────────────────────────── */}
           <div className="tt-step-indicator">
             <div className={`tt-step-pill ${step === 'trace' ? 'active' : (step === 'find' || step === 'type') ? 'completed' : 'pending'}`}>
@@ -1999,6 +1952,7 @@ export default function TraceTypeGame() {
             <div className="tt-trace-area" ref={traceAreaRef}>
               <svg 
                 className="tt-trace-svg" 
+                ref={traceSvgRef}
                 viewBox="0 0 300 300"
                 onPointerDown={(e) => {
                   e.currentTarget.setPointerCapture(e.pointerId);
@@ -2028,7 +1982,7 @@ export default function TraceTypeGame() {
                   const prevWp = letterData.waypoints[reachedWaypoints[i - 1]];
                   const currWp = letterData.waypoints[wpIndex];
                   
-                  const isJump = BAD_JUMPS[currentLetter]?.includes(i);
+                  const isJump = letterJumps.includes(i);
                   
                   return (
                     <g key={`segment-${i}`}>
@@ -2088,7 +2042,7 @@ export default function TraceTypeGame() {
                 {letterData.waypoints.map((wp, i) => {
                   if (i === 0) return null;
                   if (i < reachedWaypoints.length) return null; // already traced
-                  const isJump = (BAD_JUMPS[currentLetter] || []).includes(i);
+                  const isJump = letterJumps.includes(i);
                   return (
                     <DirectionArrow
                       key={`arrow-${i}`}
@@ -2217,20 +2171,27 @@ export default function TraceTypeGame() {
                     >
                       {currentLetter}
                     </motion.div>
-                    <div className="tt-type-slots">
-                      {Array.from({ length: TYPE_REQUIRED }, (_, i) => (
-                        <motion.div
-                          key={i}
-                          className={`tt-type-slot ${
-                            i < typedCount ? 'filled' : i === typedCount ? 'current' : 'empty'
-                          }`}
-                          initial={i < typedCount ? { scale: 0.5, rotateY: 90 } : {}}
-                          animate={i < typedCount ? { scale: 1, rotateY: 0 } : {}}
-                          transition={{ type: 'spring', stiffness: 400, damping: 15 }}
-                        >
-                          {i < typedCount ? currentLetter : ''}
-                        </motion.div>
-                      ))}
+                    {/* The WORD being built — one slot per letter, filled in as
+                        the learner types each one. This replaces the old "type
+                        the same letter three times" slots. */}
+                    <div className="tt-type-slots" aria-label={`Spelling ${word}`}>
+                      {letters.map((ch, i) => {
+                        const done = i < currentLetterIdx
+                          || (i === currentLetterIdx && typedCount >= TYPE_REQUIRED);
+                        return (
+                          <motion.div
+                            key={`${word}-${i}`}
+                            className={`tt-type-slot ${
+                              done ? 'filled' : i === currentLetterIdx ? 'current' : 'empty'
+                            }`}
+                            initial={done ? { scale: 0.5, rotateY: 90 } : {}}
+                            animate={done ? { scale: 1, rotateY: 0 } : {}}
+                            transition={{ type: 'spring', stiffness: 400, damping: 15 }}
+                          >
+                            {done ? ch : ''}
+                          </motion.div>
+                        );
+                      })}
                     </div>
                   </div>
                   <VirtualKeyboard

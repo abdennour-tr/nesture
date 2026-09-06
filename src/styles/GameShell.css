@@ -1,0 +1,750 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   GameShell.css — THE single source of truth for every game's chrome.
+   ---------------------------------------------------------------------------
+   Every mini-game (Ladybug, Bubble, Pinch Coin, Finger Copy, Finger Piano,
+   Trace→Find→Type, LetterQuest) uses these tokens and classes so the learner
+   sees the same journey everywhere:
+
+        Game card → [Instructions] → Level select → Play (HUD) → Result
+
+   RULES (see GAME_UI_GUIDELINES.md):
+     1. Never hard-code a colour that exists as a token below.
+     2. Difficulty is always Easy / Medium / Hard — never "Level 1/2/3".
+     3. The level-select screen must fit a 1366×768 laptop with NO scrolling.
+     4. Any feature added to one game (help, theme, pause, input mode) must be
+        added to all of them via GameHUD.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── PALETTE ────────────────────────────────────────────────────────────────
+   Taken wholesale from Trace → Find → Type (src/styles/TraceTypeGame.css),
+   which is the reference design for the whole product. Every game's level
+   screen and rules card now uses THESE values — not a per-game colour scheme.
+
+   That is the point: the client's first note was "it looks like screens from 2
+   different products". Giving each game its own background gradient made that
+   worse, not better, so the per-game backgrounds are gone. A game's identity
+   comes from its emoji and title, not from repainting the furniture. */
+:root {
+  /* Surfaces — dark, glassy, exactly as Trace → Find → Type ---------------- */
+  --gs-bg-base-start: #090B14;
+  --gs-bg-base-mid:   #111424;
+  --gs-bg-base-end:   #0A0C16;
+  --gs-bg-grad-1: rgba(99, 102, 241, 0.15);   /* indigo   */
+  --gs-bg-grad-2: rgba(139, 92, 246, 0.15);   /* purple   */
+  --gs-bg-grad-3: rgba(34, 211, 238, 0.10);   /* cyan     */
+
+  --gs-surface:     rgba(13, 26, 29, 0.60);
+  --gs-surface-2:   rgba(255, 255, 255, 0.06);
+  --gs-border:      rgba(255, 255, 255, 0.06);
+  --gs-ink:         #C8E8ED;
+  --gs-ink-soft:    #7BA3AB;
+  --gs-ink-bright:  #FFFFFF;
+  --gs-on-accent:   #ffffff;
+
+  /* Accents --------------------------------------------------------------- */
+  --gs-accent:     #1A8FA0;                   /* tt-primary */
+  --gs-accent-2:   #6366F1;                   /* tt-indigo  */
+  --gs-accent-glow: rgba(26, 143, 160, 0.30);
+  --gs-warm:       #E8841A;                   /* tt-accent  */
+
+  /* ── Difficulty tokens (identical across all games) ─────────────────── */
+  --gs-easy:        #10B981;
+  --gs-easy-soft:   rgba(16, 185, 129, 0.14);
+  --gs-medium:      #E8841A;
+  --gs-medium-soft: rgba(232, 132, 26, 0.14);
+  --gs-hard:        #EF4444;
+  --gs-hard-soft:   rgba(239, 68, 68, 0.14);
+
+  /* ── Shape & motion ─────────────────────────────────────────────────── */
+  --gs-radius-card:    28px;
+  --gs-radius-btn:     14px;
+  --gs-radius-pill:    999px;
+  --gs-shadow-card:    inset 0 1px 1px rgba(255, 255, 255, 0.04),
+                       0 8px 32px rgba(0, 0, 0, 0.25);
+  --gs-shadow-hover:   0 16px 48px -12px rgba(0, 0, 0, 0.55),
+                       inset 0 1px 1px rgba(255, 255, 255, 0.10);
+  --gs-ease:           cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Laptop-first vertical rhythm.
+        These shrink automatically on short viewports so the level buttons
+        are ALWAYS above the fold on a 1366×768 laptop. ─────────────────── */
+  --gs-pad-x:          clamp(16px, 3vw, 40px);
+  --gs-pad-top:        clamp(10px, 1.6vh, 22px);
+  --gs-title:          clamp(1.45rem, 2.6vh, 2.1rem);
+  --gs-sub:            clamp(0.82rem, 1.5vh, 1rem);
+  --gs-gap:            clamp(12px, 1.8vh, 24px);
+}
+
+/* Light theme — the same swap Trace → Find → Type's `.tt-light-mode` makes,
+   so the shared theme toggle behaves identically everywhere. */
+[data-game-theme='light'] {
+  --gs-bg-base-start: #F8FAFC;
+  --gs-bg-base-mid:   #EEF2FF;
+  --gs-bg-base-end:   #E0E7FF;
+  --gs-bg-grad-1: rgba(99, 102, 241, 0.10);
+  --gs-bg-grad-2: rgba(139, 92, 246, 0.10);
+  --gs-bg-grad-3: rgba(14, 165, 233, 0.08);
+
+  --gs-surface:    rgba(255, 255, 255, 0.80);
+  --gs-surface-2:  rgba(15, 23, 42, 0.05);
+  --gs-border:     rgba(0, 0, 0, 0.08);
+  --gs-ink:        #334155;
+  --gs-ink-soft:   #64748B;
+  --gs-ink-bright: #0F172A;
+  --gs-accent:     #0EA5E9;
+  --gs-accent-2:   #6366F1;
+  --gs-accent-glow: rgba(14, 165, 233, 0.30);
+  --gs-warm:       #F97316;
+  --gs-shadow-card:  0 8px 32px rgba(15, 23, 42, 0.10);
+  --gs-shadow-hover: 0 16px 48px -12px rgba(15, 23, 42, 0.25);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   1. PAGE — full viewport, never scrolls on a laptop
+   ═══════════════════════════════════════════════════════════════════════ */
+.gs-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: var(--gs-pad-top) var(--gs-pad-x) clamp(10px, 2vh, 24px);
+  box-sizing: border-box;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  position: relative;
+  overflow: hidden;                 /* kills the "scroll down to find the buttons" bug */
+  color: var(--gs-ink);
+  /* The Trace → Find → Type background, for every game: a dark base with three
+     soft colour pools. No per-game gradient — see the palette note at the top. */
+  background:
+    radial-gradient(circle at 15% 50%, var(--gs-bg-grad-1), transparent 40%),
+    radial-gradient(circle at 85% 30%, var(--gs-bg-grad-2), transparent 45%),
+    radial-gradient(circle at 50% 85%, var(--gs-bg-grad-3), transparent 50%),
+    linear-gradient(135deg, var(--gs-bg-base-start) 0%, var(--gs-bg-base-mid) 50%, var(--gs-bg-base-end) 100%);
+  background-size: 100% 100%;
+}
+
+/* The faint grid Trace → Find → Type draws over its background, masked to the
+   centre so it never competes with the cards. */
+.gs-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: center center;
+  -webkit-mask-image: radial-gradient(circle at center, black 30%, transparent 80%);
+  mask-image: radial-gradient(circle at center, black 30%, transparent 80%);
+}
+
+.gs-page > * { position: relative; z-index: 1; }
+
+/* Very short windows (e.g. 1366×600 with browser chrome) may still overflow —
+   allow scrolling there rather than clipping content. */
+@media (max-height: 560px) {
+  .gs-page { height: auto; overflow-y: auto; }
+}
+
+/* ── Top bar: back on the left, title pill centre, actions on the right ── */
+.gs-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  margin-bottom: var(--gs-gap);
+}
+
+.gs-back,
+.gs-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;                 /* child-friendly touch target */
+  padding: 0 16px;
+  border: 1px solid var(--gs-border);
+  border-radius: var(--gs-radius-btn);
+  background: var(--gs-surface);
+  backdrop-filter: blur(24px);
+  color: var(--gs-ink);
+  font: 700 0.88rem/1 'Inter', sans-serif;
+  cursor: pointer;
+  transition: transform 0.18s var(--gs-ease), background 0.18s;
+}
+.gs-back:hover,
+.gs-action:hover {
+  transform: translateY(-2px);
+  border-color: var(--gs-accent);
+  box-shadow: 0 0 20px var(--gs-accent-glow);
+}
+.gs-back:focus-visible,
+.gs-action:focus-visible { outline: 3px solid var(--gs-accent); outline-offset: 2px; }
+
+.gs-action--icon { padding: 0; width: 44px; justify-content: center; }
+
+.gs-title-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 18px;
+  border-radius: var(--gs-radius-pill);
+  background: linear-gradient(135deg, var(--gs-accent), var(--gs-accent-2));
+  color: var(--gs-on-accent);
+  font-weight: 800;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+.gs-actions { display: flex; align-items: center; gap: 8px; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   2. HEADER — compact, no dead space above the fold
+   ═══════════════════════════════════════════════════════════════════════ */
+.gs-head { text-align: center; flex-shrink: 0; margin-bottom: var(--gs-gap); }
+
+.gs-head h1 {
+  margin: 0 0 4px;
+  font-size: var(--gs-title);
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  color: var(--gs-ink-bright);
+  line-height: 1.1;
+}
+.gs-head p {
+  margin: 0 auto;
+  max-width: 620px;
+  font-size: var(--gs-sub);
+  line-height: 1.45;
+  color: var(--gs-ink-soft);
+  font-weight: 600;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   3. INPUT-MODE TOGGLE — identical in every game
+   ═══════════════════════════════════════════════════════════════════════ */
+.gs-mode-row {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-shrink: 0;
+  margin-bottom: var(--gs-gap);
+}
+.gs-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 20px;
+  border: 1px solid var(--gs-border);
+  border-radius: var(--gs-radius-pill);
+  background: var(--gs-surface);
+  backdrop-filter: blur(24px);
+  color: var(--gs-ink);
+  font-weight: 700;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: all 0.2s var(--gs-ease);
+}
+.gs-mode-btn.active {
+  background: linear-gradient(135deg, var(--gs-accent), var(--gs-accent-2));
+  border-color: transparent;
+  color: var(--gs-on-accent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+.gs-mode-sub {
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--gs-ink-soft);
+  margin: -8px 0 var(--gs-gap);
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   4. LEVEL GRID — three EQUAL cards, one horizontal row, aligned buttons
+   ═══════════════════════════════════════════════════════════════════════ */
+.gs-grid {
+  flex: 1 1 auto;
+  min-height: 0;                                  /* lets the row shrink, not overflow */
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); /* equal tracks = equal widths */
+  gap: clamp(12px, 1.6vw, 22px);
+  align-items: stretch;                            /* equal heights */
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.gs-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  height: 100%;
+  min-width: 0;
+  padding: clamp(14px, 2vh, 24px) clamp(12px, 1.4vw, 20px);
+  border: 1px solid var(--gs-border);
+  border-radius: var(--gs-radius-card);
+  background: var(--gs-surface);
+  backdrop-filter: blur(24px);
+  box-shadow: var(--gs-shadow-card);
+  cursor: pointer;
+  transition: all 0.3s var(--gs-ease);
+  overflow: hidden;
+  position: relative;
+}
+/* The glow-on-hover from Trace → Find → Type: the difficulty colour appears on
+   the border and as a halo, instead of sitting there as a heavy frame. */
+.gs-card:hover {
+  border-color: var(--lvl);
+  box-shadow: var(--gs-shadow-hover), 0 0 24px var(--lvl-soft);
+  transform: translateY(-4px);
+}
+.gs-card:focus-visible { outline: 3px solid var(--lvl); outline-offset: 3px; }
+
+.gs-card::before {                                /* accent bar, same on every card */
+  content: '';
+  position: absolute; inset: 0 0 auto 0; height: 4px;
+  background: linear-gradient(90deg, var(--lvl), transparent);
+  border-radius: var(--gs-radius-card) var(--gs-radius-card) 0 0;
+}
+
+.gs-card-emoji {
+  font-size: clamp(1.9rem, 4.2vh, 2.9rem);
+  line-height: 1;
+  margin-bottom: 6px;
+}
+.gs-card-name {
+  margin: 0 0 4px;
+  font-size: clamp(1.02rem, 2.1vh, 1.32rem);
+  font-weight: 900;
+  color: var(--lvl);
+  letter-spacing: -0.01em;
+}
+.gs-card-desc {
+  margin: 0 0 10px;
+  font-size: clamp(0.74rem, 1.4vh, 0.86rem);
+  line-height: 1.4;
+  color: var(--gs-ink-soft);
+  font-weight: 600;
+}
+
+/* Free-form preview slot (bubbles, path, coin, letters, gestures…).
+   Fixed flexible height so all three cards stay identical whatever's inside. */
+.gs-card-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.gs-card-specs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.gs-spec {
+  padding: 4px 10px;
+  border-radius: var(--gs-radius-pill);
+  background: var(--gs-surface-2);
+  border: 1px solid var(--gs-border);
+  color: var(--lvl);
+  font-size: 0.7rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* The Start button is pushed to the bottom of every card, so all three
+   buttons sit on exactly the same horizontal line. */
+.gs-card-play {
+  margin-top: auto;
+  width: 100%;
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  border-radius: var(--gs-radius-btn);
+  background: var(--lvl);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: filter 0.18s, transform 0.18s var(--gs-ease);
+}
+.gs-card-play:hover { filter: brightness(1.08); transform: translateY(-2px); }
+
+/* Footer hint — never pushes content off-screen */
+.gs-foot {
+  flex-shrink: 0;
+  text-align: center;
+  margin-top: var(--gs-gap);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--gs-ink-soft);
+}
+
+/* ── Tablet / phone: cards stack but keep identical sizing ─────────────── */
+@media (max-width: 820px) {
+  .gs-page { height: auto; overflow-y: auto; }
+  .gs-grid { grid-template-columns: 1fr; max-width: 460px; }
+  .gs-card-preview { min-height: 60px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   5. INSTRUCTIONS MODAL — same modal on first run and on every "?" press
+   ═══════════════════════════════════════════════════════════════════════ */
+.gs-modal-backdrop {
+  position: fixed; inset: 0; z-index: 9000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(6px);
+}
+.gs-modal {
+  width: 100%; max-width: 560px;
+  max-height: 86dvh; overflow-y: auto;
+  padding: 26px 28px 22px;
+  border-radius: 26px;
+  background: var(--gs-surface);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  color: var(--gs-ink);
+}
+.gs-modal-emoji { font-size: 3rem; line-height: 1; }
+.gs-modal h2 {
+  margin: 8px 0 6px;
+  font-size: 1.5rem; font-weight: 900; letter-spacing: -0.02em;
+}
+.gs-modal-lead {
+  margin: 0 0 18px; color: var(--gs-ink-soft);
+  font-size: 0.94rem; font-weight: 600; line-height: 1.5;
+}
+.gs-steps { list-style: none; margin: 0 0 18px; padding: 0; text-align: left; }
+.gs-steps li {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 9px 12px; margin-bottom: 8px;
+  border-radius: 14px;
+  background: var(--gs-surface-2);
+  font-size: 0.9rem; font-weight: 600; line-height: 1.45;
+}
+.gs-step-num {
+  flex-shrink: 0;
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--gs-accent), var(--gs-accent-2));
+  color: #fff; font-size: 0.78rem; font-weight: 900;
+}
+.gs-modal-actions { display: flex; gap: 10px; }
+.gs-btn-primary,
+.gs-btn-ghost {
+  flex: 1; min-height: 48px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border-radius: var(--gs-radius-btn);
+  font-weight: 800; font-size: 0.95rem; cursor: pointer;
+  transition: transform 0.18s var(--gs-ease), filter 0.18s;
+}
+.gs-btn-primary {
+  border: none;
+  background: linear-gradient(135deg, var(--gs-accent), var(--gs-accent-2));
+  color: #fff;
+}
+.gs-btn-ghost {
+  border: 2px solid var(--gs-ink-soft);
+  background: transparent; color: var(--gs-ink);
+}
+.gs-btn-primary:hover, .gs-btn-ghost:hover { transform: translateY(-2px); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   6. IN-GAME HUD — identical bar in every game
+   ═══════════════════════════════════════════════════════════════════════ */
+.gs-hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: var(--gs-radius-pill);
+  background: var(--gs-surface-2);
+  backdrop-filter: blur(12px);
+  flex-wrap: wrap;
+}
+.gs-hud-left, .gs-hud-right { display: flex; align-items: center; gap: 8px; }
+.gs-hud-stat {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border-radius: var(--gs-radius-pill);
+  background: var(--gs-surface);
+  font-weight: 800; font-size: 0.85rem; color: var(--gs-ink);
+  white-space: nowrap;
+}
+.gs-hud-level {
+  padding: 6px 14px; border-radius: var(--gs-radius-pill);
+  background: var(--lvl, var(--gs-accent)); color: #fff;
+  font-weight: 800; font-size: 0.8rem; text-transform: capitalize;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   7. TRACKING COACH — shown when no hand is driving the pointer
+   ═══════════════════════════════════════════════════════════════════════ */
+.bg-hand-hint,
+.gs-hand-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 6%;
+  transform: translateX(-50%);
+  z-index: 40;
+  padding: 10px 20px;
+  border-radius: var(--gs-radius-pill);
+  background: rgba(15, 23, 42, 0.82);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.92rem;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: gs-hint-pulse 1.8s ease-in-out infinite;
+}
+@keyframes gs-hint-pulse {
+  0%, 100% { opacity: 0.78; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bg-hand-hint, .gs-hand-hint { animation: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   8. TRACE → FIND → TYPE — the word being built
+   ═══════════════════════════════════════════════════════════════════════ */
+.tt-word-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin: 0 auto 10px;
+  padding: 8px 20px;
+  border-radius: var(--gs-radius-card);
+  background: var(--gs-surface-2);
+  backdrop-filter: blur(10px);
+}
+.tt-word-caption {
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gs-ink-soft);
+}
+.tt-word-letters { display: flex; gap: 10px; }
+.tt-word-letter {
+  min-width: 34px;
+  font-size: clamp(1.4rem, 3.2vh, 2rem);
+  font-weight: 900;
+  text-align: center;
+  line-height: 1.1;
+  border-bottom: 3px solid currentColor;
+  transition: color 0.2s, transform 0.2s var(--gs-ease);
+}
+.tt-word-letter.done   { color: var(--gs-easy); }
+.tt-word-letter.active { color: var(--gs-accent, #22D3EE); transform: translateY(-2px); }
+.tt-word-letter.todo   { color: var(--gs-ink-soft); opacity: 0.5; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   9. END GAME — the confirm dialog behind the "End game" button
+   ═══════════════════════════════════════════════════════════════════════ */
+.gs-modal--confirm { max-width: 440px; }
+
+.gs-btn-danger {
+  background: linear-gradient(135deg, #EF4444, #DC2626);
+}
+.gs-btn-danger:hover { filter: brightness(1.06); }
+
+/* When a game's own header class is used for the button, the flag icon and
+   label still need to read as the destructive action in that header. */
+.gs-end-btn {
+  color: #FCA5A5 !important;
+  border-color: rgba(239, 68, 68, 0.45) !important;
+}
+.gs-end-btn:hover {
+  background: rgba(239, 68, 68, 0.18) !important;
+  color: #FEE2E2 !important;
+}
+
+/* The end-game confirm is portalled into <body> and must sit above every
+   in-game layer, including Trace → Find → Type's fixed hand-pointer overlay
+   (z-index 9999) — otherwise the drawn hand covers the two buttons. */
+.gs-modal-backdrop--top { z-index: 10050; }
+
+/* Shown instead of the OT block when a session ended with nothing measured. */
+.tt-ot-none {
+  margin: 18px auto;
+  max-width: 460px;
+  padding: 14px 18px;
+  border-radius: var(--gs-radius-card);
+  border: 1.5px dashed var(--gs-ink-soft);
+  color: var(--gs-ink-soft);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   10. RULES CARD — the Trace → Find → Type design, for every game
+   ---------------------------------------------------------------------------
+   Ported from `.tt-rules-*` in TraceTypeGame.css, which is the reference. The
+   layout comments there are worth keeping: they are why the card works on a
+   laptop.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.gs-rules-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  /* NOT align-items:center. A flex item centred in a container it overflows is
+     clipped at BOTH ends and its top becomes unreachable — that is how the
+     title used to disappear under the edge. flex-start plus `margin:auto` on
+     the card centres it while it fits, and starts at the top when it does not. */
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--gs-rules-pad, clamp(12px, 3vh, 24px));
+  background: rgba(8, 10, 22, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.gs-rules-card {
+  --gs-rules-pad: clamp(12px, 3vh, 24px);
+  width: min(560px, 100%);
+  margin: auto;
+  /* The card never exceeds the window; the list inside it scrolls instead, so
+     the heading and the start button are always reachable. */
+  max-height: calc(100dvh - 2 * var(--gs-rules-pad));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: linear-gradient(160deg, rgba(19, 37, 41, 0.96), rgba(9, 11, 20, 0.96));
+  border: 1px solid var(--gs-border);
+  border-radius: 24px;
+  padding: clamp(16px, 2.6vh, 28px);
+  box-shadow: 0 25px 60px -12px rgba(0, 0, 0, 0.6);
+  color: var(--gs-ink);
+}
+
+[data-game-theme='light'] .gs-rules-card {
+  background: linear-gradient(160deg, #FFFFFF, #F1F5F9);
+}
+
+.gs-rules-head,
+.gs-rules-note,
+.gs-rules-start { flex: 0 0 auto; }
+
+.gs-rules-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: clamp(12px, 2.2vh, 22px);
+}
+
+.gs-rules-badge {
+  width: 58px;
+  height: 58px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 1.9rem;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--gs-accent), var(--gs-accent-2));
+  box-shadow: 0 8px 24px var(--gs-accent-glow);
+}
+
+.gs-rules-title {
+  margin: 0;
+  font-size: 1.55rem;
+  font-weight: 800;
+  color: var(--gs-ink-bright);
+}
+
+.gs-rules-sub {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+  color: var(--gs-ink-soft);
+}
+
+.gs-rules-list {
+  list-style: none;
+  margin: 0 0 clamp(12px, 2vh, 20px);
+  padding: 0 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(8px, 1.4vh, 12px);
+  /* The one element that gives up height when the window is short. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.gs-rules-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 1rem;
+  line-height: 1.45;
+}
+
+.gs-rule-icon {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+  border-radius: 11px;
+  background: var(--gs-surface-2);
+  border: 1px solid var(--gs-border);
+}
+
+.gs-rules-note {
+  font-size: 0.86rem;
+  line-height: 1.5;
+  color: var(--gs-ink-soft);
+  background: var(--gs-surface-2);
+  border: 1px dashed var(--gs-border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+}
+.gs-rules-note strong { color: var(--gs-warm); }
+
+.gs-rules-start {
+  width: 100%;
+  min-height: 52px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--gs-accent), var(--gs-accent-2));
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 10px 30px -8px var(--gs-accent-glow);
+  transition: transform 0.2s var(--gs-ease), filter 0.2s;
+}
+.gs-rules-start:hover { transform: translateY(-2px); filter: brightness(1.08); }

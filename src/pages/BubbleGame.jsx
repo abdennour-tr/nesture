@@ -30,15 +30,18 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Home, Pause, Play, RotateCcw, Clock, Star, Hand, MousePointer2,
   Volume2, VolumeX, Target, Activity, Zap, TrendingUp, CheckCircle,
-  Crosshair, GitBranch, AlertTriangle, XCircle,
+  Crosshair, GitBranch, AlertTriangle, XCircle, HelpCircle,
 } from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
+import GameRules from '../components/game/GameRules';
+import { FINISH } from '../utils/otScore';
+import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/BubbleGame.css';
 
-import { HandDefs, HandArt, steadyAngle, followHand, makeHandState, handFlip } from '../components/game/HandPointer';
+import { HandDefs, HandArt, followHand, makeHandState } from '../components/game/HandPointer';
 import { createHandPointerFilter, handDepthScale } from '../utils/handPointerFilter';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — fixed virtual space, scaled to the rendered field, so difficulty
@@ -84,6 +87,27 @@ const MIN_PRECISION    = 0.30;  // an edge hit still scores 30%
    hold, so driving to the middle is what actually earns points. Touch mode uses
    a dwell short enough to still feel instant. */
 const TOUCH_DWELL_MS   = 60;
+/* ── Forgiving hit + dwell hysteresis ─────────────────────────────────────
+   Client feedback: "at times i noticed the cursor didn't move that smoothly
+   for me and even my cursor touching the bubble didn't pop it. very slight
+   friction but i could feel it at random times."
+
+   Two causes, both fixed here:
+
+   1. The hit test was exactly `distance <= radius`. A hand-tracked pointer
+      hovering on the rim crosses that line several times a second, and every
+      crossing RESET the dwell timer — so the child could sit on a bubble and
+      never pop it. HIT_PAD adds a small forgiving ring outside the bubble.
+
+   2. Once a bubble is being targeted it now keeps the target through a wider
+      radius (KEEP_PAD) and through a short drop-out (DWELL_GRACE_MS), so a
+      one-frame tracking blip no longer throws the dwell away.
+
+   The pad is in CSS pixels and is deliberately NOT scaled with the bubble, so
+   Hard stays a precision task — it just stops being a coin flip at the rim. */
+const HIT_PAD_PX       = 14;   // extra radius that still counts as "on the bubble"
+const KEEP_PAD_PX      = 26;   // wider radius to KEEP an already-targeted bubble
+const DWELL_GRACE_MS   = 130;  // pointer may leave this long without losing progress
 const SWAY_AMP         = 26;    // horizontal float amplitude (px)
 const SWAY_SPEED       = 0.0016;
 const MOVE_START_SPEED = 60;    // px/s that counts as "the reach has begun"
@@ -150,6 +174,10 @@ export default function BubbleGame() {
     sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules'
   );
   const [isPaused, setIsPaused] = useState(false);
+  /* True while the end-game confirmation is on screen. The round is paused
+     then, but the PAUSE CARD must stay hidden so only one card shows. */
+  const [endAsking, setEndAsking] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);   // "How to play", re-openable mid-game
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
 
   /* ── Throttled UI readouts ── */
@@ -182,8 +210,15 @@ export default function BubbleGame() {
   const handGroupRef  = useRef(null);
   /* Camera pointer conditioning — see src/utils/handPointerFilter.js. */
   const handFilterRef = useRef(null);
-  if (!handFilterRef.current) handFilterRef.current = createHandPointerFilter();
-  const handTargetRef = useRef({ ...makeHandState(0.62), vx: 0, vy: 0, dirX: 0, dirY: -1, depth: 1 });
+  if (!handFilterRef.current) {
+    /* `fitReach` scales each axis to the child's OBSERVED range of motion, so
+       the corners of the board are reachable without stretching: the fingertip
+       position MediaPipe reports is normalised to the camera frame, and a
+       seated child's comfortable reach covers only about a third of it.
+       See src/utils/handPointerFilter.js. */
+    handFilterRef.current = createHandPointerFilter({ fitReach: true });
+  }
+  const handTargetRef = useRef({ ...makeHandState(0.62), vx: 0, vy: 0, depth: 1 })   // no dirX/dirY: the pointer never rotates;
   const handShownRef  = useRef(makeHandState(0.62));
   const trailRef    = useRef([]);
   const touchActiveRef = useRef(false);
@@ -209,6 +244,7 @@ export default function BubbleGame() {
   const dwellIdxRef     = useRef(-1);
   const dwellStartRef   = useRef(0);
   const dwellMinDistRef = useRef(Infinity);   // closest approach to the centre
+  const dwellLostAtRef  = useRef(0);          // ts the pointer left the target (0 = on target)
 
   /* ── Metric accumulators ── */
   const scoreRef       = useRef(0);
@@ -240,9 +276,29 @@ export default function BubbleGame() {
   const isPlaying = gamePhase === 'playing' && !isPaused;
   const trackingEnabled = mode === 'camera' && (gamePhase === 'countdown' || gamePhase === 'playing');
 
-  const { landmarks, isTracking, isSimulationMode } = useHandTracking(
-    videoRef, trackCanvasRef, trackingEnabled, isPaused, 1
+  /* maxHands is 2, not 1.
+     With maxHands=1 MediaPipe returns whichever single hand it happened to
+     latch onto — for the client that was the hand resting on her cheek, so the
+     pointer never moved while she waved the other one. Detecting both hands
+     lets activeHandSelector (inside useHandTracking) hand the pointer to the
+     hand that is actually MOVING, and `handHint` tells the child what to do
+     when neither hand is playing. */
+  const { landmarks, isTracking, isSimulationMode, handHint, releaseCamera } = useHandTracking(
+    videoRef, trackCanvasRef, trackingEnabled, isPaused, 2,
+    { requireMotion: true }   // pointing game: a motionless hand must not own the pointer
   );
+
+  /* ── Turn the camera off when the round ends ────────────────────────────
+     Client feedback: "when the game finish the camera need to turn off."
+
+     `trackingEnabled` already goes false on the results screen, and the hook's
+     cleanup now stops the MediaStream tracks (MediaPipe's own `Camera.stop()`
+     does not, which is why the webcam light stayed on). This call is the
+     explicit belt-and-braces version so the camera is released the instant the
+     round ends, on every exit path. */
+  useEffect(() => {
+    if (gamePhase === 'results') releaseCamera();
+  }, [gamePhase, releaseCamera]);
 
   /* ═════════════════════════════════════════════════════════════════════════
      BUBBLE POOL — created once; nodes are reused for the whole session.
@@ -327,17 +383,12 @@ export default function BubbleGame() {
     const mcp = landmarks[5];
     if (!mcp) return;
     const h = handTargetRef.current;
-    const dx = (1 - tip.x) * VW - (1 - mcp.x) * VW;
-    const dy = tip.y * VH - mcp.y * VH;
-    if (Math.hypot(dx, dy) > 4) {
-      h.dirX = dx;
-      h.dirY = dy;
-      const little = landmarks[17];
-      if (little) {
-        h.flip = handFlip(dx, dy, (1 - mcp.x) * VW, mcp.y * VH,
-                          (1 - little.x) * VW, little.y * VH);
-      }
-    }
+    /* Orientation is no longer computed: the pointer is always drawn upright.
+       The angle a fingertip implies swings several degrees on a one-pixel
+       landmark wobble, so the hand rocked constantly, and the little-finger
+       test could mirror the whole hand mid-reach. Neither moved the cursor —
+       the cursor IS the fingertip — so both were noise. This also saves an
+       atan2 and a cross product every frame. */
     /* Depth from the same palm measurement the gain uses, rather than a wrist
        span in virtual units — that one changed meaning with the field's
        aspect ratio and collapsed whenever the palm tilted. */
@@ -363,9 +414,6 @@ export default function BubbleGame() {
         const h = handTargetRef.current;
         h.x = h.vx * kx;
         h.y = h.vy * ky;
-        // the angle has to be measured in pixels: the field scales x and y differently
-        h.rot = steadyAngle(h.rot,
-          (Math.atan2(h.dirY * ky, h.dirX * kx) * 180) / Math.PI + 90);
         h.scale = (r.height / VH) * 0.62 * h.depth;
         followHand(h, handShownRef.current, node);
       }
@@ -461,6 +509,7 @@ export default function BubbleGame() {
       dwellIdxRef.current = -1;
       dwellStartRef.current = 0;
       dwellMinDistRef.current = Infinity;
+      dwellLostAtRef.current = 0;
     }
   }, []);
 
@@ -526,7 +575,11 @@ export default function BubbleGame() {
   /* ═════════════════════════════════════════════════════════════════════════
      RESULTS
      ═════════════════════════════════════════════════════════════════════════ */
-  const finishGame = useCallback(() => {
+  /* @param {string} reason  FINISH.COMPLETE when the clock ran out,
+     FINISH.ENDED when the learner pressed "End game". Bubble's metrics already
+     report 0 (and null for the path metrics) on an empty round rather than a
+     fabricated 100, so only the heading needs to know. */
+  const finishGame = useCallback((reason = FINISH.COMPLETE) => {
     cancelAnimationFrame(rafRef.current);
 
     const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
@@ -567,6 +620,7 @@ export default function BubbleGame() {
     );
 
     setResults({
+      endedEarly: reason === FINISH.ENDED,
       score: Math.round(scoreRef.current),
       popped: poppedRef.current,
       spawned: spawnedRef.current,
@@ -674,7 +728,10 @@ export default function BubbleGame() {
 
         if (ptr) {
           const d = Math.hypot(ptr.x - b.x, ptr.y - b.y);
-          if (d <= b.r && d < hoverDist) { hoverDist = d; hoverIdx = i; }
+          /* Forgiving hit radius, widened further for the bubble the child is
+             already dwelling on so rim jitter cannot cancel their progress. */
+          const pad = i === dwellIdxRef.current ? KEEP_PAD_PX : HIT_PAD_PX;
+          if (d <= b.r + pad && d < hoverDist) { hoverDist = d; hoverIdx = i; }
         }
       }
 
@@ -699,6 +756,20 @@ export default function BubbleGame() {
             feel instant. Either way it gives us a window in which to record
             how close to the centre the child actually got. ────────────────── */
       const dwellMs = mode === 'camera' ? cfg.dwellMs : TOUCH_DWELL_MS;
+
+      /* Grace window: losing the pointer for a frame or two (a tracking blip,
+         or the fingertip skimming just outside the pad) must not wipe out a
+         dwell that was nearly complete. Only a sustained miss drops it. */
+      if (hoverIdx === -1 && dwellIdxRef.current >= 0 && bubbles[dwellIdxRef.current]) {
+        if (dwellLostAtRef.current === 0) dwellLostAtRef.current = ts;
+        if (ts - dwellLostAtRef.current < DWELL_GRACE_MS) {
+          hoverIdx = dwellIdxRef.current;          // hold the target
+          hoverDist = dwellMinDistRef.current;
+        }
+      } else if (hoverIdx >= 0) {
+        dwellLostAtRef.current = 0;
+      }
+
       if (hoverIdx !== dwellIdxRef.current) {
         const prev = nodes[dwellIdxRef.current];
         if (prev) {
@@ -887,26 +958,78 @@ export default function BubbleGame() {
     freeRef.current = poolSpec.slice();
   }, [despawn, poolSpec]);
 
+  /* ── Countdown ─────────────────────────────────────────────────────────
+     Client feedback: "Occasionally, the counter becomes stuck."
+
+     Two causes, both removed here:
+
+     1. The old effect ran a `setInterval` and listed `soundEnabled` (and other
+        changing values) in its dependency array. Toggling sound — or any
+        re-render that changed one of those identities — tore the interval down
+        and started the whole countdown again from 3. Repeat that and the
+        countdown never reaches 0. The effect now depends ONLY on `gamePhase`;
+        everything else is read through a ref that is always current.
+
+     2. `setInterval` counts ticks, so a throttled or backgrounded tab (or a
+        dropped frame under camera load) simply loses ticks and the number
+        stops moving. The countdown is now DEADLINE-based: the remaining
+        seconds are computed from the clock every frame, so it self-corrects
+        after any stall and always lands on 0.
+
+     A belt-and-braces timeout also guarantees the overlay can never be left on
+     screen forever, even if requestAnimationFrame never runs again. */
+  /* Always-current handles, so the effect below never needs them as deps. */
+  const soundEnabledRef = useRef(soundEnabled);
+  soundEnabledRef.current = soundEnabled;
+
+  const beginRunRef = useRef(null);
+  beginRunRef.current = () => {
+    if (soundEnabledRef.current) soundManager.playCountdownGo();
+    resetRun();
+    setUiScore(0); setUiPopped(0); setUiRemaining(cfg.durationSec);
+    setGamePhase('playing');
+  };
+
   useEffect(() => {
     if (gamePhase !== 'countdown') return;
+
     setCountdown(COUNTDOWN_SECONDS);
-    let n = COUNTDOWN_SECONDS;
-    if (soundEnabled) { soundManager.init(); soundManager.playCountdown(); }
-    const id = setInterval(() => {
-      n -= 1;
-      if (n <= 0) {
-        clearInterval(id);
-        if (soundEnabled) soundManager.playCountdownGo();
-        resetRun();
-        setUiScore(0); setUiPopped(0); setUiRemaining(cfg.durationSec);
-        setGamePhase('playing');
-      } else {
-        setCountdown(n);
-        if (soundEnabled) soundManager.playCountdown();
+    if (soundEnabledRef.current) { soundManager.init(); soundManager.playCountdown(); }
+
+    const deadline = Date.now() + COUNTDOWN_SECONDS * 1000;
+    let shown = COUNTDOWN_SECONDS;
+    let finished = false;
+    let raf = 0;
+
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      beginRunRef.current?.();
+    };
+
+    const tick = () => {
+      if (finished) return;
+      const left = Math.ceil((deadline - Date.now()) / 1000);
+      if (left <= 0) { finish(); return; }
+      if (left !== shown) {
+        shown = left;
+        setCountdown(left);
+        if (soundEnabledRef.current) soundManager.playCountdown();
       }
-    }, 1000);
-    return () => clearInterval(id);
-  }, [gamePhase, soundEnabled, resetRun, cfg.durationSec]);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+
+    /* rAF is paused entirely while the tab is hidden. This timer still fires
+       on return and ends the countdown, so it can never strand the learner. */
+    const safety = setTimeout(finish, COUNTDOWN_SECONDS * 1000 + 1500);
+
+    return () => {
+      finished = true;
+      cancelAnimationFrame(raf);
+      clearTimeout(safety);
+    };
+  }, [gamePhase]);
 
   /* ═════════════════════════════════════════════════════════════════════════
      SESSION API
@@ -972,6 +1095,22 @@ export default function BubbleGame() {
     if (soundEnabled) { soundManager.init(); soundManager.playClick(); }
     setGamePhase('countdown');
   }, [soundEnabled]);
+
+  /* ── "How to play", available DURING the game ───────────────────────────
+     Client feedback: "there should be an optional provision for user to see
+     [the instructions] again if they wish to." The rules are shown once
+     automatically on the first visit; this button brings the exact same modal
+     back at any point, and pauses the round while it is open so nothing is
+     missed behind it. */
+  const openHelp = useCallback(() => {
+    if (gamePhase === 'playing') setIsPaused(true);
+    setShowHelp(true);
+  }, [gamePhase]);
+
+  const closeHelp = useCallback(() => {
+    setShowHelp(false);
+    if (gamePhase === 'playing') setIsPaused(false);
+  }, [gamePhase]);
 
   const togglePause = useCallback(() => {
     if (gamePhase !== 'playing') return;
@@ -1050,6 +1189,21 @@ export default function BubbleGame() {
         </div>
 
         <div className="bg-header-right">
+          {/* End the round early and go straight to the report — the same
+              control LetterQuest has. It runs the game's normal finish
+              routine, so the report is built exactly as it is at the end of a
+              full round, from whatever has been done so far. */}
+          <EndGameControl
+            className="bg-icon-btn gs-end-btn"
+            compact
+            disabled={gamePhase !== 'playing'}
+            onAskingChange={(asking) => { setEndAsking(asking); setIsPaused(asking); }}
+            onConfirm={() => { setIsPaused(false); finishRef.current?.('ended'); }}
+          />
+          <button className="bg-icon-btn" onClick={openHelp}
+            title="How to play" aria-label="How to play">
+            <HelpCircle size={20} />
+          </button>
           <button className="bg-icon-btn" onClick={switchMode}
             title={mode === 'camera' ? 'Switch to touch' : 'Switch to camera'}>
             {mode === 'camera' ? <Hand size={20} /> : <MousePointer2 size={20} />}
@@ -1111,6 +1265,16 @@ export default function BubbleGame() {
           <canvas className="bg-fx-canvas" ref={fxCanvasRef} />
           <canvas className="bg-pointer-canvas" ref={pointerCanvasRef} />
 
+          {/* Tracking coach — tells the child WHY the pointer is not moving
+              instead of leaving them to work it out (client feedback: "i
+              wondered why — only to realise camera was taking my resting
+              hand"). Shown only in camera mode, during play. */}
+          {mode === 'camera' && isPlaying && handHint && (
+            <div className="bg-hand-hint" role="status">
+              ✋ {handHint}
+            </div>
+          )}
+
           {/* Hand pointer. Its transform is written by the loop above, so this
               layer never re-renders while the hand moves. */}
           <svg className="bg-hand-layer" aria-hidden="true">
@@ -1146,8 +1310,13 @@ export default function BubbleGame() {
           <RulesModal key="rules" level={level} mode={mode} cfg={cfg} onStart={startFromRules} />
         )}
 
+        {/* Same modal, reopened on demand from the header's "?" button. */}
+        {showHelp && gamePhase !== 'rules' && (
+          <RulesModal key="help" level={level} mode={mode} cfg={cfg} onStart={closeHelp} resume />
+        )}
+
         {gamePhase === 'countdown' && (
-          <motion.div key="cd" className="bg-overlay bg-overlay-soft"
+          <motion.div key="cd" className="bg-overlay bg-overlay-soft bg-overlay-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div key={countdown} className="bg-countdown"
               initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
@@ -1159,7 +1328,9 @@ export default function BubbleGame() {
           </motion.div>
         )}
 
-        {isPaused && gamePhase === 'playing' && (
+        {/* `!endAsking`: the end-game dialog pauses the round too, and without
+            this the pause card rendered underneath it — two cards at once. */}
+        {isPaused && !endAsking && gamePhase === 'playing' && (
           <motion.div key="pause" className="bg-overlay"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="bg-card bg-pause-card"
@@ -1195,7 +1366,10 @@ export default function BubbleGame() {
                 ))}
               </div>
 
-              <h2 className="bg-results-title"><CheckCircle size={26} /> Time&apos;s up!</h2>
+              <h2 className="bg-results-title">
+                <CheckCircle size={26} />{' '}
+                {results.endedEarly ? 'Session ended' : "Time's up!"}
+              </h2>
               <p className="bg-results-sub">
                 {cfg.emoji} {cfg.label} · {mode === 'camera' ? 'Camera' : 'Touch'}
               </p>
@@ -1270,68 +1444,26 @@ const rulesFor = (mode) => [
   { icon: '⏸️', text: 'You can pause at any time.' },
 ];
 
-function RulesModal({ level, mode, cfg, onStart }) {
+/* `resume` = the modal was opened from the in-game "How to play" button rather
+   than shown automatically before the first round, so the primary button goes
+   back to the game instead of starting one. */
+/* Thin wrapper over the shared rules card (Trace → Find → Type's design).
+   Only the CONTENT is Bubble's; the card, colours and layout are the same in
+   every game. */
+function RulesModal({ level, mode, cfg, onStart, resume = false }) {
   return (
-    <motion.div className="bg-overlay"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-      <motion.div className="bg-card bg-rules-card"
-        initial={{ scale: 0.88, y: 30, opacity: 0 }}
-        animate={{ scale: 1, y: 0, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        transition={{ type: 'spring', stiffness: 240, damping: 22 }}>
-        <div className="bg-rules-head">
-          <div className="bg-rules-badge">
-            <svg viewBox="0 0 100 100" width="48" height="48">
-              <defs>
-                <radialGradient id="bgRuleSkin" cx="34%" cy="30%" r="72%">
-                  <stop offset="0%" stopColor="#BFEAFF" stopOpacity=".95" />
-                  <stop offset="55%" stopColor="#5FB8F0" stopOpacity=".6" />
-                  <stop offset="100%" stopColor="#2E86C8" stopOpacity=".8" />
-                </radialGradient>
-              </defs>
-              <circle cx="50" cy="50" r="44" fill="url(#bgRuleSkin)" />
-              <circle cx="50" cy="50" r="44" fill="none" stroke="#BFEAFF" strokeWidth="2.5" />
-              <ellipse cx="35" cy="31" rx="12" ry="8" fill="#fff" opacity=".75"
-                transform="rotate(-32 35 31)" />
-              <circle cx="63" cy="28" r="4" fill="#fff" opacity=".5" />
-            </svg>
-          </div>
-          <div>
-            <h2 className="bg-rules-title">Pop the Bubble</h2>
-            <p className="bg-rules-sub">
-              {cfg.emoji} {cfg.label} &nbsp;·&nbsp; {mode === 'camera' ? 'Camera mode' : 'Touch mode'}
-              &nbsp;·&nbsp; {cfg.durationSec}s
-            </p>
-          </div>
-        </div>
-
-        <ul className="bg-rules-list">
-          {rulesFor(mode).map((r, i) => (
-            <motion.li key={i}
-              initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.12 + i * 0.07 }}>
-              <span className="bg-rule-icon">{r.icon}</span>
-              <span>{r.text}</span>
-            </motion.li>
-          ))}
-        </ul>
-
-        {mode === 'camera' ? (
-          <p className="bg-rules-tip">
-            💡 In camera mode, hold your finger on a bubble for a moment — the ring
-            fills up, then it pops.
-          </p>
-        ) : (
-          <p className="bg-rules-tip">
-            💡 Tap and lift — you don&apos;t need to keep your finger on the screen.
-          </p>
-        )}
-
-        <button className="bg-btn bg-btn-primary bg-rules-start" onClick={onStart}>
-          <Play size={20} /> Let&apos;s go! 🫧
-        </button>
-      </motion.div>
-    </motion.div>
+    <GameRules
+      emoji="🫧"
+      title="Pop the Bubble"
+      subtitle={`${cfg.emoji} ${cfg.label} · ${mode === 'camera' ? 'Camera mode' : 'Touch mode'} · ${cfg.durationSec}s`}
+      rules={rulesFor(mode)}
+      note={mode === 'camera'
+        ? '💡 In camera mode, hold your finger on a bubble for a moment — the ring fills up, then it pops.'
+        : "💡 Tap and lift — you don't need to keep your finger on the screen."}
+      onStart={onStart}
+      resume={resume}
+      startLabel={resume ? 'Back to the game' : "Let's go! 🫧"}
+    />
   );
 }
 

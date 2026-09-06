@@ -11,7 +11,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LogOut, Volume2, VolumeX, Clock, ArrowLeft } from 'lucide-react';
+import { LogOut, Volume2, VolumeX, Clock, ArrowLeft, HelpCircle } from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import useGestureDetection, {
   LEVELS,
@@ -19,6 +19,8 @@ import useGestureDetection, {
   GESTURE_DEFS,
 } from '../hooks/useGestureDetection';
 import { soundManager } from '../utils/soundManager';
+import GameRules from '../components/game/GameRules';
+import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/FingerCopyGame.css';
@@ -96,49 +98,21 @@ const RULES = [
   { icon: '🖐️', text: 'Either hand works; the game notes which one you favour.' },
 ];
 
-function RulesModal({ level, onStart }) {
+/* `resume` = opened from the in-game "How to play" button rather than shown
+   automatically before the first round, so the primary button returns to the
+   game instead of starting one. */
+/* Thin wrapper over the shared rules card — see GameRules.jsx. */
+function RulesModal({ level, onStart, resume = false }) {
   return (
-    <motion.div
-      className="fc-rules-overlay"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    >
-      <motion.div
-        className="fc-rules-card"
-        initial={{ scale: 0.88, y: 30, opacity: 0 }}
-        animate={{ scale: 1, y: 0, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        transition={{ type: 'spring', stiffness: 240, damping: 22 }}
-      >
-        <div className="fc-rules-head">
-          <div className="fc-rules-badge">🖐️</div>
-          <div>
-            <h2 className="fc-rules-title">Magic Finger Copy</h2>
-            <p className="fc-rules-sub">Level {level} — {LEVELS[level]?.label}</p>
-          </div>
-        </div>
-
-        <ul className="fc-rules-list">
-          {RULES.map((r, i) => (
-            <motion.li
-              key={i}
-              initial={{ opacity: 0, x: -18 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.12 + i * 0.07 }}
-            >
-              <span className="fc-rule-icon">{r.icon}</span>
-              <span>{r.text}</span>
-            </motion.li>
-          ))}
-        </ul>
-
-        <div className="fc-rules-ot">
-          <strong>OT Score</strong> = Match accuracy 30% · Hold stability 25% ·
-          Speed 25% · Consistency 20%
-        </div>
-
-        <button className="fc-rules-start" onClick={onStart}>▶ Let&apos;s go!</button>
-      </motion.div>
-    </motion.div>
+    <GameRules
+      emoji="🖐️"
+      title="Magic Finger Copy"
+      subtitle={`${LEVELS[level]?.label || ''} · ${LEVELS[level]?.isSequence ? 'sequences' : 'single shapes'}`}
+      rules={RULES}
+      note={<><strong>OT Score</strong> = Match accuracy 30% · Hold stability 25% · Speed 25% · Consistency 20%</>}
+      onStart={onStart}
+      resume={resume}
+    />
   );
 }
 
@@ -201,12 +175,28 @@ export default function FingerCopyGame() {
     isTracking,
     error: trackingError,
     isSimulationMode,
+    releaseCamera,
   } = useHandTracking(videoRef, canvasRef, trackingEnabled);
 
   // ── Game state ──────────────────────────────────────────────────────────
+  /* "How to play" — re-openable at any time from the header's "?" button.
+     Client feedback: "there should be an optional provision for user to see
+     [the instructions] again if they wish to." */
+  const [showHelp, setShowHelp] = useState(false);
   const [gamePhase, setGamePhase]       = useState(
     () => (sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules')
   ); // rules | countdown | playing | success | results
+
+  /* Whenever the round is not actually running, the camera must be off.
+     This is the safety net that catches every exit path — finishing the last
+     challenge, backing out, or any future phase we forget about.
+     Declared after `gamePhase` so the dependency array can reference it. */
+  useEffect(() => {
+    if (gamePhase === 'results') {
+      setTrackingEnabled(false);
+      releaseCamera();
+    }
+  }, [gamePhase, releaseCamera]);
   const [countdown, setCountdown]       = useState(COUNTDOWN_SECONDS);
   const [challenges, setChallenges]     = useState([]);
   const [currentIdx, setCurrentIdx]     = useState(0);
@@ -294,43 +284,62 @@ export default function FingerCopyGame() {
     const times = sessionStats.responseTimes;
     const ot = otRef.current;
 
+    /* EVERY SUB-SCORE IS `null` WHEN THERE IS NO DATA FOR IT.
+       These used to default to 100 on an empty accumulator — no holds meant no
+       broken holds, no timings meant nothing slower than the reference, one
+       gesture meant no spread. Ending the round on the first screen therefore
+       produced a perfect OT score beside "0 gestures". Absence of evidence is
+       not a perfect performance: unmeasured components are reported as null
+       and left out of the composite, which is renormalised over what WAS
+       measured. Nothing measured at all → no composite. */
+
     // 1. Match accuracy — how well the hand reproduced each shape.
     const matchAccuracy = accs.length
-      ? accs.reduce((a, b) => a + b, 0) / accs.length : 0;
+      ? accs.reduce((a, b) => a + b, 0) / accs.length : null;
 
     // 2. Hold stability — a hold that collapses before the second is up means
     //    the grip was not steady. Every restart costs.
     const stability = ot.holdsStarted
-      ? clamp01(1 - ot.holdBreaks / ot.holdsStarted) * 100 : 100;
+      ? clamp01(1 - ot.holdBreaks / ot.holdsStarted) * 100 : null;
 
     // 3. Speed — against a per-level reference, never above 100.
     const avgTime = times.length
       ? times.reduce((a, b) => a + b, 0) / times.length : 0;
     const speedScore = avgTime > 0
-      ? clamp01((LEVEL_REF_SEC[level] || 8) / avgTime) * 100 : 100;
+      ? clamp01((LEVEL_REF_SEC[level] || 8) / avgTime) * 100 : null;
 
     // 4. Consistency — spread of the per-gesture accuracies. A child who is
     //    steady across every shape scores higher than one who alternates
-    //    between perfect and poor, even at the same average.
-    let consistency = 100;
+    //    between perfect and poor, even at the same average. Needs at least
+    //    two gestures to mean anything.
+    let consistency = null;
     if (accs.length > 1) {
-      const mean = matchAccuracy;
-      const variance = accs.reduce((a, v) => a + (v - mean) ** 2, 0) / accs.length;
+      const variance = accs.reduce((a, v) => a + (v - matchAccuracy) ** 2, 0) / accs.length;
       consistency = clamp01(1 - Math.sqrt(variance) / 25) * 100;
     }
 
-    const composite = Math.round(
-      matchAccuracy * 0.30 + stability * 0.25 + speedScore * 0.25 + consistency * 0.20
-    );
+    const parts = [
+      [matchAccuracy, 0.30],
+      [stability,     0.25],
+      [speedScore,    0.25],
+      [consistency,   0.20],
+    ].filter(([v]) => v != null);
+    const weight = parts.reduce((a, [, w]) => a + w, 0);
+    const composite = weight > 0
+      ? Math.round(parts.reduce((a, [v, w]) => a + v * w, 0) / weight)
+      : null;
+
+    const round = (v) => (v == null ? null : Math.round(v));
 
     setOtResults({
       composite,
-      matchAccuracy: Math.round(matchAccuracy),
-      stability: Math.round(stability),
-      speedScore: Math.round(speedScore),
-      consistency: Math.round(consistency),
+      matchAccuracy: round(matchAccuracy),
+      stability:     round(stability),
+      speedScore:    round(speedScore),
+      consistency:   round(consistency),
       holdBreaks: ot.holdBreaks,
       avgResponseSec: avgTime,
+      gesturesScored: accs.length,
     });
   }, [gamePhase, otResults, sessionStats, level]);
 
@@ -339,10 +348,12 @@ export default function FingerCopyGame() {
     if (gamePhase === 'results' && currentSessionId && !sessionSaved && otResults) {
       setSessionSaved(true);
       const durationSeconds = Math.max(1, Math.round((Date.now() - (gameStartTime || Date.now())) / 1000));
+      /* 0, not 100, when nothing was attempted: this value is written to the
+         session record, and an empty round must never be stored as perfect. */
       const avgAccuracy = Math.round(
         sessionStats.accuracies.length > 0
           ? sessionStats.accuracies.reduce((a, b) => a + b, 0) / sessionStats.accuracies.length
-          : 100
+          : 0
       );
       /* The OT composite is the headline number for therapists; the raw match
          average stays as the fallback. */
@@ -395,9 +406,26 @@ export default function FingerCopyGame() {
     return () => clearTimeout(timer);
   }, [gamePhase, countdown, soundEnabled]);
 
+  /* Opening "How to play" mid-challenge must not cost the learner time: the
+     ticker stops while the modal is up, and on close the challenge start time
+     is pushed forward by exactly how long the modal was open. */
+  const helpOpenedAtRef = useRef(0);
+
+  const openHelp = useCallback(() => {
+    helpOpenedAtRef.current = Date.now();
+    setShowHelp(true);
+  }, []);
+
+  const closeHelp = useCallback(() => {
+    const paused = helpOpenedAtRef.current ? Date.now() - helpOpenedAtRef.current : 0;
+    helpOpenedAtRef.current = 0;
+    setShowHelp(false);
+    if (paused > 0) setChallengeStartTime((t) => (t ? t + paused : t));
+  }, []);
+
   // ── Elapsed time ticker ─────────────────────────────────────────────────
   useEffect(() => {
-    if (gamePhase !== 'playing') {
+    if (gamePhase !== 'playing' || showHelp) {
       clearInterval(elapsedRef.current);
       return;
     }
@@ -409,7 +437,7 @@ export default function FingerCopyGame() {
     }, 100);
 
     return () => clearInterval(elapsedRef.current);
-  }, [gamePhase, challengeStartTime]);
+  }, [gamePhase, challengeStartTime, showHelp]);
 
   // ── Track handedness stats ──────────────────────────────────────────────
   useEffect(() => {
@@ -426,7 +454,7 @@ export default function FingerCopyGame() {
 
   // ── Gesture match & hold logic ──────────────────────────────────────────
   useEffect(() => {
-    if (gamePhase !== 'playing' || !currentTargetGesture) return;
+    if (gamePhase !== 'playing' || showHelp || !currentTargetGesture) return;
 
     const isMatching = accuracy >= MATCH_THRESHOLD;
 
@@ -446,7 +474,7 @@ export default function FingerCopyGame() {
         setHoldProgress(0);
       }
     }
-  }, [accuracy, gamePhase, currentTargetGesture, holdStartTime]);
+  }, [accuracy, gamePhase, showHelp, currentTargetGesture, holdStartTime]);
 
   // ── Handle successful gesture match ─────────────────────────────────────
   const handleSuccess = useCallback(() => {
@@ -504,7 +532,11 @@ export default function FingerCopyGame() {
 
       const nextIdx = currentIdx + 1;
       if (nextIdx >= challenges.length) {
-        // All challenges done
+        // All challenges done — the round is over, so release the webcam.
+        // `trackingEnabled` was previously set to true at the start of play and
+        // never set back, which left the camera (and its privacy light) on
+        // through the whole results screen.
+        setTrackingEnabled(false);
         setGamePhase('results');
         if (soundEnabled) soundManager.playCelebration();
       } else {
@@ -633,6 +665,16 @@ export default function FingerCopyGame() {
             }}
           />
         )}
+
+        {/* Same modal, reopened on demand from the header's "?" button. */}
+        {showHelp && gamePhase !== 'rules' && (
+          <RulesModal
+            key="help"
+            level={level}
+            resume
+            onStart={closeHelp}
+          />
+        )}
       </AnimatePresence>
 
       {/* ── Countdown Overlay ────────────────────────────────────────── */}
@@ -698,7 +740,12 @@ export default function FingerCopyGame() {
                 Level {level} — {LEVELS[level]?.label}
               </div>
 
-              {otResults && (
+              {/* `null` = not measured: shown as "—" with an empty bar, never
+                  as 0% (reads as failure) and never as 100% (what it used to
+                  do). With nothing measured at all the block is replaced by a
+                  plain note — a report a therapist reads must not imply a
+                  result it does not have. */}
+              {otResults && otResults.composite != null && (
                 <div className="fc-ot-block">
                   <div className="fc-perf-ring" style={{ '--pct': otResults.composite }}>
                     <div className="fc-perf-inner">
@@ -716,19 +763,26 @@ export default function FingerCopyGame() {
                       <div className="fc-ot-bar" key={label}>
                         <div className="fc-ot-bar-head">
                           <span>{label} <em>{weight}</em></span>
-                          <strong>{value}%</strong>
+                          <strong>{value == null ? '—' : `${value}%`}</strong>
                         </div>
                         <div className="fc-ot-bar-track">
                           <motion.div
                             className="fc-ot-bar-fill"
                             initial={{ width: 0 }}
-                            animate={{ width: `${value}%` }}
+                            animate={{ width: `${value == null ? 0 : value}%` }}
                             transition={{ duration: 0.7, delay: 0.3 }}
                           />
                         </div>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {otResults && otResults.composite == null && (
+                <div className="tt-ot-none">
+                  No OT score for this session — the round ended before any
+                  gesture was completed, so there is nothing to measure.
                 </div>
               )}
 
@@ -784,6 +838,25 @@ export default function FingerCopyGame() {
           </div>
         </div>
         <div className="fc-header-right">
+          {/* End the round early and go straight to the report — the same
+              control LetterQuest has. Setting the phase to 'results' is all
+              that is needed here: the OT score is computed by an effect keyed
+              on that phase, so a short session is scored exactly like a full
+              one, from whatever has been done. */}
+          <EndGameControl
+            className="fc-sound-btn gs-end-btn"
+            compact
+            disabled={gamePhase !== 'playing'}
+            onConfirm={() => { setTrackingEnabled(false); setGamePhase('results'); }}
+          />
+          <button
+            className="fc-sound-btn"
+            onClick={openHelp}
+            title="How to play"
+            aria-label="How to play"
+          >
+            <HelpCircle size={18} />
+          </button>
           <div className="fc-timer">
             <Clock size={16} />
             <span>{elapsedTime}s</span>

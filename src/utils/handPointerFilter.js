@@ -126,6 +126,74 @@ export const DEFAULTS = {
   /* A gap longer than this means the hand left and came back. The pointer
      jumps to it rather than sliding across the board. */
   reacquireMs: 500,
+
+  /* ── Reach fitting (opt-in: `fitReach: true`) ──────────────────────────
+     Client feedback on Trace → Find → Type: "the hand pointer still can't roam
+     the whole screen".
+
+     Why the fixed gain is not enough: `rx`/`ry` are the fingertip's position
+     in the CAMERA FRAME. A seated child's comfortable fingertip travel covers
+     only about half that frame, so at gain 1.0 they can only ever reach the
+     middle half of the screen — the corners are physically out of range no
+     matter how far they stretch. It is worse on one axis than the other,
+     because the camera is 4:3 and the screen is 16:9.
+
+     Reach fitting measures how far the child ACTUALLY moves (the filter
+     already tracks the lo/hi extremes for the anchor) and scales each axis
+     independently so that their natural range covers `reachTarget` of the
+     screen. A child who sits back and makes small movements gets a faster
+     pointer; one who sweeps their whole arm gets a slower one. Both reach the
+     corners.
+
+     Left off by default so the games that were reported working — Pop the
+     Bubble, Follow the Ladybug — keep the exact feel they have today. */
+  fitReach: false,
+  /* Fraction of the screen the child's observed reach should cover. Slightly
+     under 1 because softEdge compresses the last 10% anyway. */
+  reachTarget: 0.92,
+  /* Never believe a reach smaller than this (per axis, in frame units). It is
+     the guard that stops the gain running away when a child holds still and
+     the observed extremes collapse towards each other. */
+  minReach: 0.16,
+  /* Where the fit STARTS, before the child has moved enough to measure them:
+     a typical seated fingertip sweep. Starting from `minReach` instead would
+     open at maximum gain and feel jumpy for the first second. */
+  initialReach: 0.34,
+  /* The measured reach grows immediately but shrinks very slowly (per second),
+     so a moment of stillness does not make the pointer twitchy. */
+  reachDecay: 0.02,
+  /* Independent, wider gain limits for the fitted axes. */
+  fitMinGain: 1.0,
+  /* 4.2 is where the benefit plateaus in simulation: below it a child who
+     makes only small movements cannot reach the edges, above it nothing
+     further is gained (the reach floor and the soft edges bind first) and
+     the pointer only gets more sensitive to tracking noise. */
+  fitMaxGain: 4.2,
+
+  /* ── Holding still ─────────────────────────────────────────────────────
+     Client feedback: the pointer would not stay put when the hand was held
+     steady on a target.
+
+     Three separate things made a "still" hand drift:
+
+       1. One-Euro at `minCutoff` still lets roughly a fifth of the raw
+          landmark jitter through every frame. Small, but on a held pointer it
+          reads as a permanent tremble.
+       2. The reach ANCHOR kept adapting. While the hand is parked, the lo/hi
+          extremes decay towards wherever it is parked, the anchor follows, and
+          the mapping slides out from under a hand that never moved — the
+          pointer creeps off the target on its own.
+       3. With reach fitting on, that same decay shrinks the measured reach,
+          which RAISES the gain, which makes the pointer progressively twitchier
+          the longer the child holds still. Exactly backwards.
+
+     `stillSpeed` is the speed below which the hand counts as still; while it
+     is, the anchor and the reach measurement are frozen. `stillEps` is a
+     micro-deadband: movement smaller than this does not move the pointer at
+     all. It is applied as a soft ramp rather than a hard freeze, so there is
+     no jump when the child starts moving again. */
+  stillSpeed: 0.055,
+  stillEps: 0.0045,
 };
 
 /* One-Euro's frame-rate-independent smoothing factor. */
@@ -161,17 +229,29 @@ export function createHandPointerFilter(options = {}) {
      exactly, and walks to the child's real reach centre over a few seconds. */
   let anchorX = 0.5, anchorY = 0.5;
   let loX = 0.5, hiX = 0.5, loY = 0.5, hiY = 0.5;
+  /* Observed reach per axis, and the gain fitted to it (see `fitReach`). */
+  let reachX = o.initialReach, reachY = o.initialReach;
+  let gainX = clamp(o.reachTarget / o.initialReach, o.fitMinGain, o.fitMaxGain);
+  let gainY = gainX;
   let outX = 0.5, outY = 0.5;      // filtered position
   let velX = 0,   velY = 0;        // filtered velocity, board units / second
+  /* Last frame's speed. `speed` itself is not computed until after the
+     mapping, but the anchor/reach freeze has to be decided BEFORE it — and
+     the previous frame's speed is the right measure anyway: it describes the
+     movement that has just happened. */
+  let lastSpeed = 0;
   let prevMX = 0.5, prevMY = 0.5;  // previous mapped (pre-filter) position
   let started = false;
 
   function reset() {
     lastT = 0; gain = 1;
     anchorX = 0.5; anchorY = 0.5;
+    reachX = reachY = o.initialReach;
+    gainX = gainY = clamp(o.reachTarget / o.initialReach, o.fitMinGain, o.fitMaxGain);
     loX = hiX = loY = hiY = 0.5;
     outX = outY = 0.5;
     velX = velY = 0;
+    lastSpeed = 0;
     prevMX = prevMY = 0.5;
     started = false;
   }
@@ -182,6 +262,7 @@ export function createHandPointerFilter(options = {}) {
   function lost() {
     lastT = 0;
     velX = velY = 0;
+    lastSpeed = 0;
   }
 
   function push(lm, now) {
@@ -202,11 +283,14 @@ export function createHandPointerFilter(options = {}) {
       lastT = t;
       gain = rawGain;
       if (loX === hiX) { loX = hiX = rx; loY = hiY = ry; }
-      const mx = softEdge(0.5 + (rx - anchorX) * gain, o.edgeKnee);
-      const my = softEdge(0.5 + (ry - anchorY) * gain, o.edgeKnee);
+      const gx0 = o.fitReach ? gainX : gain;
+      const gy0 = o.fitReach ? gainY : gain;
+      const mx = softEdge(0.5 + (rx - anchorX) * gx0, o.edgeKnee);
+      const my = softEdge(0.5 + (ry - anchorY) * gy0, o.edgeKnee);
       outX = prevMX = clamp(mx, 0, 1);
       outY = prevMY = clamp(my, 0, 1);
       velX = velY = 0;
+      lastSpeed = 0;
       return { x: outX, y: outY, gain, span, speed: 0, reacquired: true };
     }
 
@@ -223,9 +307,16 @@ export function createHandPointerFilter(options = {}) {
     loY = Math.min(loY, ry); hiY = Math.max(hiY, ry);
     /* Old extremes expire, so a single stretch to the far corner does not
        define the reach centre for the rest of the session. */
-    const decay = o.anchorDecay * dt;
-    loX += (rx - loX) * decay; hiX += (rx - hiX) * decay;
-    loY += (ry - loY) * decay; hiY += (ry - hiY) * decay;
+    /* Frozen while the hand is still (see `stillSpeed`): otherwise a parked
+       hand pulls its own extremes together, which drifts the anchor and — with
+       reach fitting — inflates the gain. `speed` here is last frame's, which is
+       exactly what we want: it describes the movement that just happened. */
+    const isStill = lastSpeed < o.stillSpeed;
+    if (!isStill) {
+      const decay = o.anchorDecay * dt;
+      loX += (rx - loX) * decay; hiX += (rx - hiX) * decay;
+      loY += (ry - loY) * decay; hiY += (ry - hiY) * decay;
+    }
 
     const wantX = clamp((loX + hiX) / 2, 0.5 - o.anchorRange, 0.5 + o.anchorRange);
     const wantY = clamp((loY + hiY) / 2, 0.5 - o.anchorRange, 0.5 + o.anchorRange);
@@ -233,12 +324,43 @@ export function createHandPointerFilter(options = {}) {
     /* The deadband is what makes a held pointer hold: without it the anchor
        creeps towards a stationary hand and the pointer slides off the target
        the child is trying to sit on. */
-    if (Math.abs(wantX - anchorX) > o.anchorDeadband) anchorX += (wantX - anchorX) * aStep;
-    if (Math.abs(wantY - anchorY) > o.anchorDeadband) anchorY += (wantY - anchorY) * aStep;
+    if (!isStill) {
+      if (Math.abs(wantX - anchorX) > o.anchorDeadband) anchorX += (wantX - anchorX) * aStep;
+      if (Math.abs(wantY - anchorY) > o.anchorDeadband) anchorY += (wantY - anchorY) * aStep;
+    }
+
+    /* ── Reach fitting ────────────────────────────────────────────────────
+       Scale each axis so the child's OBSERVED range of motion covers
+       `reachTarget` of the screen, instead of assuming their fingertip sweeps
+       the whole camera frame (it never does). Per-axis, because the camera and
+       the screen have different aspect ratios.
+
+       The measured reach jumps up immediately when the child moves further
+       than before, and decays only very slowly, so holding still never makes
+       the pointer twitchy — and `minReach` is the hard floor that stops the
+       gain running away entirely. */
+    let gx = gain;
+    let gy = gain;
+    if (o.fitReach) {
+      /* Also frozen while still, for the same reason. */
+      const shrink = isStill ? 1 : 1 - o.reachDecay * dt;
+      reachX = Math.max(reachX * shrink, hiX - loX, o.minReach);
+      reachY = Math.max(reachY * shrink, hiY - loY, o.minReach);
+
+      const wantGX = clamp(o.reachTarget / reachX, o.fitMinGain, o.fitMaxGain);
+      const wantGY = clamp(o.reachTarget / reachY, o.fitMinGain, o.fitMaxGain);
+      /* Ease on the same slow time constant as the distance gain, so the
+         mapping never changes under the child mid-reach. */
+      const gStep = 1 - Math.exp(-dt / o.gainTau);
+      gainX += (wantGX - gainX) * gStep;
+      gainY += (wantGY - gainY) * gStep;
+      gx = gainX;
+      gy = gainY;
+    }
 
     // ── The mapping itself ───────────────────────────────────────────────
-    const mx = softEdge(0.5 + (rx - anchorX) * gain, o.edgeKnee);
-    const my = softEdge(0.5 + (ry - anchorY) * gain, o.edgeKnee);
+    const mx = softEdge(0.5 + (rx - anchorX) * gx, o.edgeKnee);
+    const my = softEdge(0.5 + (ry - anchorY) * gy, o.edgeKnee);
 
     // ── 2. One-Euro ──────────────────────────────────────────────────────
     const dAlpha = alphaFor(dt, o.dCutoff);
@@ -247,12 +369,41 @@ export function createHandPointerFilter(options = {}) {
     prevMX = mx; prevMY = my;
 
     const speed  = Math.hypot(velX, velY);
+    lastSpeed = speed;
     const alpha  = alphaFor(dt, o.minCutoff + o.beta * speed);
-    outX += (mx - outX) * alpha;
-    outY += (my - outY) * alpha;
+
+    /* Micro-deadband. One-Euro alone still passes roughly a fifth of the raw
+       landmark jitter on a stationary hand, which on screen is a pointer that
+       will not sit still. `hold` ramps the update from 0 to 1 across the
+       deadband, so movement below `stillEps` moves the pointer not at all and
+       anything larger is unaffected — a soft edge rather than a freeze, so the
+       pointer never jumps when the child starts moving again. */
+    /* The deadband is measured in BOARD units, but the jitter that has to fit
+       inside it arrives in FRAME units and is then multiplied by the gain. A
+       fixed deadband therefore stops working the moment reach fitting raises
+       the gain — which is why a held pointer wobbled several times more with
+       fitting on. Scaling it by the gain actually in use keeps the pointer
+       equally steady at every distance and on every screen. */
+    const eps = o.stillEps * Math.max(1, (gx + gy) / 2);
+    const dist = Math.hypot(mx - outX, my - outY);
+    const hold = dist <= eps ? 0
+               : Math.min(1, (dist - eps) / eps);
+
+    outX += (mx - outX) * alpha * hold;
+    outY += (my - outY) * alpha * hold;
 
     // ── 3. Prediction ────────────────────────────────────────────────────
-    const lead = clamp((speed - o.predictFloor) / (o.predictFull - o.predictFloor), 0, 1);
+    /* Prediction has to obey the deadband too. `velX/velY` are measured from
+       the PRE-deadband mapped position, so on a parked hand they still carry
+       the raw jitter — and adding `vel * lead` back on top of a held `outX`
+       reintroduced exactly the wobble the deadband had just removed. This was
+       the dominant remaining source of movement on a still hand.
+
+       Multiplying by `hold` (0 inside the deadband) and zeroing it outright
+       while the hand is still means prediction only ever acts on real reaches,
+       which is all it was ever for. */
+    const lead = isStill ? 0
+      : clamp((speed - o.predictFloor) / (o.predictFull - o.predictFloor), 0, 1) * hold;
     const ps   = (o.predictMs / 1000) * lead;
     const px   = outX + clamp(velX * ps, -o.maxPredict, o.maxPredict);
     const py   = outY + clamp(velY * ps, -o.maxPredict, o.maxPredict);
@@ -261,6 +412,8 @@ export function createHandPointerFilter(options = {}) {
       x: clamp(px, 0, 1),
       y: clamp(py, 0, 1),
       gain,
+      gainX, gainY,
+      reachX, reachY,
       span,
       speed,
       reacquired: false,

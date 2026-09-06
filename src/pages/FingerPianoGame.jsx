@@ -44,10 +44,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Home, Pause, Play, RotateCcw, Clock, Star, Hand, MousePointer2,
   Volume2, VolumeX, Target, Activity, Zap, TrendingUp, CheckCircle,
-  Gauge, Fingerprint, Timer, Info, AlertTriangle,
+  Gauge, Fingerprint, Timer, Info, AlertTriangle, HelpCircle,
 } from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
+import GameRules from '../components/game/GameRules';
+import { otComposite, otRound, otPct, FINISH } from '../utils/otScore';
+import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/FingerPianoGame.css';
@@ -103,6 +106,8 @@ const LEVELS = {
 
 /* ── Detection constants (validated against synthetic hands) ────────────── */
 const EMA_ALPHA   = 0.40;
+/* Board units below which a movement is hand tremor, not intent. */
+const STILL_EPS   = 2.5;
 /* Air-tap thresholds, validated against synthetic flexion traces. */
 const ARM_LEVEL   = 1.90;   // extension above which a finger is armed
 const FIRE_LEVEL  = 1.65;   // crossing below this while armed = a tap
@@ -341,60 +346,21 @@ const RULES = [
   { icon: '⏸️', text: 'You can pause at any time.' },
 ];
 
-function RulesModal({ cfg, mode, onStart }) {
+/* `resume` = opened from the in-game "How to play" button rather than shown
+   automatically before the first round, so the primary button returns to the
+   game instead of starting one. */
+/* Thin wrapper over the shared rules card — see GameRules.jsx. */
+function RulesModal({ cfg, mode, onStart, resume = false }) {
   return (
-    <motion.div className="fpp-overlay"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-      <motion.div className="fpp-card fpp-rules-card"
-        initial={{ scale: 0.88, y: 30, opacity: 0 }}
-        animate={{ scale: 1, y: 0, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        transition={{ type: 'spring', stiffness: 240, damping: 22 }}>
-        <div className="fpp-rules-head">
-          <div className="fpp-rules-badge">
-            <svg viewBox="0 0 100 100" width="46" height="46">
-              <rect x="8" y="24" width="84" height="52" rx="6" fill="#F8FAFC" stroke="#1E1B4B" strokeWidth="4" />
-              <rect x="22" y="24" width="9" height="32" rx="2" fill="#1E1B4B" />
-              <rect x="40" y="24" width="9" height="32" rx="2" fill="#1E1B4B" />
-              <rect x="64" y="24" width="9" height="32" rx="2" fill="#1E1B4B" />
-              <path d="M8 56 H92" stroke="#CBD5E1" strokeWidth="2" />
-            </svg>
-          </div>
-          <div>
-            <h2 className="fpp-rules-title">Finger Piano</h2>
-            <p className="fpp-rules-sub">
-              {cfg.emoji} {cfg.label} &nbsp;·&nbsp; {cfg.notes} notes &nbsp;·&nbsp;
-              {cfg.fingers.length} fingers
-            </p>
-          </div>
-        </div>
-
-        <ul className="fpp-rules-list">
-          {RULES.map((r, i) => (
-            <motion.li key={i}
-              initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.12 + i * 0.07 }}>
-              <span className="fpp-rule-icon">{r.icon}</span>
-              <span>{r.text}</span>
-            </motion.li>
-          ))}
-        </ul>
-
-        {mode === 'touch' && (
-          <p className="fpp-rules-tip">
-            <AlertTriangle size={16} />
-            <span>
-              A touchscreen cannot tell which finger you used, so finger isolation
-              is not measured in touch mode. Switch to camera for the full report.
-            </span>
-          </p>
-        )}
-
-        <button className="fpp-btn fpp-btn-primary fpp-rules-start" onClick={onStart}>
-          <Play size={20} /> Let&apos;s play! 🎹
-        </button>
-      </motion.div>
-    </motion.div>
+    <GameRules
+      emoji="🎹"
+      title="Finger Piano"
+      subtitle={`${cfg.emoji} ${cfg.label} · ${mode === 'camera' ? 'Camera mode' : 'Touch mode'} · ${cfg.notes} notes`}
+      rules={RULES}
+      onStart={onStart}
+      resume={resume}
+      startLabel={resume ? 'Back to the game' : "Let's play! 🎹"}
+    />
   );
 }
 
@@ -421,6 +387,10 @@ export default function FingerPianoGame() {
     sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules'
   );
   const [isPaused, setIsPaused] = useState(false);
+  /* True while the end-game confirmation is on screen. The round is paused
+     then, but the PAUSE CARD must stay hidden so only one card shows. */
+  const [endAsking, setEndAsking] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);   // "How to play", re-openable mid-game
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
 
   const [uiScore, setUiScore] = useState(0);
@@ -477,9 +447,21 @@ export default function FingerPianoGame() {
   const isPlaying = gamePhase === 'playing' && !isPaused;
   const trackingEnabled = mode === 'camera' && (gamePhase === 'countdown' || gamePhase === 'playing');
 
-  const { landmarks, isTracking, isSimulationMode } = useHandTracking(
+  const { landmarks, isTracking, isSimulationMode, releaseCamera } = useHandTracking(
     videoRef, canvasRef, trackingEnabled
   );
+
+  /* ── Turn the camera off when the round ends ────────────────────────────
+     Client feedback: "when the game finish the camera need to turn off."
+
+     `trackingEnabled` already goes false on the results screen, and the hook's
+     cleanup now stops the MediaStream tracks (MediaPipe's own `Camera.stop()`
+     does not, which is why the webcam light stayed on). This call is the
+     explicit belt-and-braces version so the camera is released the instant the
+     round ends, on every exit path. */
+  useEffect(() => {
+    if (gamePhase === 'results') releaseCamera();
+  }, [gamePhase, releaseCamera]);
 
   /* ── Keyboard geometry ── */
   const keys = useMemo(() => {
@@ -524,10 +506,18 @@ export default function FingerPianoGame() {
       if (!p) continue;
       const nx = (1 - p.x) * VW;
       const ny = p.y * VH;
-      tips[f.key] = prevTips && prevTips[f.key]
-        ? { x: prevTips[f.key].x + (nx - prevTips[f.key].x) * EMA_ALPHA,
-            y: prevTips[f.key].y + (ny - prevTips[f.key].y) * EMA_ALPHA }
-        : { x: nx, y: ny };
+      /* Micro-deadband so a fingertip resting on a key stops twitching:
+         movement below STILL_EPS board units is treated as tremor and does not
+         move the point, ramping smoothly to full response just above it. */
+      if (prevTips && prevTips[f.key]) {
+        const pv = prevTips[f.key];
+        const d = Math.hypot(nx - pv.x, ny - pv.y);
+        const hold = d <= STILL_EPS ? 0 : Math.min(1, (d - STILL_EPS) / STILL_EPS);
+        const a = EMA_ALPHA * hold;
+        tips[f.key] = { x: pv.x + (nx - pv.x) * a, y: pv.y + (ny - pv.y) * a };
+      } else {
+        tips[f.key] = { x: nx, y: ny };
+      }
       const e = extensionOf(landmarks, f);
       ext[f.key] = prevExt && prevExt[f.key] != null
         ? prevExt[f.key] + (e - prevExt[f.key]) * EMA_ALPHA
@@ -641,44 +631,56 @@ export default function FingerPianoGame() {
   /* ═════════════════════════════════════════════════════════════════════════
      RESULTS
      ═════════════════════════════════════════════════════════════════════════ */
-  const finishGame = useCallback(() => {
+  /* @param {string} reason  FINISH.COMPLETE when the piece was played through,
+     FINISH.ENDED when the learner pressed "End game". */
+  const finishGame = useCallback((reason = FINISH.COMPLETE) => {
     cancelAnimationFrame(rafRef.current);
+
+    /* EVERY SUB-SCORE IS `null` WHEN IT HAS NO DATA — see src/utils/otScore.js.
+       `reactionScore` was the trap here: with no reaction samples `mean()` is
+       0 ms, and 0 ms is FASTER than the 600 ms "quick" reference, so an
+       untouched round scored a perfect 100 for reaction time. */
     const attempted = hitRef.current + wrongFingerRef.current + missRef.current;
-    const accuracy = attempted ? (hitRef.current / attempted) * 100 : 0;
+    const accuracy = attempted ? (hitRef.current / attempted) * 100 : null;
 
     const iv = intervalsRef.current;
     const ivMean = mean(iv);
     const ivSd = stdev(iv);
     // Rhythm consistency = 1 - coefficient of variation of the inter-key gaps.
-    const rhythm = ivMean > 0 ? clamp01(1 - ivSd / ivMean) * 100 : 0;
+    const rhythm = ivMean > 0 ? clamp01(1 - ivSd / ivMean) * 100 : null;
 
-    const rtMean = mean(reactionsRef.current);
+    const rtMean = reactionsRef.current.length ? mean(reactionsRef.current) : null;
     // 2.5 s to reach a key is slow for a child; 0.6 s is quick.
-    const reactionScore = clamp01((2500 - rtMean) / (2500 - 600)) * 100;
+    const reactionScore = rtMean == null
+      ? null
+      : clamp01((2500 - rtMean) / (2500 - 600)) * 100;
 
     const npm = elapsedRef.current > 0
       ? (hitRef.current / (elapsedRef.current / 60000)) : 0;
-    const speedScore = clamp01(npm / REF_NPM) * 100;
+    const speedScore = hitRef.current > 0 ? clamp01(npm / REF_NPM) * 100 : null;
 
     /* With nothing to travel towards, path smoothness no longer means anything.
        What can be measured instead is how decisive each tap was: how far the
        finger actually flexed and how fast. Both are read straight off the
        landmarks, not inferred. */
-    const tapQuality = clamp01(
-      clamp01(mean(amplitudesRef.current) / GOOD_AMPL) *
-      clamp01(mean(ratesRef.current) / GOOD_RATE)
-    ) * 100;
+    const tapQuality = amplitudesRef.current.length
+      ? clamp01(
+          clamp01(mean(amplitudesRef.current) / GOOD_AMPL) *
+          clamp01(mean(ratesRef.current) / GOOD_RATE)
+        ) * 100
+      : null;
 
     const cameraMetrics = mode === 'camera' && isolationsRef.current.length > 0;
     const isolation = cameraMetrics ? mean(isolationsRef.current) * 100 : null;
 
-    /* Touch mode cannot observe isolation, so its weight is redistributed
-       rather than filled with an invented value. */
+    /* Touch mode cannot observe isolation, and an unplayed round cannot observe
+       anything: otComposite() renormalises over whatever WAS measured rather
+       than filling the gaps with invented values. */
     const composite = cameraMetrics
-      ? Math.round(accuracy * 0.28 + isolation * 0.25 + tapQuality * 0.15 +
-                   rhythm * 0.14 + reactionScore * 0.12 + speedScore * 0.06)
-      : Math.round(accuracy * 0.46 + rhythm * 0.23 + reactionScore * 0.20 +
-                   speedScore * 0.11);
+      ? otComposite([[accuracy, 0.28], [isolation, 0.25], [tapQuality, 0.15],
+                     [rhythm, 0.14], [reactionScore, 0.12], [speedScore, 0.06]])
+      : otComposite([[accuracy, 0.46], [rhythm, 0.23],
+                     [reactionScore, 0.20], [speedScore, 0.11]]);
 
     const perFinger = FINGERS
       .filter((f) => cfg.fingers.includes(f.key))
@@ -694,18 +696,19 @@ export default function FingerPianoGame() {
       });
 
     setResults({
+      endedEarly: reason === FINISH.ENDED,
       score: Math.round(scoreRef.current),
       hit: hitRef.current,
       wrongFinger: wrongFingerRef.current,
       missed: missRef.current,
       total: cfg.notes,
-      accuracy: Math.round(accuracy),
-      isolation: isolation == null ? null : Math.round(isolation),
-      reactionMs: reactionsRef.current.length ? Math.round(rtMean) : null,
+      accuracy: otRound(accuracy),
+      isolation: otRound(isolation),
+      reactionMs: otRound(rtMean),
       intervalMs: iv.length ? Math.round(ivMean) : null,
       intervalSd: iv.length ? Math.round(ivSd) : null,
-      rhythm: Math.round(rhythm),
-      tapQuality: Math.round(tapQuality),
+      rhythm: otRound(rhythm),
+      tapQuality: otRound(tapQuality),
       ambiguous: ambiguousRef.current,
       npm: Math.round(npm),
       pauses: pausesRef.current,
@@ -1024,6 +1027,21 @@ export default function FingerPianoGame() {
     setGamePhase('countdown');
   }, [soundEnabled]);
 
+  /* ── "How to play", available DURING the game ───────────────────────────
+     Client feedback: "there should be an optional provision for user to see
+     [the instructions] again if they wish to." The rules are shown once
+     automatically on the first visit; this button brings the exact same modal
+     back at any point, and pauses the round while it is open. */
+  const openHelp = useCallback(() => {
+    if (gamePhase === 'playing') setIsPaused(true);
+    setShowHelp(true);
+  }, [gamePhase]);
+
+  const closeHelp = useCallback(() => {
+    setShowHelp(false);
+    if (gamePhase === 'playing') setIsPaused(false);
+  }, [gamePhase]);
+
   const togglePause = useCallback(() => {
     if (gamePhase !== 'playing') return;
     setIsPaused((p) => {
@@ -1098,6 +1116,21 @@ export default function FingerPianoGame() {
         </div>
 
         <div className="fpp-header-right">
+          {/* End the round early and go straight to the report — the same
+              control LetterQuest has. It runs the game's normal finish
+              routine, so the report is built exactly as it is at the end of a
+              full round, from whatever has been done so far. */}
+          <EndGameControl
+            className="fpp-icon-btn gs-end-btn"
+            compact
+            disabled={gamePhase !== 'playing'}
+            onAskingChange={(asking) => { setEndAsking(asking); setIsPaused(asking); }}
+            onConfirm={() => { setIsPaused(false); finishRef.current?.('ended'); }}
+          />
+          <button className="fpp-icon-btn" onClick={openHelp}
+            title="How to play" aria-label="How to play">
+            <HelpCircle size={20} />
+          </button>
           <button className="fpp-icon-btn" onClick={switchMode}
             title={mode === 'camera' ? 'Switch to touch' : 'Switch to camera'}>
             {mode === 'camera' ? <Hand size={20} /> : <MousePointer2 size={20} />}
@@ -1247,6 +1280,11 @@ export default function FingerPianoGame() {
           <RulesModal key="rules" cfg={cfg} mode={mode} onStart={startFromRules} />
         )}
 
+        {/* Same modal, reopened on demand from the header's "?" button. */}
+        {showHelp && gamePhase !== 'rules' && (
+          <RulesModal key="help" cfg={cfg} mode={mode} onStart={closeHelp} resume />
+        )}
+
         {gamePhase === 'countdown' && (
           <motion.div key="cd" className="fpp-overlay fpp-overlay-soft"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -1260,7 +1298,9 @@ export default function FingerPianoGame() {
           </motion.div>
         )}
 
-        {isPaused && gamePhase === 'playing' && (
+        {/* `!endAsking`: the end-game dialog pauses the round too, and without
+            this the pause card rendered underneath it — two cards at once. */}
+        {isPaused && !endAsking && gamePhase === 'playing' && (
           <motion.div key="pause" className="fpp-overlay"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="fpp-card fpp-pause-card"
@@ -1296,21 +1336,31 @@ export default function FingerPianoGame() {
                 ))}
               </div>
 
-              <h2 className="fpp-results-title"><CheckCircle size={26} /> Piece finished!</h2>
+              <h2 className="fpp-results-title">
+                <CheckCircle size={26} />{' '}
+                {results.endedEarly ? 'Session ended' : 'Piece finished!'}
+              </h2>
               <p className="fpp-results-sub">
                 {cfg.emoji} {cfg.label} · {mode === 'camera' ? 'Camera' : 'Touch'}
               </p>
 
-              <div className="fpp-perf-ring" style={{ '--pct': results.composite }}>
-                <div className="fpp-perf-inner">
-                  <span className="fpp-perf-val">{results.composite}</span>
-                  <span className="fpp-perf-lbl">OT Score</span>
+              {results.composite != null ? (
+                <div className="fpp-perf-ring" style={{ '--pct': results.composite }}>
+                  <div className="fpp-perf-inner">
+                    <span className="fpp-perf-val">{results.composite}</span>
+                    <span className="fpp-perf-lbl">OT Score</span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="tt-ot-none">
+                  No OT score for this session — the round ended before a key
+                  was played, so there is nothing to measure.
+                </div>
+              )}
 
               <div className="fpp-metrics">
                 <Metric icon={<Star size={16} />} label="Score" value={results.score} />
-                <Metric icon={<Target size={16} />} label="Accuracy" value={`${results.accuracy}%`} />
+                <Metric icon={<Target size={16} />} label="Accuracy" value={otPct(results.accuracy)} />
                 <Metric icon={<Fingerprint size={16} />} label="Finger Isolation"
                   value={results.isolation == null ? 'n/a' : `${results.isolation}%`}
                   muted={results.isolation == null}
@@ -1322,9 +1372,9 @@ export default function FingerPianoGame() {
                 <Metric icon={<Timer size={16} />} label="Inter-Key Interval"
                   value={results.intervalMs == null ? '—'
                     : `${(results.intervalMs / 1000).toFixed(2)}s ±${(results.intervalSd / 1000).toFixed(2)}`} />
-                <Metric icon={<Activity size={16} />} label="Rhythm" value={`${results.rhythm}%`}
+                <Metric icon={<Activity size={16} />} label="Rhythm" value={otPct(results.rhythm)}
                   tip="One minus the coefficient of variation of the gaps between presses — how even the tempo was." />
-                <Metric icon={<TrendingUp size={16} />} label="Tap Quality" value={`${results.tapQuality}%`}
+                <Metric icon={<TrendingUp size={16} />} label="Tap Quality" value={otPct(results.tapQuality)}
                   tip="How decisive each tap was: how far the finger flexed and how fast. A crisp bend scores high, a vague wiggle low." />
                 <Metric icon={<Gauge size={16} />} label="Speed" value={`${results.npm} /min`} />
                 <Metric icon={<Pause size={16} />} label="Hesitations" value={results.pauses} />

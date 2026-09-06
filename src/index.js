@@ -22,6 +22,13 @@ import ReactDOM from 'react-dom/client';
 import './i18n';
 import App from './App';
 import { initDB } from './services/localDB.js';
+import { applyStoredGameTheme } from './components/game/gameShell';
+
+/* Put the game theme on <html> BEFORE the first paint, so the dark default (and
+   the learner's choice, if they made one) applies to everything — including
+   anything rendered through a portal, which sits outside every page's own DOM
+   and so cannot inherit the attribute from it. */
+applyStoredGameTheme();
 
 // Open IndexedDB and seed demo data before the app renders.
 // The await ensures no component ever races with un-initialised data.

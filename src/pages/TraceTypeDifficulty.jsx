@@ -1,158 +1,58 @@
 /**
  * TraceTypeDifficulty.jsx
- * Level selection screen for Trace → Find → Type game.
+ * Level select for "Trace → Find → Type" — thin config over GameLevelSelect.
  *
- * Presents 3 difficulty levels with letter previews.
- * Navigates to /play/trace-type-game?level=<1|2|3> on selection.
+ * Client feedback addressed:
+ *   • "mentioning level 1,2,3" while other games said Easy/Medium/Hard →
+ *     it is Easy / Medium / Hard everywhere now.
+ *   • different colour coding → the shared difficulty tokens are used.
+ *   • the theme toggle used to live only here → it is now in the shared shell,
+ *     so it is available on this screen AND in every other game.
  */
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { ArrowLeft, Play } from 'lucide-react';
-import '../styles/TraceTypeGame.css';
+import GameLevelSelect from '../components/game/GameLevelSelect';
+import { GAMES, levelNumber } from '../components/game/gameShell';
+import { WORD_SETS } from './traceTypeWords';
 
-// ── Level card metadata ────────────────────────────────────────────────────
-const LEVEL_CARDS = [
-  {
-    level: 1,
-    emoji: '🌱',
-    name: 'Beginner',
-    desc: 'Start with basic letters! Larger tracing guides and a simplified keyboard to build confidence.',
-    color: '#22d3ee', // Cyan glowing
-    gradient: 'linear-gradient(135deg, rgba(34, 211, 238, 0.2), rgba(34, 211, 238, 0))',
-    borderColor: 'rgba(34, 211, 238, 0.5)',
-    letters: 'LVXTIFEH'.split(''),
-  },
-  {
-    level: 2,
-    emoji: '⚡',
-    name: 'Intermediate',
-    desc: 'Take on more complex letters with standard tracing and a full QWERTY keyboard.',
-    color: '#818cf8', // Indigo glowing
-    gradient: 'linear-gradient(135deg, rgba(129, 140, 248, 0.2), rgba(129, 140, 248, 0))',
-    borderColor: 'rgba(129, 140, 248, 0.5)',
-    letters: 'AMNKOPUYZCD'.split(''),
-  },
-  {
-    level: 3,
-    emoji: '🔥',
-    name: 'Expert',
-    desc: 'Master the final letters with precision tracing, timed challenges, and bonus points!',
-    color: '#f43f5e', // Rose glowing
-    gradient: 'linear-gradient(135deg, rgba(244, 63, 94, 0.2), rgba(244, 63, 94, 0))',
-    borderColor: 'rgba(244, 63, 94, 0.5)',
-    letters: 'QSRGJWB'.split(''),
-  },
-];
+const Words = ({ words }) => (
+  <>
+    {words.slice(0, 6).map((w) => (
+      <span key={w} className="gs-spec">{w}</span>
+    ))}
+  </>
+);
 
-// ── Animation variants ─────────────────────────────────────────────────────
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.12, delayChildren: 0.1 },
+const LEVELS = {
+  easy: {
+    desc: 'Short 3-letter words made of straight-line letters. Big tracing guide and a simplified keyboard.',
+    specs: ['3-letter words', 'Extra-wide guide', 'Simple keyboard'],
+    preview: <Words words={WORD_SETS.easy} />,
+  },
+  medium: {
+    desc: 'Longer words with curved letters, a standard guide and the full QWERTY keyboard.',
+    specs: ['4-letter words', 'Standard guide', 'Full keyboard'],
+    preview: <Words words={WORD_SETS.medium} />,
+  },
+  hard: {
+    desc: 'The trickiest letters in longer words, with a precise guide and bonus points for speed.',
+    specs: ['5-letter words', 'Precise guide', 'Time bonus'],
+    preview: <Words words={WORD_SETS.hard} />,
   },
 };
 
-const cardVariants = {
-  hidden: { opacity: 0, y: 30, scale: 0.95 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    scale: 1,
-    transition: { type: 'spring', stiffness: 200, damping: 20 },
-  },
-};
-
-// ═══════════════════════════════════════════════════════════════════════════
 export default function TraceTypeDifficulty() {
   const navigate = useNavigate();
-
-  const handleSelectLevel = (level) => {
-    navigate(`/play/trace-type-game?level=${level}`);
-  };
-
   return (
-    <div className="tt-difficulty-page">
-      {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div className="tt-difficulty-header">
-        <button className="tt-difficulty-back" onClick={() => navigate('/play')}>
-          <ArrowLeft size={18} />
-          Back to Games
-        </button>
-
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-        >
-          <h1 className="tt-difficulty-title">✏️ Trace → Find → Type</h1>
-          <p className="tt-difficulty-subtitle">
-            Learn letters in 3 fun steps — trace, find on the keyboard, then type!
-          </p>
-        </motion.div>
-      </div>
-
-      {/* ── Level Cards ────────────────────────────────────────────────── */}
-      <motion.div
-        className="tt-difficulty-grid"
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        {LEVEL_CARDS.map((card) => (
-          <motion.div
-            key={card.level}
-            className="tt-level-card"
-            variants={cardVariants}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => handleSelectLevel(card.level)}
-            style={{ '--level-color': card.color, '--level-glow': card.borderColor }}
-          >
-            {/* Color bar at top */}
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 4,
-                background: card.gradient,
-                borderRadius: '24px 24px 0 0',
-              }}
-            />
-
-            <div className="tt-level-emoji">{card.emoji}</div>
-            <div className="tt-level-name">
-              Level {card.level} — {card.name}
-            </div>
-            <div className="tt-level-desc">{card.desc}</div>
-
-            {/* ── Letter preview tags ─────────────────────────────────── */}
-            <div className="tt-level-letters">
-              {card.letters.map((letter) => (
-                <span key={letter} className="tt-level-letter-tag">
-                  {letter}
-                </span>
-              ))}
-            </div>
-
-            {/* ── Play button ──────────────────────────────────────────── */}
-            <button
-              className="tt-level-play-btn"
-              style={{ background: card.gradient }}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleSelectLevel(card.level);
-              }}
-            >
-              <Play size={18} />
-              Start Level {card.level}
-            </button>
-          </motion.div>
-        ))}
-      </motion.div>
-    </div>
+    <GameLevelSelect
+      game={GAMES['trace-type']}
+      levels={LEVELS}
+      onStart={(key, mode) =>
+        navigate(
+          `${GAMES['trace-type'].route}?level=${levelNumber(key)}&difficulty=${key}&mode=${mode}`
+        )
+      }
+      footNote="💡 Tracing works with your finger in the air or with the mouse — switch at any time. Each round spells a whole word."
+    />
   );
 }

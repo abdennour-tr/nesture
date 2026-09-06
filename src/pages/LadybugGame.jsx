@@ -26,16 +26,19 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Home, Pause, Play, RotateCcw, Clock, Star, Hand, MousePointer2,
-  Volume2, VolumeX, Target, Activity, Zap, TrendingUp, CheckCircle,
+  Volume2, VolumeX, Target, Activity, Zap, TrendingUp, CheckCircle, HelpCircle,
 } from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
+import GameRules from '../components/game/GameRules';
+import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/LadybugGame.css';
 
-import { HandDefs, HandArt, steadyAngle, followHand, makeHandState, handFlip } from '../components/game/HandPointer';
+import { HandDefs, HandArt, followHand, makeHandState } from '../components/game/HandPointer';
 import { createHandPointerFilter, handDepthScale } from '../utils/handPointerFilter';
+import { otComposite, otRound, otPct, FINISH } from '../utils/otScore';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — the play field uses a fixed virtual coordinate space that is
    scaled to the rendered element. All game math happens in this space so the
@@ -293,63 +296,21 @@ const RULES = [
   { icon: '⏸️', text: 'You can pause at any time.' },
 ];
 
-function RulesModal({ level, mode, onStart }) {
+/* `resume` = opened from the in-game "How to play" button rather than shown
+   automatically before the first round, so the primary button returns to the
+   game instead of starting one. */
+/* Thin wrapper over the shared rules card — see GameRules.jsx. */
+function RulesModal({ level, mode, onStart, resume = false }) {
   return (
-    <motion.div
-      className="lb-overlay"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-    >
-      <motion.div
-        className="lb-rules-card"
-        initial={{ scale: 0.88, y: 30, opacity: 0 }}
-        animate={{ scale: 1, y: 0, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        transition={{ type: 'spring', stiffness: 240, damping: 22 }}
-      >
-        <div className="lb-rules-head">
-          <div className="lb-rules-badge">
-            <svg viewBox="0 0 100 100" width="46" height="46">
-              <ellipse cx="50" cy="56" rx="33" ry="31" fill="#E53E3E" />
-              <path d="M50 25 L50 87" stroke="#1A1A1A" strokeWidth="3" />
-              <circle cx="34" cy="46" r="6" fill="#1A1A1A" />
-              <circle cx="66" cy="46" r="6" fill="#1A1A1A" />
-              <circle cx="30" cy="68" r="5" fill="#1A1A1A" />
-              <circle cx="70" cy="68" r="5" fill="#1A1A1A" />
-              <ellipse cx="50" cy="26" rx="20" ry="16" fill="#161616" />
-              <circle cx="42" cy="24" r="5.5" fill="#fff" />
-              <circle cx="58" cy="24" r="5.5" fill="#fff" />
-              <circle cx="43" cy="25" r="2.8" fill="#111" />
-              <circle cx="59" cy="25" r="2.8" fill="#111" />
-            </svg>
-          </div>
-          <div>
-            <h2 className="lb-rules-title">Follow the Ladybug</h2>
-            <p className="lb-rules-sub">
-              {LEVELS[level].emoji} {LEVELS[level].label} &nbsp;·&nbsp;
-              {mode === 'camera' ? 'Camera mode' : 'Touch mode'}
-            </p>
-          </div>
-        </div>
-
-        <ul className="lb-rules-list">
-          {RULES.map((r, i) => (
-            <motion.li
-              key={i}
-              initial={{ opacity: 0, x: -18 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.12 + i * 0.07 }}
-            >
-              <span className="lb-rule-icon">{r.icon}</span>
-              <span>{r.text}</span>
-            </motion.li>
-          ))}
-        </ul>
-
-        <button className="lb-btn lb-btn-primary lb-rules-start" onClick={onStart}>
-          <Play size={20} /> Let&apos;s go! 🐞
-        </button>
-      </motion.div>
-    </motion.div>
+    <GameRules
+      emoji="🐞"
+      title="Follow the Ladybug"
+      subtitle={`${LEVELS[level].emoji} ${LEVELS[level].label} · ${mode === 'camera' ? 'Camera mode' : 'Touch mode'}`}
+      rules={RULES}
+      onStart={onStart}
+      resume={resume}
+      startLabel={resume ? 'Back to the game' : "Let's go! 🐞"}
+    />
   );
 }
 
@@ -376,6 +337,10 @@ export default function LadybugGame() {
     sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules'
   );
   const [isPaused, setIsPaused] = useState(false);
+  /* True while the end-game confirmation is on screen. The round is paused
+     then, but the PAUSE CARD must stay hidden so only one card shows. */
+  const [endAsking, setEndAsking] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);   // "How to play", re-openable mid-game
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
 
   /* ── Throttled UI readouts (never written from inside the rAF loop) ── */
@@ -417,8 +382,15 @@ export default function LadybugGame() {
   const handGroupRef  = useRef(null);
   /* Camera pointer conditioning — see src/utils/handPointerFilter.js. */
   const handFilterRef = useRef(null);
-  if (!handFilterRef.current) handFilterRef.current = createHandPointerFilter();
-  const handTargetRef = useRef({ ...makeHandState(0.6), vx: 0, vy: 0, dirX: 0, dirY: -1, depth: 1 });
+  if (!handFilterRef.current) {
+    /* `fitReach` scales each axis to the child's OBSERVED range of motion, so
+       the corners of the board are reachable without stretching: the fingertip
+       position MediaPipe reports is normalised to the camera frame, and a
+       seated child's comfortable reach covers only about a third of it.
+       See src/utils/handPointerFilter.js. */
+    handFilterRef.current = createHandPointerFilter({ fitReach: true });
+  }
+  const handTargetRef = useRef({ ...makeHandState(0.6), vx: 0, vy: 0, depth: 1 })   // no dirX/dirY: the pointer never rotates;
   const handShownRef  = useRef(makeHandState(0.6));
   const trailRef      = useRef([]);
   const onPathRef     = useRef(true);
@@ -469,9 +441,21 @@ export default function LadybugGame() {
   const isPlaying = gamePhase === 'playing' && !isPaused;
   const trackingEnabled = mode === 'camera' && (gamePhase === 'countdown' || gamePhase === 'playing');
 
-  const { landmarks, isTracking, isSimulationMode } = useHandTracking(
+  const { landmarks, isTracking, isSimulationMode, releaseCamera } = useHandTracking(
     videoRef, trackCanvasRef, trackingEnabled, isPaused, 1
   );
+
+  /* ── Turn the camera off when the round ends ────────────────────────────
+     Client feedback: "when the game finish the camera need to turn off."
+
+     `trackingEnabled` already goes false on the results screen, and the hook's
+     cleanup now stops the MediaStream tracks (MediaPipe's own `Camera.stop()`
+     does not, which is why the webcam light stayed on). This call is the
+     explicit belt-and-braces version so the camera is released the instant the
+     round ends, on every exit path. */
+  useEffect(() => {
+    if (gamePhase === 'results') releaseCamera();
+  }, [gamePhase, releaseCamera]);
 
   /* ═════════════════════════════════════════════════════════════════════════
      Coordinate helpers
@@ -547,17 +531,12 @@ export default function LadybugGame() {
     const mcp = landmarks[5];
     if (!mcp) return;
     const h = handTargetRef.current;
-    const dx = (1 - tip.x) * VW - (1 - mcp.x) * VW;
-    const dy = tip.y * VH - mcp.y * VH;
-    if (Math.hypot(dx, dy) > 4) {
-      h.dirX = dx;
-      h.dirY = dy;
-      const little = landmarks[17];
-      if (little) {
-        h.flip = handFlip(dx, dy, (1 - mcp.x) * VW, mcp.y * VH,
-                          (1 - little.x) * VW, little.y * VH);
-      }
-    }
+    /* Orientation is no longer computed: the pointer is always drawn upright.
+       The angle a fingertip implies swings several degrees on a one-pixel
+       landmark wobble, so the hand rocked constantly, and the little-finger
+       test could mirror the whole hand mid-reach. Neither moved the cursor —
+       the cursor IS the fingertip — so both were noise. This also saves an
+       atan2 and a cross product every frame. */
     /* Depth from the same palm measurement the gain uses, rather than a wrist
        span in virtual units — that one changed meaning with the field's
        aspect ratio and collapsed whenever the palm tilted. */
@@ -585,9 +564,6 @@ export default function LadybugGame() {
         const h = handTargetRef.current;
         h.x = h.vx * kx;
         h.y = h.vy * ky;
-        // the angle has to be measured in pixels: the field scales x and y differently
-        h.rot = steadyAngle(h.rot,
-          (Math.atan2(h.dirY * ky, h.dirX * kx) * 180) / Math.PI + 90);
         h.scale = (r.height / VH) * 0.6 * h.depth;
         followHand(h, handShownRef.current, node);
       }
@@ -625,44 +601,66 @@ export default function LadybugGame() {
   /* ═════════════════════════════════════════════════════════════════════════
      GAME LOOP — the only place per-frame work happens.
      ═════════════════════════════════════════════════════════════════════════ */
-  const finishGame = useCallback(() => {
+  /* @param {string} reason  FINISH.COMPLETE when the ladybug reached the leaf,
+     FINISH.ENDED when the learner pressed "End game". Only the report's title
+     and the `endedEarly` flag depend on it — the metrics are the same either
+     way, computed from whatever actually happened. */
+  const finishGame = useCallback((reason = FINISH.COMPLETE) => {
     cancelAnimationFrame(rafRef.current);
-    const carryMs = Math.max(1, carryMsRef.current);
-    const accuracy = clamp01(onPathMsRef.current / carryMs) * 100;
 
-    // Smoothness: low mean jerk → high score. Normalised against a generous cap.
+    /* EVERY SUB-SCORE IS `null` WHEN IT HAS NO DATA — see src/utils/otScore.js.
+       These used to default high on an empty round: no jerk samples meant zero
+       jerk (smoothness 100), totalMs floored to 1ms beat any reference time
+       (speed 100), and no drops meant a perfect grip (100). Ending the round
+       before touching the ladybug therefore reported OT 60 beside "0 score,
+       0% path accuracy". Never having held it is not a perfect grip. */
+    const everGrabbed = firstGrabAtRef.current != null;
+    const carriedMs = carryMsRef.current;
+
+    // Path accuracy — only means something once the bug has been carried.
+    const accuracy = carriedMs > 0
+      ? clamp01(onPathMsRef.current / carriedMs) * 100
+      : null;
+
+    // Smoothness: low mean jerk → high score, against a generous cap.
     const jerks = jerkSamplesRef.current;
-    const meanJerk = jerks.length
-      ? jerks.reduce((a, b) => a + b, 0) / jerks.length
-      : 0;
-    const smoothness = clamp01(1 - meanJerk / 2600) * 100;
+    const smoothness = jerks.length
+      ? clamp01(1 - (jerks.reduce((a, b) => a + b, 0) / jerks.length) / 2600) * 100
+      : null;
 
-    // Speed: measured against a per-level reference time.
-    const totalMs = Math.max(1, totalMsRef.current);
-    const speedScore = clamp01(cfg.refTimeMs / totalMs) * 100;
+    // Speed: against a per-level reference time. Meaningless if the run never
+    // started — a zero-length round would otherwise "beat" every reference.
+    const totalMs = totalMsRef.current;
+    const speedScore = (everGrabbed && totalMs > 0)
+      ? clamp01(cfg.refTimeMs / totalMs) * 100
+      : null;
 
-    // Grip: how well the child kept hold of the ladybug.
-    const grip = clamp01(1 - dropsRef.current / 6) * 100;
+    // Grip: how well the child kept hold. Undefined if they never took hold.
+    const grip = everGrabbed ? clamp01(1 - dropsRef.current / 6) * 100 : null;
 
-    const composite = Math.round(
-      accuracy * 0.40 + smoothness * 0.25 + speedScore * 0.20 + grip * 0.15
-    );
+    const composite = otComposite([
+      [accuracy,   0.40],
+      [smoothness, 0.25],
+      [speedScore, 0.20],
+      [grip,       0.15],
+    ]);
 
     const reactionMs = firstGrabAtRef.current == null
       ? null
       : firstGrabAtRef.current - startedAtRef.current;
 
     const payload = {
+      endedEarly: reason === FINISH.ENDED,
       score: Math.round(scoreRef.current),
-      accuracy: Math.round(accuracy),
-      smoothness: Math.round(smoothness),
-      speedScore: Math.round(speedScore),
-      grip: Math.round(grip),
+      accuracy: otRound(accuracy),
+      smoothness: otRound(smoothness),
+      speedScore: otRound(speedScore),
+      grip: otRound(grip),
       drops: dropsRef.current,
       overspeeds: overspeedsRef.current,
       composite,
       reactionMs: reactionMs == null ? null : Math.round(reactionMs),
-      movementMs: Math.round(carryMs),
+      movementMs: Math.round(carriedMs),
       completionSec: totalMs / 1000,
       pauses: pauseCountRef.current,
       pauseMs: Math.round(pauseMsRef.current),
@@ -981,53 +979,103 @@ export default function LadybugGame() {
   /* ═════════════════════════════════════════════════════════════════════════
      COUNTDOWN
      ═════════════════════════════════════════════════════════════════════════ */
+  /* ── Countdown ─────────────────────────────────────────────────────────
+     Client feedback: "Occasionally, the counter becomes stuck."
+
+     Two causes, both removed here:
+
+     1. The old effect ran a `setInterval` and listed `soundEnabled` in its
+        dependency array. Toggling sound — or any re-render that changed one of
+        those identities — tore the interval down and restarted the countdown
+        from 3. Repeat that and it never reaches 0. This effect now depends
+        ONLY on `gamePhase`; everything else is read through an always-current
+        ref.
+
+     2. `setInterval` counts ticks, so a throttled tab or a dropped frame under
+        camera load simply loses ticks and the number stops moving. The
+        countdown is now DEADLINE-based: remaining seconds are computed from
+        the clock each frame, so it self-corrects after any stall.
+
+     A belt-and-braces timeout guarantees the overlay can never be left on
+     screen forever, even if requestAnimationFrame never runs again. */
+  const soundEnabledRef = useRef(soundEnabled);
+  soundEnabledRef.current = soundEnabled;
+
+  const beginRunRef = useRef(null);
+  beginRunRef.current = () => {
+    if (soundEnabledRef.current) soundManager.playCountdownGo();
+    // Reset every accumulator for a clean run.
+    lastTsRef.current = 0;
+    scoreRef.current = 0;
+    onPathMsRef.current = 0;
+    carryMsRef.current = 0;
+    totalMsRef.current = 0;
+    firstGrabAtRef.current = null;
+    dropsRef.current = 0;
+    overspeedsRef.current = 0;
+    overSinceRef.current = null;
+    lastMoveRef.current = null;
+    headingRef.current = null;
+    dirChangesRef.current = 0;
+    pauseCountRef.current = 0;
+    pauseMsRef.current = 0;
+    slowSinceRef.current = null;
+    jerkSamplesRef.current = [];
+    trailRef.current = [];
+    onPathRef.current = true;
+    grabbedRef.current = false;
+    tMaxRef.current = 0;
+    offSinceRef.current = null;
+    returningRef.current = false;
+    bugPosRef.current = pathPointAt(0, cfg);
+    bugAngleRef.current = 0;
+    if (bugRef.current) bugRef.current.classList.remove('lb-bug-returning');
+    paintBug();
+    setUiGrabbed(false);
+    setUiEverGrabbed(false);
+    startedAtRef.current = performance.now();
+    setGamePhase('playing');
+  };
+
   useEffect(() => {
     if (gamePhase !== 'countdown') return;
+
     setCountdown(COUNTDOWN_SECONDS);
-    let n = COUNTDOWN_SECONDS;
-    if (soundEnabled) { soundManager.init(); soundManager.playCountdown(); }
-    const id = setInterval(() => {
-      n -= 1;
-      if (n <= 0) {
-        clearInterval(id);
-        if (soundEnabled) soundManager.playCountdownGo();
-        // Reset every accumulator for a clean run.
-        lastTsRef.current = 0;
-        scoreRef.current = 0;
-        onPathMsRef.current = 0;
-        carryMsRef.current = 0;
-        totalMsRef.current = 0;
-        firstGrabAtRef.current = null;
-        dropsRef.current = 0;
-        overspeedsRef.current = 0;
-        overSinceRef.current = null;
-        lastMoveRef.current = null;
-        headingRef.current = null;
-        dirChangesRef.current = 0;
-        pauseCountRef.current = 0;
-        pauseMsRef.current = 0;
-        slowSinceRef.current = null;
-        jerkSamplesRef.current = [];
-        trailRef.current = [];
-        onPathRef.current = true;
-        grabbedRef.current = false;
-        tMaxRef.current = 0;
-        offSinceRef.current = null;
-        returningRef.current = false;
-        bugPosRef.current = pathPointAt(0, cfg);
-        bugAngleRef.current = 0;
-        if (bugRef.current) bugRef.current.classList.remove('lb-bug-returning');
-        paintBug();
-        setUiGrabbed(false);
-        setUiEverGrabbed(false);
-        startedAtRef.current = performance.now();
-        setGamePhase('playing');
-      } else {
-        setCountdown(n);
-        if (soundEnabled) soundManager.playCountdown();
+    if (soundEnabledRef.current) { soundManager.init(); soundManager.playCountdown(); }
+
+    const deadline = Date.now() + COUNTDOWN_SECONDS * 1000;
+    let shown = COUNTDOWN_SECONDS;
+    let finished = false;
+    let raf = 0;
+
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      beginRunRef.current?.();
+    };
+
+    const tick = () => {
+      if (finished) return;
+      const left = Math.ceil((deadline - Date.now()) / 1000);
+      if (left <= 0) { finish(); return; }
+      if (left !== shown) {
+        shown = left;
+        setCountdown(left);
+        if (soundEnabledRef.current) soundManager.playCountdown();
       }
-    }, 1000);
-    return () => clearInterval(id);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+
+    /* rAF is paused entirely while the tab is hidden. This timer still fires on
+       return and ends the countdown, so it can never strand the learner. */
+    const safety = setTimeout(finish, COUNTDOWN_SECONDS * 1000 + 1500);
+
+    return () => {
+      finished = true;
+      cancelAnimationFrame(raf);
+      clearTimeout(safety);
+    };
   }, [gamePhase]);
 
   /* Place the bug at the path start on mount / level change. */
@@ -1101,6 +1149,21 @@ export default function LadybugGame() {
     if (soundEnabled) { soundManager.init(); soundManager.playClick(); }
     setGamePhase('countdown');
   }, [soundEnabled]);
+
+  /* ── "How to play", available DURING the game ───────────────────────────
+     Client feedback: "there should be an optional provision for user to see
+     [the instructions] again if they wish to." The rules are shown once
+     automatically on the first visit; this button brings the exact same modal
+     back at any point, and pauses the round while it is open. */
+  const openHelp = useCallback(() => {
+    if (gamePhase === 'playing') setIsPaused(true);
+    setShowHelp(true);
+  }, [gamePhase]);
+
+  const closeHelp = useCallback(() => {
+    setShowHelp(false);
+    if (gamePhase === 'playing') setIsPaused(false);
+  }, [gamePhase]);
 
   const togglePause = useCallback(() => {
     if (gamePhase !== 'playing') return;
@@ -1201,6 +1264,21 @@ export default function LadybugGame() {
         </div>
 
         <div className="lb-header-right">
+          {/* End the round early and go straight to the report — the same
+              control LetterQuest has. It runs the game's normal finish
+              routine, so the report is built exactly as it is at the end of a
+              full round, from whatever has been done so far. */}
+          <EndGameControl
+            className="lb-icon-btn gs-end-btn"
+            compact
+            disabled={gamePhase !== 'playing'}
+            onAskingChange={(asking) => { setEndAsking(asking); setIsPaused(asking); }}
+            onConfirm={() => { setIsPaused(false); finishRef.current?.('ended'); }}
+          />
+          <button className="lb-icon-btn" onClick={openHelp}
+            title="How to play" aria-label="How to play">
+            <HelpCircle size={20} />
+          </button>
           <button className="lb-icon-btn" onClick={switchMode}
             title={mode === 'camera' ? 'Switch to touch' : 'Switch to camera'}>
             {mode === 'camera' ? <Hand size={20} /> : <MousePointer2 size={20} />}
@@ -1315,8 +1393,13 @@ export default function LadybugGame() {
           <RulesModal key="rules" level={level} mode={mode} onStart={startFromRules} />
         )}
 
+        {/* Same modal, reopened on demand from the header's "?" button. */}
+        {showHelp && gamePhase !== 'rules' && (
+          <RulesModal key="help" level={level} mode={mode} onStart={closeHelp} resume />
+        )}
+
         {gamePhase === 'countdown' && (
-          <motion.div key="cd" className="lb-overlay lb-overlay-soft"
+          <motion.div key="cd" className="lb-overlay lb-overlay-soft lb-overlay-center"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div
               key={countdown}
@@ -1332,7 +1415,9 @@ export default function LadybugGame() {
           </motion.div>
         )}
 
-        {isPaused && gamePhase === 'playing' && (
+        {/* `!endAsking`: the end-game dialog pauses the round too, and without
+            this the pause card rendered underneath it — two cards at once. */}
+        {isPaused && !endAsking && gamePhase === 'playing' && (
           <motion.div key="pause" className="lb-overlay"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="lb-pause-card"
@@ -1369,25 +1454,38 @@ export default function LadybugGame() {
                 ))}
               </div>
 
+              {/* An honest heading: "Level complete!" over a round the learner
+                  stopped early (or never started) is a claim the report cannot
+                  support. */}
               <h2 className="lb-results-title">
-                <CheckCircle size={26} /> Level complete!
+                <CheckCircle size={26} />{' '}
+                {results.endedEarly ? 'Session ended' : 'Level complete!'}
               </h2>
               <p className="lb-results-sub">
                 {cfg.emoji} {cfg.label} · {mode === 'camera' ? 'Camera' : 'Touch'}
               </p>
 
-              <div className="lb-perf-ring" style={{ '--pct': results.composite }}>
-                <div className="lb-perf-inner">
-                  <span className="lb-perf-val">{results.composite}</span>
-                  <span className="lb-perf-lbl">OT Score</span>
+              {/* No composite means nothing was measured — show a plain note
+                  rather than a ring around a number that does not exist. */}
+              {results.composite != null ? (
+                <div className="lb-perf-ring" style={{ '--pct': results.composite }}>
+                  <div className="lb-perf-inner">
+                    <span className="lb-perf-val">{results.composite}</span>
+                    <span className="lb-perf-lbl">OT Score</span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="tt-ot-none">
+                  No OT score for this session — the round ended before the
+                  ladybug was picked up, so there is nothing to measure.
+                </div>
+              )}
 
               <div className="lb-metrics">
                 <Metric icon={<Star size={16} />}       label="Score"             value={results.score} />
-                <Metric icon={<Target size={16} />}     label="Path Accuracy"     value={`${results.accuracy}%`} />
-                <Metric icon={<Activity size={16} />}   label="Smoothness"        value={`${results.smoothness}%`} />
-                <Metric icon={<Hand size={16} />}       label="Grip"              value={`${results.grip}%`} />
+                <Metric icon={<Target size={16} />}     label="Path Accuracy"     value={otPct(results.accuracy)} />
+                <Metric icon={<Activity size={16} />}   label="Smoothness"        value={otPct(results.smoothness)} />
+                <Metric icon={<Hand size={16} />}       label="Grip"              value={otPct(results.grip)} />
                 <Metric icon={<MousePointer2 size={16} />} label="Drops"          value={results.drops} />
                 <Metric icon={<Zap size={16} />}        label="Reaction Time"
                   value={results.reactionMs == null ? '—' : `${(results.reactionMs / 1000).toFixed(2)}s`} />
@@ -1395,7 +1493,7 @@ export default function LadybugGame() {
                 <Metric icon={<Pause size={16} />}      label="Pauses"
                   value={`${results.pauses} · ${(results.pauseMs / 1000).toFixed(1)}s`} />
                 <Metric icon={<RotateCcw size={16} />}  label="Direction Changes" value={results.directionChanges} />
-                <Metric icon={<TrendingUp size={16} />} label="Speed Score"       value={`${results.speedScore}%`} />
+                <Metric icon={<TrendingUp size={16} />} label="Speed Score"       value={otPct(results.speedScore)} />
               </div>
 
               <div className="lb-results-actions">

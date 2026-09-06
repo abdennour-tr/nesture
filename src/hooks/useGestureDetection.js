@@ -35,6 +35,11 @@ export const GESTURE_DEFS = {
   two_fingers: { thumb: 'down', index: 'up',   middle: 'up',   ring: 'down', pinky: 'down' },
   open_hand:   { thumb: 'up',   index: 'up',   middle: 'up',   ring: 'up',   pinky: 'up'   },
   closed_fist: { thumb: 'down', index: 'down', middle: 'down', ring: 'down', pinky: 'down' },
+  // ── Added so Medium has its own distinct, finer-motor set (see LEVELS) ──
+  three_fingers: { thumb: 'down', index: 'up',   middle: 'up',   ring: 'up',   pinky: 'down' },
+  rock:          { thumb: 'down', index: 'up',   middle: 'down', ring: 'down', pinky: 'up'   },
+  pinky_up:      { thumb: 'down', index: 'down', middle: 'down', ring: 'down', pinky: 'up'   },
+  call_me:       { thumb: 'up',   index: 'down', middle: 'down', ring: 'down', pinky: 'up'   },
   // OK and Pinch need special handling — see classifyGesture()
   ok_sign:     { thumb: 'special', index: 'special', middle: 'up', ring: 'up', pinky: 'up'   },
   pinch:       { thumb: 'special', index: 'special', middle: 'any', ring: 'any', pinky: 'any' },
@@ -49,34 +54,96 @@ export const GESTURE_INFO = {
   closed_fist: { emoji: '✊', name: 'Closed Fist', color: '#EF4444' },
   ok_sign:     { emoji: '👌', name: 'OK Sign',     color: '#EC4899' },
   pinch:       { emoji: '🤏', name: 'Pinch',       color: '#14B8A6' },
+  three_fingers: { emoji: '🤟', name: 'Three Fingers', color: '#6366F1' },
+  rock:          { emoji: '🤘', name: 'Rock Horns',    color: '#A855F7' },
+  pinky_up:      { emoji: '🖖', name: 'Pinky Only',    color: '#0EA5E9' },
+  call_me:       { emoji: '🤙', name: 'Call Me',       color: '#F97316' },
 };
 
 // ── Level definitions ──────────────────────────────────────────────────────
+/**
+ * Client feedback: "Magic finger copy -> what is the difference between level 1
+ * and 2? as i see some movements repeating in both -> like open hand, thumbs
+ * up, two fingers?"
+ *
+ * That was real: Level 2's `allGestures` re-used three of Level 1's gestures.
+ * The sets are now DISJOINT and the difficulty comes from three independent
+ * dials, so the progression is obvious to a learner and to a therapist:
+ *
+ *   Easy   — 4 gross, whole-hand shapes, held one at a time, generous timer.
+ *   Medium — 5 completely different fine-motor shapes, shorter hold + timer.
+ *   Hard   — sequences of 3 shapes from both sets, fastest timer.
+ *
+ * Invariant enforced by the assertion below: no gesture appears in both
+ * Easy and Medium.
+ */
 export const LEVELS = {
   1: {
-    label: 'Beginner',
-    gestures: ['thumbs_up', 'one_finger', 'two_fingers', 'open_hand', 'closed_fist'],
+    label: 'Easy',
+    key: 'easy',
+    // Gross motor: the whole hand moves, no individual finger isolation.
+    gestures: ['open_hand', 'closed_fist', 'thumbs_up', 'one_finger'],
     challengeCount: 5,
     isSequence: false,
+    holdMs: 1200,        // how long the shape must be held to score
+    timeLimitMs: 15000,  // per challenge
+    minAccuracy: 70,
   },
   2: {
-    label: 'Intermediate',
-    gestures: ['ok_sign', 'pinch'],
-    // Also include some level 1 gestures for variety
-    allGestures: ['ok_sign', 'pinch', 'thumbs_up', 'two_fingers', 'open_hand'],
-    challengeCount: 5,
+    label: 'Medium',
+    key: 'medium',
+    // Fine motor: finger isolation and thumb–finger opposition.
+    // NONE of these appear in Level 1.
+    gestures: ['two_fingers', 'three_fingers', 'ok_sign', 'pinch', 'rock'],
+    challengeCount: 6,
     isSequence: false,
+    holdMs: 900,
+    timeLimitMs: 11000,
+    minAccuracy: 80,
   },
   3: {
-    label: 'Expert',
+    label: 'Hard',
+    key: 'hard',
+    // Sequences — memory + speed on top of the shapes already learned.
     sequences: [
-      ['two_fingers', 'closed_fist', 'open_hand'],
-      ['thumbs_up', 'two_fingers', 'ok_sign'],
+      ['open_hand', 'closed_fist', 'thumbs_up'],
+      ['two_fingers', 'ok_sign', 'closed_fist'],
+      ['pinch', 'rock', 'open_hand'],
+      ['one_finger', 'three_fingers', 'pinch'],
     ],
-    challengeCount: 2, // 2 sequences, each with 3 gestures
+    challengeCount: 3,   // 3 sequences of 3 gestures each
     isSequence: true,
+    holdMs: 650,
+    timeLimitMs: 9000,   // for the whole sequence
+    minAccuracy: 80,
   },
 };
+
+/* Guard rail: fail loudly in development if the level sets ever overlap again. */
+if (process.env.NODE_ENV !== 'production') {
+  const overlap = LEVELS[1].gestures.filter((g) => LEVELS[2].gestures.includes(g));
+  if (overlap.length) {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[useGestureDetection] Level 1 and Level 2 share gestures:', overlap,
+      '— levels must feel different. Fix LEVELS in useGestureDetection.js.'
+    );
+  }
+}
+
+/** Accepts 1|2|3 or 'easy'|'medium'|'hard'. */
+export function getLevelConfig(level) {
+  const map = { easy: 1, medium: 2, hard: 3 };
+  const n = map[String(level).toLowerCase()] ?? Number(level);
+  return LEVELS[n] || LEVELS[1];
+}
+
+/** All gestures a level can ask for (sequences flattened). */
+export function gesturesForLevel(level) {
+  const cfg = getLevelConfig(level);
+  if (cfg.isSequence) return [...new Set(cfg.sequences.flat())];
+  return cfg.gestures;
+}
 
 // ── Utility: Euclidean distance between two landmarks ──────────────────────
 function dist(a, b) {
@@ -164,7 +231,13 @@ export function classifyGesture(lm, fingerStates) {
 
   // ── Pattern matching for simple gestures ─────────────────────────────────
   // Check each gesture definition against current finger states
-  const simpleGestures = ['thumbs_up', 'one_finger', 'two_fingers', 'open_hand', 'closed_fist'];
+  // Most specific patterns first so e.g. `rock` is not swallowed by a looser
+  // match. Every non-special gesture in GESTURE_DEFS must be listed here.
+  const simpleGestures = [
+    'open_hand', 'closed_fist',
+    'three_fingers', 'two_fingers', 'one_finger',
+    'rock', 'call_me', 'pinky_up', 'thumbs_up',
+  ];
 
   for (const gestureKey of simpleGestures) {
     const def = GESTURE_DEFS[gestureKey];

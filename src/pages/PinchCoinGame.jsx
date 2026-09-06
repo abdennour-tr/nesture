@@ -24,15 +24,19 @@
  * Route (unchanged): /play/pinch-coin-game?level=1|2|3&mode=camera|touch
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { COIN_SIZE, COIN_TARGET_COUNT, PINCH_TOLERANCE } from './pinchCoinLevels';
+import { otComposite, otRound, otPct, FINISH } from '../utils/otScore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Home, Pause, Play, RotateCcw, Clock, Hand, MousePointer2,
   Volume2, VolumeX, Target, Activity, Zap, TrendingUp, CheckCircle,
-  Gauge, Move, Crosshair, Info,
+  Gauge, Move, Crosshair, Info, HelpCircle,
 } from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
+import GameRules from '../components/game/GameRules';
+import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/PinchCoinGame.css';
@@ -47,27 +51,43 @@ const TABLE_Y   = 430;   // top of the wooden surface in the backdrop
 const SLOT_X    = 700;   // the coin slot — the real release target
 const SLOT_Y    = 260;
 
-/* ── Difficulty (level ids stay numeric: the difficulty page sends 1|2|3) ── */
+/* ── Difficulty (level ids stay numeric: the difficulty page sends 1|2|3) ──
+   Client feedback: "it does say coin size is bigger to smaller across levels,
+   but i thought they were same size, no?"
+
+   She was right to doubt it. The old radii were 46 / 37 / 29 px in virtual
+   space — a 1.6× spread that, once scaled down to fit a laptop viewport, was
+   almost invisible. The sizes now come from pinchCoinLevels.js (which the
+   level-select cards ALSO read, so the preview always matches reality) and
+   span 2.4× from Easy to Hard, which reads instantly.
+
+   Diameters: Easy 160px · Medium 105px · Hard 66px. */
 const LEVELS = {
   1: {
-    id: 1, label: 'Easy', emoji: '🌱', color: '#38A169',
-    pinchOn: 0.095, coinR: 46, coinsToCollect: 5,
-    slotRadius: 165, starThresholds: [1, 3, 5],
+    id: 1, key: 'easy', label: 'Easy', emoji: '🌱', color: '#10B981',
+    pinchOn: PINCH_TOLERANCE.easy, coinR: COIN_SIZE.easy / 2,
+    coinsToCollect: COIN_TARGET_COUNT.easy,
+    slotRadius: 175, starThresholds: [1, 3, 5],
   },
   2: {
-    id: 2, label: 'Medium', emoji: '⚡', color: '#DD6B20',
-    pinchOn: 0.072, coinR: 37, coinsToCollect: 10,
+    id: 2, key: 'medium', label: 'Medium', emoji: '⚡', color: '#F59E0B',
+    pinchOn: PINCH_TOLERANCE.medium, coinR: COIN_SIZE.medium / 2,
+    coinsToCollect: COIN_TARGET_COUNT.medium,
     slotRadius: 130, starThresholds: [3, 6, 10],
   },
   3: {
-    id: 3, label: 'Hard', emoji: '🔥', color: '#E53E3E',
-    pinchOn: 0.055, coinR: 29, coinsToCollect: 15,
+    id: 3, key: 'hard', label: 'Hard', emoji: '🔥', color: '#EF4444',
+    pinchOn: PINCH_TOLERANCE.hard, coinR: COIN_SIZE.hard / 2,
+    coinsToCollect: COIN_TARGET_COUNT.hard,
     slotRadius: 100, starThresholds: [5, 10, 15],
   },
 };
 
 /* ── Tracking / scoring constants ───────────────────────────────────────── */
 const EMA_ALPHA        = 0.45;   // landmark smoothing
+/* Board units (VW = 1000) below which a movement is treated as hand tremor
+   rather than intent, so a pointer held on the coin stays put. */
+const STILL_EPS        = 2.5;
 const PINCH_MARGIN     = 0.03;   // hysteresis: open threshold = pinchOn + this
 /* A single noisy frame above the threshold must never drop the coin — the hand
    model jitters, and a child who is holding steadily would be punished for the
@@ -361,55 +381,24 @@ const RULES = [
   { icon: '⏸️', text: 'You can pause at any time.' },
 ];
 
-function RulesModal({ cfg, mode, onStart }) {
+/* `resume` = opened from the in-game "How to play" button rather than shown
+   automatically before the first round, so the primary button returns to the
+   game instead of starting one. */
+/* Thin wrapper over the shared rules card — see GameRules.jsx. */
+function RulesModal({ cfg, mode, onStart, resume = false }) {
   return (
-    <motion.div className="pcg-overlay"
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-      <motion.div className="pcg-card pcg-rules-card"
-        initial={{ scale: 0.88, y: 30, opacity: 0 }}
-        animate={{ scale: 1, y: 0, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        transition={{ type: 'spring', stiffness: 240, damping: 22 }}>
-        <div className="pcg-rules-head">
-          <div className="pcg-rules-badge">
-            <svg viewBox="0 0 100 100" width="46" height="46">
-              <circle cx="50" cy="50" r="44" fill="#FCD34D" stroke="#B8790A" strokeWidth="3" />
-              <path d="M50 26 L57.6 42.4 L75.5 44.6 L62.4 56.9 L65.9 74.6 L50 65.8 L34.1 74.6 L37.6 56.9 L24.5 44.6 L42.4 42.4 Z"
-                fill="#FDE68A" stroke="#B8790A" strokeWidth="2.4" strokeLinejoin="round" />
-            </svg>
-          </div>
-          <div>
-            <h2 className="pcg-rules-title">Pinch the Coin</h2>
-            <p className="pcg-rules-sub">
-              {cfg.emoji} {cfg.label} &nbsp;·&nbsp; {mode === 'camera' ? 'Camera mode' : 'Touch mode'}
-              &nbsp;·&nbsp; {cfg.coinsToCollect} coins
-            </p>
-          </div>
-        </div>
-
-        <ul className="pcg-rules-list">
-          {RULES.map((r, i) => (
-            <motion.li key={i}
-              initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.12 + i * 0.07 }}>
-              <span className="pcg-rule-icon">{r.icon}</span>
-              <span>{r.text}</span>
-            </motion.li>
-          ))}
-        </ul>
-
-        {mode === 'touch' && (
-          <p className="pcg-rules-tip">
-            💡 In touch mode, press and hold on the coin to pick it up, then lift
-            your finger over the slot to drop it.
-          </p>
-        )}
-
-        <button className="pcg-btn pcg-btn-primary pcg-rules-start" onClick={onStart}>
-          <Play size={20} /> Let&apos;s go! 🪙
-        </button>
-      </motion.div>
-    </motion.div>
+    <GameRules
+      emoji="🪙"
+      title="Pinch the Coin"
+      subtitle={`${cfg.emoji} ${cfg.label} · ${mode === 'camera' ? 'Camera mode' : 'Touch mode'} · ${cfg.coinsToCollect} coins`}
+      rules={RULES}
+      note={mode === 'touch'
+        ? (<><strong>No pinching needed in this mode.</strong> On a laptop, click and hold the coin with the mouse. On a touch screen, press and hold it with <strong>one</strong> finger. Either way, drag it to the piggy bank and let go. Pinching in the air is only used in Camera mode.</>)
+        : null}
+      onStart={onStart}
+      resume={resume}
+      startLabel={resume ? 'Back to the game' : "Let's go! 🪙"}
+    />
   );
 }
 
@@ -437,6 +426,10 @@ export default function PinchCoinGame() {
     sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules'
   );
   const [isPaused, setIsPaused] = useState(false);
+  /* True while the end-game confirmation is on screen. The round is paused
+     then, but the PAUSE CARD must stay hidden so only one card shows. */
+  const [endAsking, setEndAsking] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);   // "How to play", re-openable mid-game
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
 
   /* ── Throttled / discrete UI state ── */
@@ -501,9 +494,21 @@ export default function PinchCoinGame() {
   const trackingEnabled = mode === 'camera' && (gamePhase === 'countdown' || gamePhase === 'playing');
 
   /* Keep the existing 3-argument call signature of the hook. */
-  const { landmarks, isTracking, isSimulationMode } = useHandTracking(
+  const { landmarks, isTracking, isSimulationMode, releaseCamera } = useHandTracking(
     videoRef, canvasRef, trackingEnabled
   );
+
+  /* ── Turn the camera off when the round ends ────────────────────────────
+     Client feedback: "when the game finish the camera need to turn off."
+
+     `trackingEnabled` already goes false on the results screen, and the hook's
+     cleanup now stops the MediaStream tracks (MediaPipe's own `Camera.stop()`
+     does not, which is why the webcam light stayed on). This call is the
+     explicit belt-and-braces version so the camera is released the instant the
+     round ends, on every exit path. */
+  useEffect(() => {
+    if (gamePhase === 'results') releaseCamera();
+  }, [gamePhase, releaseCamera]);
 
   const pinchOff = cfg.pinchOn + PINCH_MARGIN;
 
@@ -525,9 +530,21 @@ export default function PinchCoinGame() {
     const ix = landmarks[8];
     if (!th || !ix) return;
 
-    const smooth = (prev, nx, ny) => (prev
-      ? { x: prev.x + (nx - prev.x) * EMA_ALPHA, y: prev.y + (ny - prev.y) * EMA_ALPHA }
-      : { x: nx, y: ny });
+    /* Plain EMA lets a fifth of the raw landmark jitter through every frame,
+       so a hand held still on the coin never quite stopped moving. STILL_EPS is
+       a micro-deadband in board units: movement smaller than it does not move
+       the point at all, and it ramps smoothly to full response just above, so
+       there is no jump when the child starts moving again.
+       (The same idea as `stillEps` in handPointerFilter.js, which this game
+       does not use — its thumb/index geometry has to stay raw for the pinch
+       aperture below.) */
+    const smooth = (prev, nx, ny) => {
+      if (!prev) return { x: nx, y: ny };
+      const d = Math.hypot(nx - prev.x, ny - prev.y);
+      const hold = d <= STILL_EPS ? 0 : Math.min(1, (d - STILL_EPS) / STILL_EPS);
+      const a = EMA_ALPHA * hold;
+      return { x: prev.x + (nx - prev.x) * a, y: prev.y + (ny - prev.y) * a };
+    };
 
     thumbRef.current = smooth(thumbRef.current, (1 - th.x) * VW, th.y * VH);
     indexRef.current = smooth(indexRef.current, (1 - ix.x) * VW, ix.y * VH);
@@ -606,49 +623,65 @@ export default function PinchCoinGame() {
   /* ═════════════════════════════════════════════════════════════════════════
      RESULTS
      ═════════════════════════════════════════════════════════════════════════ */
-  const finishGame = useCallback(() => {
+  /* @param {string} reason  FINISH.COMPLETE when every coin was banked,
+     FINISH.ENDED when the learner pressed "End game". */
+  const finishGame = useCallback((reason = FINISH.COMPLETE) => {
     cancelAnimationFrame(rafRef.current);
 
-    const releaseAccuracy = mean(releaseAccRef.current) * 100;
+    /* EVERY SUB-SCORE IS `null` WHEN IT HAS NO DATA — see src/utils/otScore.js.
+       On an empty round these defaulted high: with fewer than two aperture
+       samples there is no wobble to measure, so `steadiness` came out at 1 and
+       Pinch Stability reported 40% for a hand that never pinched anything.
+       An empty mean() is 0, which is just as wrong in the other direction:
+       0% reads as a failure the child never had the chance to earn. */
+    const attemptsMade = attemptsRef.current;
+    const hasReleases  = releaseAccRef.current.length > 0;
+
+    const releaseAccuracy = hasReleases ? mean(releaseAccRef.current) * 100 : null;
 
     /* Pinch Stability — see the file header. Two honest components:
        how much of the carry kept the grip closed, and how little the aperture
        wobbled while it was closed. No force is claimed. */
-    const closedShare = holdFramesRef.current > 0
-      ? closedFramesRef.current / holdFramesRef.current
-      : 0;
     const ap = holdAperturesRef.current;
-    let wobble = 0;
-    if (ap.length > 1) {
+    let stability = null;
+    if (holdFramesRef.current > 0 && ap.length > 1) {
+      const closedShare = closedFramesRef.current / holdFramesRef.current;
       const m = mean(ap);
-      wobble = Math.sqrt(mean(ap.map((v) => (v - m) ** 2)));
+      const wobble = Math.sqrt(mean(ap.map((v) => (v - m) ** 2)));
+      // With only closed-grip samples, a standard deviation of 0.012 normalised
+      // units is already a visibly shaky hold.
+      const steadiness = clamp01(1 - wobble / 0.012);
+      stability = clamp01(closedShare * 0.6 + steadiness * 0.4) * 100;
     }
-    // With only closed-grip samples, a standard deviation of 0.012 normalised
-    // units is already a visibly shaky hold.
-    const steadiness = clamp01(1 - wobble / 0.012);
-    const stability = clamp01(closedShare * 0.6 + steadiness * 0.4) * 100;
 
     // Trajectory efficiency: direct distance / distance actually travelled,
     // averaged over the coins that were successfully banked.
-    const trajectoryEff = mean(trajectoryScoreRef.current) * 100;
-    const smoothness = clamp01(1 - mean(jerkRef.current) / 2600) * 100;
+    const trajectoryEff = trajectoryScoreRef.current.length
+      ? mean(trajectoryScoreRef.current) * 100 : null;
+    const smoothness = jerkRef.current.length
+      ? clamp01(1 - mean(jerkRef.current) / 2600) * 100 : null;
 
-    const dragSpeed = mean(speedsRef.current);
-    const speedScore = clamp01(dragSpeed / REF_DRAG_SPEED) * 100;
+    const dragSpeed = speedsRef.current.length ? mean(speedsRef.current) : null;
+    const speedScore = dragSpeed == null ? null : clamp01(dragSpeed / REF_DRAG_SPEED) * 100;
 
-    const attempts = Math.max(1, attemptsRef.current);
-    const successRate = (collectedRef.current / attempts) * 100;
+    // Success rate is only a rate once something was attempted.
+    const successRate = attemptsMade > 0
+      ? (collectedRef.current / attemptsMade) * 100 : null;
 
-    const composite = Math.round(
-      releaseAccuracy * 0.25 + stability * 0.25 + trajectoryEff * 0.20 +
-      successRate * 0.20 + speedScore * 0.10
-    );
+    const composite = otComposite([
+      [releaseAccuracy, 0.25],
+      [stability,       0.25],
+      [trajectoryEff,   0.20],
+      [successRate,     0.20],
+      [speedScore,      0.10],
+    ]);
 
     const stars = cfg.starThresholds.reduce(
       (acc, t) => acc + (collectedRef.current >= t ? 1 : 0), 0
     );
 
     setResults({
+      endedEarly: reason === FINISH.ENDED,
       collected: collectedRef.current,
       target: cfg.coinsToCollect,
       attempts: attemptsRef.current,
@@ -656,14 +689,14 @@ export default function PinchCoinGame() {
       onsetMs: onsetsRef.current.length ? Math.round(mean(onsetsRef.current)) : null,
       aperture: aperturesRef.current.length
         ? Math.round(mean(aperturesRef.current) * 1000) / 1000 : null,
-      stability: Math.round(stability),
-      trajectory: Math.round(trajectoryEff),
-      smoothness: Math.round(smoothness),
-      dragSpeed: Math.round(dragSpeed),
+      stability: otRound(stability),
+      trajectory: otRound(trajectoryEff),
+      smoothness: otRound(smoothness),
+      dragSpeed: otRound(dragSpeed),
       pauses: pauseCountRef.current,
       pauseMs: Math.round(pauseMsRef.current),
-      releaseAccuracy: Math.round(releaseAccuracy),
-      successRate: Math.round(successRate),
+      releaseAccuracy: otRound(releaseAccuracy),
+      successRate: otRound(successRate),
       totalSec: elapsedRef.current / 1000,
       stars,
       composite,
@@ -1088,6 +1121,21 @@ export default function PinchCoinGame() {
     setGamePhase('countdown');
   }, [soundEnabled]);
 
+  /* ── "How to play", available DURING the game ───────────────────────────
+     The rules are shown once automatically on the first visit; this button
+     brings the same modal back at any point and pauses the round while it is
+     open, so the learner can re-read how Camera vs Touch/Mouse works without
+     losing their coin. */
+  const openHelp = useCallback(() => {
+    if (gamePhase === 'playing') setIsPaused(true);
+    setShowHelp(true);
+  }, [gamePhase]);
+
+  const closeHelp = useCallback(() => {
+    setShowHelp(false);
+    if (gamePhase === 'playing') setIsPaused(false);
+  }, [gamePhase]);
+
   const togglePause = useCallback(() => {
     if (gamePhase !== 'playing') return;
     setIsPaused((p) => {
@@ -1162,6 +1210,21 @@ export default function PinchCoinGame() {
         </div>
 
         <div className="pcg-header-right">
+          {/* End the round early and go straight to the report — the same
+              control LetterQuest has. It runs the game's normal finish
+              routine, so the report is built exactly as it is at the end of a
+              full round, from whatever has been done so far. */}
+          <EndGameControl
+            className="pcg-icon-btn gs-end-btn"
+            compact
+            disabled={gamePhase !== 'playing'}
+            onAskingChange={(asking) => { setEndAsking(asking); setIsPaused(asking); }}
+            onConfirm={() => { setIsPaused(false); finishRef.current?.('ended'); }}
+          />
+          <button className="pcg-icon-btn" onClick={openHelp}
+            title="How to play" aria-label="How to play">
+            <HelpCircle size={20} />
+          </button>
           <div className="pcg-stat">
             <Clock size={18} className="pcg-stat-ico" />
             <span className="pcg-stat-val">{fmtTime(uiElapsed)}</span>
@@ -1264,6 +1327,11 @@ export default function PinchCoinGame() {
           <RulesModal key="rules" cfg={cfg} mode={mode} onStart={startFromRules} />
         )}
 
+        {/* Same modal, reopened on demand from the header's "?" button. */}
+        {showHelp && gamePhase !== 'rules' && (
+          <RulesModal key="help" cfg={cfg} mode={mode} onStart={closeHelp} resume />
+        )}
+
         {gamePhase === 'countdown' && (
           <motion.div key="cd" className="pcg-overlay pcg-overlay-soft"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -1277,7 +1345,9 @@ export default function PinchCoinGame() {
           </motion.div>
         )}
 
-        {isPaused && gamePhase === 'playing' && (
+        {/* `!endAsking`: the end-game dialog pauses the round too, and without
+            this the pause card rendered underneath it — two cards at once. */}
+        {isPaused && !endAsking && gamePhase === 'playing' && (
           <motion.div key="pause" className="pcg-overlay"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
             <motion.div className="pcg-card pcg-pause-card"
@@ -1313,7 +1383,16 @@ export default function PinchCoinGame() {
                 ))}
               </div>
 
-              <h2 className="pcg-results-title"><CheckCircle size={26} /> All coins banked!</h2>
+              {/* Honest heading: "All coins banked!" over a round that banked
+                  none is a claim the report cannot support. */}
+              <h2 className="pcg-results-title">
+                <CheckCircle size={26} />{' '}
+                {results.endedEarly
+                  ? 'Session ended'
+                  : results.collected >= results.target
+                    ? 'All coins banked!'
+                    : 'Round finished'}
+              </h2>
               <p className="pcg-results-sub">
                 {cfg.emoji} {cfg.label} · {mode === 'camera' ? 'Camera' : 'Touch'}
               </p>
@@ -1324,12 +1403,19 @@ export default function PinchCoinGame() {
                 ))}
               </div>
 
-              <div className="pcg-perf-ring" style={{ '--pct': results.composite }}>
-                <div className="pcg-perf-inner">
-                  <span className="pcg-perf-val">{results.composite}</span>
-                  <span className="pcg-perf-lbl">OT Score</span>
+              {results.composite != null ? (
+                <div className="pcg-perf-ring" style={{ '--pct': results.composite }}>
+                  <div className="pcg-perf-inner">
+                    <span className="pcg-perf-val">{results.composite}</span>
+                    <span className="pcg-perf-lbl">OT Score</span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="tt-ot-none">
+                  No OT score for this session — the round ended before a coin
+                  was picked up, so there is nothing to measure.
+                </div>
+              )}
 
               <div className="pcg-metrics">
                 <Metric icon={<Zap size={16} />} label="Pinch Onset"
@@ -1337,13 +1423,13 @@ export default function PinchCoinGame() {
                 <Metric icon={<Move size={16} />} label="Pinch Aperture"
                   value={results.aperture == null ? '—' : results.aperture.toFixed(3)} />
                 <Metric icon={<Activity size={16} />} label="Pinch Stability"
-                  value={`${results.stability}%`}
+                  value={otPct(results.stability)}
                   tip="Consistency of the grip measured from thumb–index distance — not a force reading. A camera cannot measure force." />
-                <Metric icon={<TrendingUp size={16} />} label="Drag Trajectory" value={`${results.trajectory}%`} />
-                <Metric icon={<Gauge size={16} />} label="Drag Speed" value={`${results.dragSpeed} px/s`} />
+                <Metric icon={<TrendingUp size={16} />} label="Drag Trajectory" value={otPct(results.trajectory)} />
+                <Metric icon={<Gauge size={16} />} label="Drag Speed" value={results.dragSpeed == null ? '—' : `${results.dragSpeed} px/s`} />
                 <Metric icon={<Pause size={16} />} label="Pauses"
                   value={`${results.pauses} · ${(results.pauseMs / 1000).toFixed(1)}s`} />
-                <Metric icon={<Target size={16} />} label="Release Accuracy" value={`${results.releaseAccuracy}%`} />
+                <Metric icon={<Target size={16} />} label="Release Accuracy" value={otPct(results.releaseAccuracy)} />
                 <Metric icon={<Crosshair size={16} />} label="Success"
                   value={`${results.collected}/${results.attempts}`} />
                 <Metric icon={<Clock size={16} />} label="Total Time" value={fmtTime(results.totalSec)} />

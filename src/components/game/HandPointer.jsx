@@ -25,6 +25,9 @@ import React from 'react';
    pixel or two and the angle it implies swings several degrees. This absorbs
    that — small changes are ignored outright, larger ones are damped — so the
    hand holds its heading instead of shivering. */
+/* NOTE: no longer used for rendering — the pointer never rotates (see
+   followHand). Kept exported because it is a generally useful angle-unwrap
+   helper and is still imported by callers; safe to delete once they are gone. */
 export function steadyAngle(current, raw) {
   let d = raw - current;
   while (d > 180) d -= 360;
@@ -174,32 +177,37 @@ export function followHand(target, shown, node) {
   // Re-appearing after a gap: jump to the new spot instead of sliding.
   if (target.on === 1 && shown.on < 0.04) {
     shown.x = target.x; shown.y = target.y;
-    shown.rot = target.rot; shown.scale = target.scale; shown.flip = target.flip;
+    shown.scale = target.scale;
   }
   shown.x += (target.x - shown.x) * 0.78;
   shown.y += (target.y - shown.y) * 0.78;
   shown.scale += (target.scale - shown.scale) * 0.2;
   shown.on += (target.on - shown.on) * 0.3;
-  shown.flip = target.flip;
 
-  let d = target.rot - shown.rot;
-  while (d > 180) d -= 360;
-  while (d < -180) d += 360;
-  shown.rot += d * 0.2;
+  /* NO ROTATION, NO MIRRORING.
+     ---------------------------------------------------------------------
+     The pointer used to be turned to the direction the index finger implied,
+     and mirrored depending on which side the little finger fell. Both are
+     gone: the hand is always drawn upright.
 
+     Why: the angle a fingertip implies swings several degrees on a one-pixel
+     landmark wobble, so the pointer was permanently rocking, and the mirror
+     could flip the whole hand across the finger axis mid-reach. Neither told
+     the child anything useful about where the cursor was — and the cursor is
+     the fingertip, which does not move when the art rotates around it.
+
+     `shown.rot` / `shown.flip` are left in the state object (makeHandState
+     still returns them) so nothing that reads the struct breaks, but they no
+     longer affect the transform. */
   node.setAttribute(
     'transform',
-    `translate(${shown.x.toFixed(2)} ${shown.y.toFixed(2)}) rotate(${shown.rot.toFixed(2)}) ` +
-    `scale(${(shown.scale * shown.flip).toFixed(4)} ${shown.scale.toFixed(4)})`
+    `translate(${shown.x.toFixed(2)} ${shown.y.toFixed(2)}) ` +
+    `scale(${shown.scale.toFixed(4)})`
   );
   node.style.opacity = shown.on.toFixed(3);
 }
 
-/* Which way round is the hand? The art is drawn with the curled fingers on the
-   right of the pointing finger, so when the little finger falls on the other
-   side of the finger axis the whole hand is mirrored. Pass the finger direction
-   and the little-finger knuckle, both already in screen space. */
-export function handFlip(dirX, dirY, fromX, fromY, littleX, littleY) {
-  const cross = dirX * (littleY - fromY) - dirY * (littleX - fromX);
-  return cross > 0 ? 1 : -1;
-}
+/* `handFlip` (which way round to mirror the hand) was removed with the
+   rotation: the pointer is always drawn upright, so there is nothing to
+   mirror. See followHand above. */
+
