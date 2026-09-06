@@ -239,11 +239,19 @@ export default function useHandTracking(videoRef, canvasRef, enabled = true, pau
           locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
         });
 
+        /* A hand held further from the camera is a smaller hand in the frame,
+           and a smaller hand scores lower. At 0.7 detection / 0.5 tracking a
+           child sitting back was dropped and re-acquired several times a
+           second, which is the other half of why the pointer felt heavy at
+           distance: every drop restarts the filter downstream and blanks the
+           pointer for the 400ms grace period. Letting a distant hand stay
+           tracked costs some extra jitter, and rejecting jitter is exactly
+           what handPointerFilter is for. */
         hands.setOptions({
           maxNumHands: maxHands,
           modelComplexity: 1,
-          minDetectionConfidence: 0.7,
-          minTrackingConfidence: 0.5,
+          minDetectionConfidence: 0.55,
+          minTrackingConfidence: 0.40,
         });
 
         hands.onResults(onResults);

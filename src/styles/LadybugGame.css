@@ -275,6 +275,27 @@
   pointer-events: none;
 }
 
+/* ── Hand pointer ──────────────────────────────────────────────────────────
+   An SVG layer over the pointer canvas. Coordinates are CSS pixels of the
+   field, so no viewBox: the field stretches the virtual board by a different
+   factor on each axis and the hand must not stretch with it. */
+.lb-hand-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 7;
+}
+
+/* The animation loop owns the transform and the opacity through inline style;
+   this only keeps the hand hidden until the first frame has positioned it. */
+.lb-hand-pointer {
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    LADYBUG
    ═══════════════════════════════════════════════════════════════════════════ */

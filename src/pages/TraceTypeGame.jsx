@@ -27,6 +27,8 @@ import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/TraceTypeGame.css';
 
+import { HandDefs, HandArt, steadyAngle, followHand } from '../components/game/HandPointer';
+import { createHandPointerFilter, handDepthScale } from '../utils/handPointerFilter';
 // ── Constants ──────────────────────────────────────────────────────────────
 const COUNTDOWN_SECONDS = 3;
 const TYPE_REQUIRED      = 3;   // Must type the letter 3 times
@@ -87,12 +89,31 @@ const LEVEL_LETTERS = {
   3: 'QSRGJWB'.split(''), // High complexity, multiple curves or strokes
 };
 
-// Explicitly mark waypoint connections that are "jumps" (i.e. moving to a new stroke)
-// where a segment line should NOT be drawn.
+/* Explicitly mark waypoint connections that are "pen lifts" (i.e. moving to the
+   start of a NEW stroke) where a segment line should NOT be drawn and the path
+   error should NOT be scored. The index is the index of the DESTINATION
+   waypoint, so `[2]` means "the move from waypoint 1 to waypoint 2 is a lift".
+
+   These follow the standard manuscript stroke sequence for capitals
+   (Handwriting Without Tears / Zaner-Bloser): every capital starts at the top,
+   big lines before little lines, top-to-bottom and left-to-right. */
 const BAD_JUMPS = {
-  A: [3], // Jump from bottom right leg to the start of the crossbar
-  Q: [9], // Jump from the O ring to the start of the tail
-  X: [2], // Jump from bottom right of first stroke to top right of second stroke
+  A: [2, 4], // back to top for the 2nd slant, then lift to the crossbar
+  B: [2],    // back to the top after the big line down
+  D: [2],
+  E: [2, 4, 6], // top, middle and bottom little lines
+  F: [2, 4],
+  H: [2, 4], // 2nd big line down, then the crossbar
+  I: [2, 4], // top little line, then bottom little line
+  K: [2],
+  M: [2],
+  N: [2],
+  P: [2],
+  Q: [9],    // lift from the O ring to the start of the tail
+  R: [2],
+  T: [2],    // big line down first, then the little line across the top
+  X: [2],    // lift from the end of the 1st slant to the top of the 2nd
+  Y: [2],
 };
 
 // ── Encouraging messages pool ──────────────────────────────────────────────
@@ -114,18 +135,22 @@ const QWERTY_ROWS = [
 // Each letter has waypoints [{x, y}] for tracing in a 300×300 canvas,
 // and a d path string for the guide outline.
 const LETTER_DATA = {
+  // Slant down left, back to the top, slant down right, then the crossbar.
   A: {
     waypoints: [
-      { x: 50, y: 260 },   { x: 150, y: 40 },  { x: 250, y: 260 },
-      { x: 200, y: 170 },  { x: 100, y: 170 },
+      { x: 150, y: 40 },   { x: 50, y: 260 },
+      { x: 150, y: 40 },   { x: 250, y: 260 },
+      { x: 100, y: 170 },  { x: 200, y: 170 },
     ],
-    path: 'M50,260 L150,40 L250,260 M100,170 L200,170',
+    path: 'M150,40 L50,260 M150,40 L250,260 M100,170 L200,170',
   },
+  // Big line down, back to the top, top bump, bottom bump.
   B: {
     waypoints: [
+      { x: 70, y: 40 },   { x: 70, y: 260 },
       { x: 70, y: 40 },   { x: 190, y: 60 },   { x: 190, y: 130 },
       { x: 70, y: 150 },  { x: 210, y: 170 },  { x: 210, y: 240 },
-      { x: 70, y: 260 },  { x: 70, y: 40 },
+      { x: 70, y: 260 },
     ],
     path: 'M70,40 L70,260 M70,40 Q230,40 230,100 Q230,150 70,150 Q240,150 240,210 Q240,260 70,260',
   },
@@ -137,27 +162,33 @@ const LETTER_DATA = {
     ],
     path: 'M230,80 Q150,20 70,80 Q40,150 70,220 Q150,280 230,230',
   },
+  // Big line down, back to the top, curve around to the bottom.
   D: {
     waypoints: [
-      { x: 70, y: 40 },   { x: 215, y: 70 },   { x: 260, y: 150 },
-      { x: 215, y: 230 },  { x: 70, y: 260 },   { x: 70, y: 40 },
+      { x: 70, y: 40 },    { x: 70, y: 260 },
+      { x: 70, y: 40 },    { x: 215, y: 70 },  { x: 260, y: 150 },
+      { x: 215, y: 230 },  { x: 70, y: 260 },
     ],
     path: 'M70,40 L70,260 M70,40 Q260,40 260,150 Q260,260 70,260',
   },
+  // Big line down, then the top, middle and bottom little lines (left to right).
   E: {
     waypoints: [
-      { x: 210, y: 40 },  { x: 70, y: 40 },   { x: 70, y: 150 },
-      { x: 180, y: 150 }, { x: 70, y: 150 },   { x: 70, y: 260 },
-      { x: 210, y: 260 },
+      { x: 70, y: 40 },   { x: 70, y: 260 },
+      { x: 70, y: 40 },   { x: 210, y: 40 },
+      { x: 70, y: 150 },  { x: 180, y: 150 },
+      { x: 70, y: 260 },  { x: 210, y: 260 },
     ],
-    path: 'M210,40 L70,40 L70,260 L210,260 M70,150 L180,150',
+    path: 'M70,40 L70,260 M70,40 L210,40 M70,150 L180,150 M70,260 L210,260',
   },
+  // Big line down, then the top and middle little lines (left to right).
   F: {
     waypoints: [
-      { x: 210, y: 40 },  { x: 70, y: 40 },   { x: 70, y: 150 },
-      { x: 180, y: 150 }, { x: 70, y: 150 },   { x: 70, y: 260 },
+      { x: 70, y: 40 },   { x: 70, y: 260 },
+      { x: 70, y: 40 },   { x: 210, y: 40 },
+      { x: 70, y: 150 },  { x: 180, y: 150 },
     ],
-    path: 'M210,40 L70,40 L70,260 M70,150 L180,150',
+    path: 'M70,40 L70,260 M70,40 L210,40 M70,150 L180,150',
   },
   G: {
     waypoints: [
@@ -167,35 +198,37 @@ const LETTER_DATA = {
     ],
     path: 'M230,80 Q150,20 70,80 Q40,150 70,220 Q150,280 230,220 L230,160 L170,160',
   },
+  // Big line down, big line down, then the little line across.
   H: {
     waypoints: [
       { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 70, y: 150 },  { x: 230, y: 150 },
       { x: 230, y: 40 },  { x: 230, y: 260 },
+      { x: 70, y: 150 },  { x: 230, y: 150 },
     ],
     path: 'M70,40 L70,260 M230,40 L230,260 M70,150 L230,150',
   },
+  // Big line down, little line across the top, little line across the bottom.
   I: {
     waypoints: [
-      { x: 100, y: 40 },  { x: 200, y: 40 },
       { x: 150, y: 40 },  { x: 150, y: 260 },
+      { x: 100, y: 40 },  { x: 200, y: 40 },
       { x: 100, y: 260 }, { x: 200, y: 260 },
     ],
-    path: 'M100,40 L200,40 M150,40 L150,260 M100,260 L200,260',
+    path: 'M150,40 L150,260 M100,40 L200,40 M100,260 L200,260',
   },
+  // One stroke: big line down, then turn (hook) to the left.
   J: {
     waypoints: [
-      { x: 120, y: 40 },  { x: 220, y: 40 },
       { x: 190, y: 40 },  { x: 190, y: 210 },
       { x: 150, y: 260 }, { x: 80, y: 230 },
     ],
-    path: 'M120,40 L220,40 M190,40 L190,210 Q190,270 120,250 Q80,240 80,220',
+    path: 'M190,40 L190,210 Q190,270 120,250 Q80,240 80,220',
   },
+  // Big line down, then slant in to the middle and slant out to the bottom.
   K: {
     waypoints: [
       { x: 70, y: 40 },   { x: 70, y: 260 },
-      { x: 70, y: 160 },  { x: 220, y: 40 },
-      { x: 70, y: 160 },  { x: 220, y: 260 },
+      { x: 220, y: 40 },  { x: 70, y: 160 },  { x: 220, y: 260 },
     ],
     path: 'M70,40 L70,260 M220,40 L70,160 L220,260',
   },
@@ -205,19 +238,22 @@ const LETTER_DATA = {
     ],
     path: 'M70,40 L70,260 L220,260',
   },
+  // Big line down, back to the top, slant down, slant up, big line down.
   M: {
     waypoints: [
-      { x: 50, y: 260 },  { x: 50, y: 40 },   { x: 150, y: 160 },
+      { x: 50, y: 40 },   { x: 50, y: 260 },
+      { x: 50, y: 40 },   { x: 150, y: 160 },
       { x: 250, y: 40 },  { x: 250, y: 260 },
     ],
-    path: 'M50,260 L50,40 L150,160 L250,40 L250,260',
+    path: 'M50,40 L50,260 M50,40 L150,160 L250,40 L250,260',
   },
+  // Big line down, back to the top, slant down, big line up.
   N: {
     waypoints: [
-      { x: 70, y: 260 },  { x: 70, y: 40 },   { x: 230, y: 260 },
-      { x: 230, y: 40 },
+      { x: 70, y: 40 },   { x: 70, y: 260 },
+      { x: 70, y: 40 },   { x: 230, y: 260 },  { x: 230, y: 40 },
     ],
-    path: 'M70,260 L70,40 L230,260 L230,40',
+    path: 'M70,40 L70,260 M70,40 L230,260 L230,40',
   },
   O: {
     waypoints: [
@@ -227,12 +263,14 @@ const LETTER_DATA = {
     ],
     path: 'M150,40 Q50,40 50,150 Q50,260 150,260 Q250,260 250,150 Q250,40 150,40 Z',
   },
+  // Big line down, back to the top, curve around to the middle.
   P: {
     waypoints: [
-      { x: 70, y: 260 },  { x: 70, y: 40 },   { x: 180, y: 50 },
+      { x: 70, y: 40 },   { x: 70, y: 260 },
+      { x: 70, y: 40 },   { x: 180, y: 50 },
       { x: 220, y: 100 }, { x: 180, y: 150 },  { x: 70, y: 160 },
     ],
-    path: 'M70,260 L70,40 Q240,40 240,100 Q240,160 70,160',
+    path: 'M70,40 L70,260 M70,40 Q240,40 240,100 Q240,160 70,160',
   },
   Q: {
     waypoints: [
@@ -243,13 +281,15 @@ const LETTER_DATA = {
     ],
     path: 'M150,40 Q50,40 50,150 Q50,260 150,260 Q250,260 250,150 Q250,40 150,40 Z M200,210 L260,270',
   },
+  // Big line down, back to the top, curve to the middle, then slant to the corner.
   R: {
     waypoints: [
-      { x: 70, y: 260 },  { x: 70, y: 40 },   { x: 180, y: 50 },
+      { x: 70, y: 40 },   { x: 70, y: 260 },
+      { x: 70, y: 40 },   { x: 180, y: 50 },
       { x: 220, y: 100 }, { x: 180, y: 150 },  { x: 70, y: 160 },
-      { x: 140, y: 160 }, { x: 230, y: 260 },
+      { x: 230, y: 260 },
     ],
-    path: 'M70,260 L70,40 Q240,40 240,100 Q240,160 70,160 M140,160 L230,260',
+    path: 'M70,40 L70,260 M70,40 Q240,40 240,100 Q240,160 70,160 L230,260',
   },
   S: {
     waypoints: [
@@ -259,12 +299,13 @@ const LETTER_DATA = {
     ],
     path: 'M220,70 Q150,20 80,70 Q50,120 150,150 Q250,180 220,230 Q170,280 70,230',
   },
+  // Big line down, then the little line across the top.
   T: {
     waypoints: [
-      { x: 50, y: 40 },   { x: 250, y: 40 },
       { x: 150, y: 40 },  { x: 150, y: 260 },
+      { x: 50, y: 40 },   { x: 250, y: 40 },
     ],
-    path: 'M50,40 L250,40 M150,40 L150,260',
+    path: 'M150,40 L150,260 M50,40 L250,40',
   },
   U: {
     waypoints: [
@@ -294,12 +335,13 @@ const LETTER_DATA = {
     ],
     path: 'M60,40 L240,260 M240,40 L60,260',
   },
+  // Slant down to the middle, slant down to the middle, then big line down.
   Y: {
     waypoints: [
       { x: 50, y: 40 },   { x: 150, y: 150 },
       { x: 250, y: 40 },  { x: 150, y: 150 },  { x: 150, y: 260 },
     ],
-    path: 'M50,40 L150,150 L250,40 M150,150 L150,260',
+    path: 'M50,40 L150,150 M250,40 L150,150 L150,260',
   },
   Z: {
     waypoints: [
@@ -309,6 +351,66 @@ const LETTER_DATA = {
     path: 'M60,40 L240,40 L60,260 L240,260',
   },
 };
+
+// ── Trace guidance: hand pointer + direction arrows ────────────────────────
+/* Base size of the hand pointer in SVG units (the canvas is 300x300). The art
+   below is drawn ~170 units tall with the fingertip at the origin, so this
+   scale puts the fingertip on the target with a hand about 50 units tall. */
+const HAND_SCALE = 0.32;
+/* The same hand over the whole viewport (Find & Type). Bigger, because it is
+   measured in screen pixels rather than in the 300-unit trace canvas. */
+const GLOBAL_HAND_SCALE = 0.62;
+/* Radius of the dwell-to-click ring drawn around the fingertip, and its
+   circumference, in the hand's own coordinates. */
+const DWELL_R = 26;
+const DWELL_C = 2 * Math.PI * DWELL_R;
+
+/* The "start here" hint: the same hand, ghosted, resting on the next waypoint.
+   It is only shown while the child's real hand is not being tracked, so there
+   is never more than one hand on the canvas. The rotation is picked so the
+   hand always has room inside the 300x300 canvas. */
+function HandHint({ x, y }) {
+  const rot = y <= 200 ? 0 : x <= 150 ? 205 : 155;
+  return (
+    <g className="tt-hand-hint" transform={`translate(${x} ${y}) rotate(${rot}) scale(${HAND_SCALE})`} pointerEvents="none">
+      <HandArt />
+    </g>
+  );
+}
+
+/* A double chevron sitting on a stroke, rotated to show which way to move.
+   `state` is 'active' (the stroke being traced now) or 'next' (still ahead).
+   A jump is a pen lift, so it is drawn hollow and in the "lift" colour. */
+function DirectionArrow({ from, to, state, isJump }) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 26) return null; // too short to place a readable arrow
+
+  const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+  // Sit slightly past the midpoint so the arrow leads the child forward.
+  const t = 0.55;
+  const cx = from.x + dx * t;
+  const cy = from.y + dy * t;
+
+  return (
+    <g
+      className={`tt-trace-arrow ${state} ${isJump ? 'jump' : ''}`}
+      transform={`translate(${cx} ${cy}) rotate(${angle})`}
+      pointerEvents="none"
+    >
+      {/* inner group carries the CSS animation: a CSS transform on the outer
+          group would override its transform attribute and move the arrow */}
+      <g className="tt-trace-arrow-anim">
+        {/* a pen lift gets a dashed shaft instead of the second chevron, so
+            "slide along" and "lift and move" never look alike */}
+        <path d="M-26,0 H-6" className="tt-trace-arrow-shaft" />
+        <path d="M-13,-8 L-4,0 L-13,8" className="tt-trace-arrow-head trail" />
+        <path d="M-1,-9 L9,0 L-1,9" className="tt-trace-arrow-head" />
+      </g>
+    </g>
+  );
+}
 
 // ── Confetti component ─────────────────────────────────────────────────────
 function Confetti({ show }) {
@@ -376,7 +478,7 @@ function VirtualKeyboard({ targetLetter, onKeyPress, highlightTarget, keyStates 
 //                              RULES MODAL
 // ════════════════════════════════════════════════════════════════════════════
 const RULES = [
-  { icon: '✏️', text: 'TRACE — follow the numbered dots in order with your index finger.' },
+  { icon: '✏️', text: 'TRACE — put your index finger on the pointing hand, then follow the arrows.' },
   { icon: '⚡', text: 'Stay close to the line: the further you drift, the lower your accuracy.' },
   { icon: '🔍', text: 'FIND — spot the same letter on the keyboard and press it.' },
   { icon: '⌨️', text: 'TYPE — press that letter 3 times on your own, without the hint.' },
@@ -513,12 +615,40 @@ export default function TraceTypeGame() {
   // ── Trace state ─────────────────────────────────────────────────────────
   const [reachedWaypoints, setReachedWaypoints] = useState([]);
   const [traceProgress, setTraceProgress]       = useState(0);
-  const [fingerPos, setFingerPos]               = useState(null);
   const [isDrawing, setIsDrawing]               = useState(false);
+  /* Is the child's hand currently on the canvas? Only used to decide whether
+     to show the ghosted "start here" hand, so it flips at most twice a second
+     rather than on every frame. */
+  const [handVisible, setHandVisible] = useState(false);
+
+  /* ── Hand pointer motion ────────────────────────────────────────────────
+     The pointer is driven straight from the tracked landmarks on a rAF loop
+     and written onto the DOM node, never through React state: re-rendering
+     this screen 30x a second would make the hand stutter. `handTargetRef` is
+     where tracking writes, `handShownRef` is the smoothed value on screen. */
+  const handGroupRef  = useRef(null);
+  /* Camera pointer conditioning — see src/utils/handPointerFilter.js. One
+     filter for the whole screen: trace, find and type never run at the same
+     time, so sharing it means the reach centre learned while the child traces
+     is still there when they move to the keyboard. */
+  const handFilterRef = useRef(null);
+  if (!handFilterRef.current) handFilterRef.current = createHandPointerFilter();
+  const handTargetRef = useRef({ x: 150, y: 150, rot: 0, scale: HAND_SCALE, flip: 1, on: 0 });
+  const handShownRef  = useRef({ x: 150, y: 150, rot: 0, scale: HAND_SCALE, flip: 1, on: 0 });
   const traceAreaRef = useRef(null);
 
-  // ── Global Pointer state (Find & Type) ──────────────────────────────────
-  const [globalPointer, setGlobalPointer] = useState(null);
+  /* ── Global pointer (Find & Type) ────────────────────────────────────────
+     The same hand, over the whole viewport this time, so the child points at
+     the keys with the pointer they already learned to use while tracing.
+     Driven the same way: tracking writes to the target ref, the rAF loop below
+     eases the on-screen value towards it and writes the transform onto the DOM
+     node. `gDwellRef` carries the dwell-to-click progress so the ring around
+     the fingertip can be updated without re-rendering the screen. */
+  const gHandGroupRef  = useRef(null);
+  const gDwellRingRef  = useRef(null);
+  const gDwellRef      = useRef(0);
+  const gHandTargetRef = useRef({ x: 0, y: 0, rot: 0, scale: GLOBAL_HAND_SCALE, flip: 1, on: 0 });
+  const gHandShownRef  = useRef({ x: 0, y: 0, rot: 0, scale: GLOBAL_HAND_SCALE, flip: 1, on: 0 });
   const hoverTargetRef = useRef(null);
   const hoverStartTimeRef = useRef(null);
 
@@ -706,22 +836,66 @@ export default function TraceTypeGame() {
   // ══════════════════════════════════════════════════════════════════════════
   useEffect(() => {
     if ((step !== 'find' && step !== 'type') || gamePhase !== 'playing' || isPaused) {
-      setGlobalPointer(null);
+      gHandTargetRef.current.on = 0;
+      gDwellRef.current = 0;
       hoverTargetRef.current = null;
       hoverStartTimeRef.current = null;
+      handFilterRef.current.lost();
       return;
     }
-    if (!landmarks || landmarks.length < 9) {
-      setGlobalPointer(null);
+    if (!landmarks || landmarks.length < 18) {
+      gHandTargetRef.current.on = 0;
+      gDwellRef.current = 0;
+      handFilterRef.current.lost();
       return;
     }
 
     const indexTip = landmarks[8];
-    if (!indexTip) return;
+    const indexMcp = landmarks[5];
+    const littleMcp = landmarks[17];
+    const wrist = landmarks[0];
+    if (!indexTip || !indexMcp) return;
 
-    // Map to viewport
-    const sx = (1 - indexTip.x) * window.innerWidth;
-    const sy = indexTip.y * window.innerHeight;
+    /* Map to the viewport through the shared filter. This pointer had no
+       smoothing at all before, which is why a dwell on a key was hard to hold
+       from any distance: the raw fingertip wanders by several pixels a frame,
+       and the further back the child sat the less of the keyboard they could
+       reach in the first place. */
+    const p = handFilterRef.current.push(landmarks);
+    if (!p) return;
+    const sx = p.x * window.innerWidth;
+    const sy = p.y * window.innerHeight;
+
+    /* Same orientation maths as the tracing pointer: the knuckle→tip vector
+       gives the direction the finger points, and the side the little finger
+       falls on tells us whether to mirror the hand.
+       Measured from the RAW landmarks, not from the filtered position: the
+       filter moves the fingertip and not the knuckle, so mixing the two
+       would swing the drawn hand's heading as the gain changed. */
+    const rx = (1 - indexTip.x) * window.innerWidth;
+    const ry = indexTip.y * window.innerHeight;
+    const kx = (1 - indexMcp.x) * window.innerWidth;
+    const ky = indexMcp.y * window.innerHeight;
+    const dx = rx - kx;
+    const dy = ry - ky;
+    const gt = gHandTargetRef.current;
+
+    if (Math.hypot(dx, dy) > 8) {
+      gt.rot = steadyAngle(gt.rot, (Math.atan2(dy, dx) * 180) / Math.PI + 90);
+      if (littleMcp) {
+        const cross = dx * (littleMcp.y * window.innerHeight - ky)
+                    - dy * ((1 - littleMcp.x) * window.innerWidth - kx);
+        gt.flip = cross > 0 ? 1 : -1;
+      }
+    }
+    if (wrist) {
+      /* Depth from the palm measurement the filter already made, which does
+         not change meaning with the window's aspect ratio. */
+      gt.scale = Math.max(0.45, Math.min(0.9, GLOBAL_HAND_SCALE * handDepthScale(p.span)));
+    }
+    gt.x = sx;
+    gt.y = sy;
+    gt.on = 1;
 
     let hoverKey = null;
     let clickProgress = 0;
@@ -755,7 +929,7 @@ export default function TraceTypeGame() {
       hoverStartTimeRef.current = null;
     }
 
-    setGlobalPointer({ x: sx, y: sy, hoverKey, clickProgress });
+    gDwellRef.current = clickProgress;
   }, [landmarks, step, gamePhase, isPaused, handleFindKeyPress, handleTypeKeyPress]);
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -878,7 +1052,7 @@ export default function TraceTypeGame() {
           setStep('trace');
           setReachedWaypoints([]);
           setTraceProgress(0);
-          setFingerPos(null);
+          handTargetRef.current.on = 0;
           setKeyStates({});
           setTypedCount(0);
           letterStartTimeRef.current = Date.now();
@@ -904,7 +1078,7 @@ export default function TraceTypeGame() {
     /* Path error. Segments flagged in BAD_JUMPS are pen lifts between strokes
        (the crossbar of A, the tail of Q): the child is *supposed* to travel off
        the letter there, so those frames are not scored. */
-    const isJump = (BAD_JUMPS[currentLetter] || []).includes(nextIdx - 1);
+    const isJump = (BAD_JUMPS[currentLetter] || []).includes(nextIdx);
     if (nextIdx < waypoints.length && !isJump) {
       const target = waypoints[nextIdx];
       const prev   = nextIdx > 0 ? waypoints[nextIdx - 1] : target;
@@ -949,8 +1123,6 @@ export default function TraceTypeGame() {
   const processTracePosition = useCallback((sx, sy) => {
     if (step !== 'trace' || gamePhase !== 'playing' || isPaused) return;
 
-    setFingerPos({ x: sx, y: sy });
-
     // Check waypoint proximity
     const waypoints = letterData?.waypoints;
     if (!waypoints) return;
@@ -990,6 +1162,12 @@ export default function TraceTypeGame() {
   }, [step, gamePhase, isPaused, letterData, reachedWaypoints, soundEnabled,
       handleStepComplete, recordTraceSample]);
 
+  /* Hide the pointer (it fades out rather than vanishing). */
+  const hideHand = useCallback(() => {
+    handTargetRef.current.on = 0;
+    setHandVisible((v) => (v ? false : v));
+  }, []);
+
   // Touch/Mouse Support for Trace Phase
   const handlePointerEvent = (e) => {
     if (e.type === 'pointermove' && !isDrawing) return;
@@ -998,31 +1176,105 @@ export default function TraceTypeGame() {
     const rect = e.currentTarget.getBoundingClientRect();
     const sx = ((e.clientX - rect.left) / rect.width) * 300;
     const sy = ((e.clientY - rect.top) / rect.height) * 300;
-    
+
+    // Touch input has no hand orientation, so the pointer stays upright.
+    const t = handTargetRef.current;
+    t.x = sx; t.y = sy; t.rot = 0; t.scale = HAND_SCALE; t.flip = 1; t.on = 1;
+    setHandVisible((v) => (v ? v : true));
+
     processTracePosition(sx, sy);
   };
 
-  // Map finger landmark to SVG coordinates within the trace area
+  /* Map the tracked hand onto the canvas: the index fingertip gives the
+     position, the knuckle→tip vector gives the direction the finger is
+     pointing, the wrist→knuckle span gives a little depth (the hand grows as
+     the child reaches toward the camera) and the index/little-finger order
+     tells us which way round the hand is, so a left hand is not drawn as a
+     right one. */
   useEffect(() => {
     if (step !== 'trace' || gamePhase !== 'playing' || isPaused) {
-      setFingerPos(null);
+      hideHand();
+      handFilterRef.current.lost();
       return;
     }
-    if (!landmarks || landmarks.length < 9) {
-      if (!isDrawing) setFingerPos(null); // only clear if not actively using touch
+    if (!landmarks || landmarks.length < 18) {
+      if (!isDrawing) hideHand(); // only clear if not actively using touch
+      handFilterRef.current.lost();
       return;
     }
 
-    // Index fingertip is landmark 8
-    const indexTip = landmarks[8];
-    if (!indexTip) return;
+    const indexTip = landmarks[8];   // index fingertip
+    const indexMcp = landmarks[5];   // index knuckle
+    const littleMcp = landmarks[17]; // little-finger knuckle
+    const wrist    = landmarks[0];
+    if (!indexTip || !indexMcp) return;
 
-    // Convert normalized camera coords to SVG canvas coords (300x300)
-    const sx = (1 - indexTip.x) * 300; // mirror
-    const sy = indexTip.y * 300;
-    
+    /* Position through the shared filter, so the letter is the same size to
+       trace whether the child is close to the camera or sitting back. */
+    const p = handFilterRef.current.push(landmarks);
+    if (!p) return;
+    const sx = p.x * 300;
+    const sy = p.y * 300;
+
+    /* Heading from the RAW landmarks: the filter moves the fingertip and not
+       the knuckle, so measuring the finger direction across the two would
+       swing the drawn hand as the gain changed. */
+    const rx = (1 - indexTip.x) * 300; // mirror
+    const ry = indexTip.y * 300;
+    const kx = (1 - indexMcp.x) * 300;
+    const ky = indexMcp.y * 300;
+
+    const dx = rx - kx;
+    const dy = ry - ky;
+    const t = handTargetRef.current;
+
+    /* The art points along -y, so a finger pointing straight up needs no
+       rotation: atan2 gives -90 there, hence the +90. */
+    if (Math.hypot(dx, dy) > 6) {
+      t.rot = steadyAngle(t.rot, (Math.atan2(dy, dx) * 180) / Math.PI + 90);
+
+      /* Which side is the little finger on, relative to the pointing
+         direction? The art is drawn with the curled fingers on the right, so
+         a negative cross product means we mirror it across the finger. */
+      if (littleMcp) {
+        const cross = dx * (littleMcp.y * 300 - ky) - dy * ((1 - littleMcp.x) * 300 - kx);
+        t.flip = cross > 0 ? 1 : -1;
+      }
+    }
+
+    if (wrist) {
+      t.scale = Math.max(0.24, Math.min(0.44, HAND_SCALE * handDepthScale(p.span)));
+    }
+
+    t.x = sx;
+    t.y = sy;
+    t.on = 1;
+    setHandVisible((v) => (v ? v : true));
+
     processTracePosition(sx, sy);
-  }, [landmarks, step, gamePhase, isPaused, processTracePosition, isDrawing]);
+  }, [landmarks, step, gamePhase, isPaused, processTracePosition, isDrawing, hideHand]);
+
+  /* Smoothing loop. Tracking arrives at ~30fps and jitters by a pixel or two;
+     easing towards the target on every animation frame turns that into the
+     continuous, natural movement a child can actually follow. */
+  useEffect(() => {
+    let raf = 0;
+
+    const tick = () => {
+      followHand(handTargetRef.current, handShownRef.current, handGroupRef.current);
+      followHand(gHandTargetRef.current, gHandShownRef.current, gHandGroupRef.current);
+
+      // Dwell-to-click ring around the fingertip, on the keyboard steps.
+      const ring = gDwellRingRef.current;
+      if (ring) {
+        ring.style.strokeDashoffset = (DWELL_C * (1 - gDwellRef.current)).toFixed(2);
+        ring.style.opacity = gDwellRef.current > 0.01 ? '0.95' : '0';
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   // ══════════════════════════════════════════════════════════════════════════
   // Keyboard event handler
@@ -1547,7 +1799,7 @@ export default function TraceTypeGame() {
                     setTraceProgress(0);
                     setTypedCount(0);
                     setKeyStates({});
-                    setFingerPos(null);
+                    handTargetRef.current.on = 0;
                     setStarRatings({});
                     setSessionStats({
                       totalScore: 0, lettersCompleted: 0, totalStars: 0,
@@ -1736,7 +1988,7 @@ export default function TraceTypeGame() {
                 <div className="tt-step-number step-1">1</div>
                 <div>
                   <div className="tt-step-name">TRACE</div>
-                  <div className="tt-step-instruction">Trace the letter with your index finger.</div>
+                  <div className="tt-step-instruction">Start at the hand and follow the arrows with your index finger.</div>
                 </div>
               </div>
               <button className="tt-sound-btn" onClick={() => soundEnabled && speak(currentLetter)} title="Hear the letter">
@@ -1756,16 +2008,19 @@ export default function TraceTypeGame() {
                 onPointerMove={handlePointerEvent}
                 onPointerUp={(e) => { 
                   e.currentTarget.releasePointerCapture(e.pointerId);
-                  setIsDrawing(false); 
-                  setFingerPos(null); 
+                  setIsDrawing(false);
+                  hideHand();
                 }}
                 onPointerCancel={(e) => {
                   e.currentTarget.releasePointerCapture(e.pointerId);
-                  setIsDrawing(false); 
-                  setFingerPos(null); 
+                  setIsDrawing(false);
+                  hideHand();
                 }}
                 style={{ touchAction: 'none' }}
               >
+                {/* the hand's gradients and clip live in the overlay SVG at the
+                    bottom of this component — one definition, referenced by
+                    both pointers */}
                 <path d={letterData.path} className="tt-trace-guide-path" />
                 <path d={letterData.path} className="tt-trace-guide-outline" />
                 {reachedWaypoints.map((wpIndex, i) => {
@@ -1827,32 +2082,62 @@ export default function TraceTypeGame() {
                     </g>
                   );
                 })}
+                {/* Direction arrows — they replace the old step numbers. Each
+                    arrow sits on the stroke and points the way the finger has
+                    to travel; a hollow arrow means "lift and move" (new stroke). */}
+                {letterData.waypoints.map((wp, i) => {
+                  if (i === 0) return null;
+                  if (i < reachedWaypoints.length) return null; // already traced
+                  const isJump = (BAD_JUMPS[currentLetter] || []).includes(i);
+                  return (
+                    <DirectionArrow
+                      key={`arrow-${i}`}
+                      from={letterData.waypoints[i - 1]}
+                      to={wp}
+                      state={i === reachedWaypoints.length ? 'active' : 'next'}
+                      isJump={isJump}
+                    />
+                  );
+                })}
+
                 {letterData.waypoints.map((wp, i) => {
                   const isReached = reachedWaypoints.includes(i);
                   const isActive = i === reachedWaypoints.length;
-                  
-                  // Find the lowest index at this coordinate that has NOT been reached yet
-                  const nextIndexAtCoord = letterData.waypoints.findIndex(
-                    (w, idx) => w.x === wp.x && w.y === wp.y && !reachedWaypoints.includes(idx)
-                  );
-                  
-                  // Only show text if this is the next unreached waypoint at this coordinate
-                  const shouldShowText = !isReached && nextIndexAtCoord === i;
 
                   return (
                     <g key={i} className="tt-trace-waypoint">
-                      <circle cx={wp.x} cy={wp.y} r={isActive ? 16 : 13} className={`tt-trace-waypoint-circle ${isReached ? 'reached' : ''} ${isActive ? 'active' : ''}`} />
-                      {shouldShowText && (
-                        <text x={wp.x} y={wp.y} className={`tt-trace-waypoint-number ${isReached ? 'reached' : ''} ${isActive ? 'active' : ''}`}>
-                          {i + 1}
-                        </text>
+                      {/* the target the finger is heading for glows softly —
+                          a halo rather than a hard ring, so it never reads as
+                          a cursor competing with the hand */}
+                      {isActive && (
+                        <circle cx={wp.x} cy={wp.y} r={26} className="tt-trace-target-glow" fill="url(#ttTargetG)" />
                       )}
+                      <circle
+                        cx={wp.x}
+                        cy={wp.y}
+                        r={isActive ? 7 : 9}
+                        className={`tt-trace-waypoint-circle ${isReached ? 'reached' : ''} ${isActive ? 'active' : ''}`}
+                      />
                     </g>
                   );
                 })}
-                {fingerPos && (
-                  <circle cx={fingerPos.x} cy={fingerPos.y} r={18} className="tt-trace-finger-ring" />
+
+                {/* "Start here" hint — only while the child's own hand is not
+                    on the canvas, so there is never a second hand competing
+                    with the live pointer. */}
+                {!handVisible && reachedWaypoints.length < letterData.waypoints.length && (
+                  <HandHint
+                    x={letterData.waypoints[reachedWaypoints.length].x}
+                    y={letterData.waypoints[reachedWaypoints.length].y}
+                  />
                 )}
+
+                {/* The live pointer. Its transform is written straight to the
+                    DOM by the smoothing loop, so it tracks the real hand
+                    frame-by-frame instead of re-rendering the screen. */}
+                <g ref={handGroupRef} className="tt-hand-pointer" pointerEvents="none">
+                  <HandArt />
+                </g>
               </svg>
               <div className="tt-camera-container" style={{ visibility: 'hidden', opacity: 0, position: 'absolute', pointerEvents: 'none' }}>
                 <video ref={videoRef} playsInline autoPlay muted />
@@ -1860,7 +2145,7 @@ export default function TraceTypeGame() {
               </div>
             </div>
             <div className={`tt-trace-feedback ${traceProgress > 0 ? 'on-path' : ''}`} style={{ textCombineUpright: 'none' }}>
-              {traceProgress > 0 ? `${Math.round(traceProgress * 100)}% complete — keep going!` : isTracking ? 'Move your index finger to waypoint 1' : 'Initializing camera...'}
+              {traceProgress > 0 ? `${Math.round(traceProgress * 100)}% complete — follow the arrow!` : isTracking ? 'Point your index finger at the glowing spot' : 'Initializing camera...'}
             </div>
           </div>
 
@@ -2066,42 +2351,42 @@ export default function TraceTypeGame() {
         </aside>
       </div>
 
-      {/* ── Global Pointer Overlay ────────────────────────────────── */}
-      {globalPointer && (
-        <div
-          className="tt-global-pointer"
-          style={{
-            position: 'fixed',
-            left: globalPointer.x,
-            top: globalPointer.y,
-            transform: 'translate(-50%, -50%)',
-            pointerEvents: 'none',
-            zIndex: 9999,
-            width: 40,
-            height: 40,
-            borderRadius: '50%',
-            border: '3px solid rgba(99, 102, 241, 0.8)',
-            backgroundColor: 'rgba(99, 102, 241, 0.2)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 0 15px rgba(99, 102, 241, 0.5)'
-          }}
-        >
-          {/* Dwell Progress Ring */}
-          <svg width="50" height="50" style={{ position: 'absolute', transform: 'rotate(-90deg)' }}>
-            <circle
-              cx="25" cy="25" r="20"
-              stroke="rgba(255, 255, 255, 0.8)"
-              strokeWidth="4"
-              fill="none"
-              strokeDasharray="125.6"
-              strokeDashoffset={125.6 * (1 - globalPointer.clickProgress)}
-              style={{ transition: 'stroke-dashoffset 0.1s linear' }}
-            />
-          </svg>
-        </div>
-      )}
+      {/* ── Global pointer overlay (Find & Type) ──────────────────────
+          The same hand as the tracing step, over the whole viewport, with the
+          dwell-to-click ring drawn around its fingertip. Both the transform and
+          the ring are written by the animation loop, so the pointer keeps up
+          with the camera without re-rendering the screen. */}
+      <svg
+        className="tt-global-pointer"
+        aria-hidden="true"
+        style={{
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          width: '100vw',
+          height: '100vh',
+          pointerEvents: 'none',
+          zIndex: 9999,
+          overflow: 'visible',
+        }}
+      >
+        <HandDefs />
+        <g ref={gHandGroupRef} className="tt-hand-pointer">
+          <HandArt />
+          {/* dwell-to-click progress, sweeping around the fingertip */}
+          <circle
+            cx="0" cy="4" r={DWELL_R}
+            fill="none"
+            stroke="#A5FFF4"
+            strokeWidth="4"
+            strokeLinecap="round"
+            strokeDasharray={DWELL_C}
+            transform="rotate(-90 0 4)"
+            className="tt-dwell-ring"
+            ref={gDwellRingRef}
+          />
+        </g>
+      </svg>
 
       {/* ── Alphabet Progress Bar ─────────────────────────────────── */}
       <div className="tt-alphabet-bar">

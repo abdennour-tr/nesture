@@ -636,12 +636,14 @@
   fill: var(--tt-surface-solid);
   stroke: var(--tt-indigo);
   stroke-width: 2;
+  opacity: 0.75;
   transition: all 0.3s ease;
 }
 
 .tt-trace-waypoint-circle.reached {
   fill: var(--tt-success);
   stroke: #fff;
+  opacity: 1;
   filter: drop-shadow(0 0 10px var(--tt-success-glow));
   animation: tt-waypoint-burst 0.5s ease-out;
 }
@@ -663,22 +665,107 @@
   fill: var(--tt-indigo);
   stroke: #fff;
   stroke-width: 3;
+  opacity: 1;
   animation: tt-waypoint-pulse 1.2s ease-in-out infinite;
 }
 
-.tt-trace-waypoint-number {
-  fill: var(--tt-text-dim);
-  font-size: 11px;
-  font-weight: 700;
-  text-anchor: middle;
-  dominant-baseline: central;
+/* ── Hand pointer ─────────────────────────────────────────────────────────
+   The live pointer follows the tracked hand; its transform is written by the
+   rAF loop in TraceTypeGame.jsx, so nothing here may set `transform`.        */
+.tt-hand-pointer {
   pointer-events: none;
-  transition: fill 0.3s ease;
+  will-change: transform, opacity;
+  /* the animation loop owns this through inline style; the rule below only
+     keeps the pointer hidden until the first frame has positioned it */
+  opacity: 0;
 }
 
-.tt-trace-waypoint-number.reached,
-.tt-trace-waypoint-number.active {
-  fill: #fff;
+/* dwell-to-click ring around the fingertip on the Find / Type steps */
+.tt-dwell-ring {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The ghosted "start here" hand, shown only while no hand is tracked. */
+.tt-hand-hint {
+  pointer-events: none;
+  opacity: 0.55;
+  animation: tt-hand-hint-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes tt-hand-hint-breathe {
+  0%, 100% { opacity: 0.38; }
+  50%      { opacity: 0.62; }
+}
+
+/* Soft halo on the waypoint the finger is heading for. */
+.tt-trace-target-glow {
+  pointer-events: none;
+  animation: tt-target-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes tt-target-glow {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+/* ── Direction arrows (replace the old step numbers) ─────────────────────── */
+.tt-trace-arrow-head {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tt-trace-arrow.next {
+  opacity: 0.4;
+}
+
+.tt-trace-arrow.next .tt-trace-arrow-head.trail {
+  opacity: 0.5;
+}
+
+.tt-trace-arrow.active {
+  opacity: 1;
+}
+
+.tt-trace-arrow.active .tt-trace-arrow-anim {
+  animation: tt-arrow-nudge 1.1s ease-in-out infinite;
+}
+
+.tt-trace-arrow.active .tt-trace-arrow-head {
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.85));
+}
+
+/* A "jump" is a pen lift: amber, with a dashed shaft trailing the arrowhead,
+   so it clearly means "lift your finger and start a new stroke here". */
+.tt-trace-arrow-shaft {
+  display: none;
+  fill: none;
+  stroke: var(--tt-warning, #F59E0B);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 4 5;
+}
+
+.tt-trace-arrow.jump .tt-trace-arrow-shaft {
+  display: block;
+}
+
+.tt-trace-arrow.jump .tt-trace-arrow-head {
+  stroke: var(--tt-warning, #F59E0B);
+  stroke-width: 3.4;
+}
+
+/* the trailing chevron would crowd the dashed shaft */
+.tt-trace-arrow.jump .tt-trace-arrow-head.trail {
+  display: none;
+}
+
+@keyframes tt-arrow-nudge {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(3px); }
 }
 
 @keyframes tt-waypoint-pulse {
@@ -692,18 +779,7 @@
   transition: cx 0.05s linear, cy 0.05s linear;
 }
 
-.tt-trace-finger-ring {
-  fill: none;
-  stroke: var(--tt-accent);
-  stroke-width: 2;
-  opacity: 0.4;
-  animation: tt-finger-ring-pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes tt-finger-ring-pulse {
-  0%, 100% { r: 18; opacity: 0.4; }
-  50% { r: 24; opacity: 0.15; }
-}
+/* The old ring cursor is gone — the hand pointer is the cursor now. */
 
 .tt-trace-feedback {
   text-align: center;

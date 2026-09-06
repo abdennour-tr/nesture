@@ -34,6 +34,8 @@ import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/LadybugGame.css';
 
+import { HandDefs, HandArt, steadyAngle, followHand, makeHandState, handFlip } from '../components/game/HandPointer';
+import { createHandPointerFilter, handDepthScale } from '../utils/handPointerFilter';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — the play field uses a fixed virtual coordinate space that is
    scaled to the rendered element. All game math happens in this space so the
@@ -62,7 +64,10 @@ const LEVELS = {
 };
 
 /* ── Tracking / scoring constants ───────────────────────────────────────── */
-const EMA_ALPHA          = 0.35;  // pointer smoothing (matches TraceTypeGame feel)
+/* Touch and mouse only. The camera pointer is smoothed by
+   `handPointerFilter`, which adapts to speed and to how far away the child is
+   sitting; a fixed alpha on top of it would only put the lag back. */
+const EMA_ALPHA          = 0.35;  // pointer smoothing (touch/mouse input)
 const BUG_LERP           = 0.5;   // how tightly the bug trails the finger
 const ANGLE_LERP         = 0.18;  // rotation smoothing so the bug doesn't twitch
 const RELEASE_FACTOR     = 2.0;   // release radius = grabRadius × this
@@ -399,6 +404,22 @@ export default function LadybugGame() {
   const lastTsRef     = useRef(0);
   const scoreRef      = useRef(0);
   const pointerRef    = useRef(null);   // { x, y } smoothed, virtual coords
+
+  /* ── Hand pointer ─────────────────────────────────────────────────────────
+     The same hand as the other gesture games. Tracking writes where the hand
+     is into `handTargetRef`; the loop below eases the drawn pointer towards it
+     and writes the transform onto the node, so the pointer keeps up with the
+     camera without re-rendering the board. Coordinates are CSS pixels of the
+     field: the field stretches the 1000x560 virtual space by a different
+     factor on each axis, and the hand must not stretch with it.
+     Grab / on-path / off-path feedback stays on the canvas halo and trail
+     underneath, which already change colour with the state. */
+  const handGroupRef  = useRef(null);
+  /* Camera pointer conditioning — see src/utils/handPointerFilter.js. */
+  const handFilterRef = useRef(null);
+  if (!handFilterRef.current) handFilterRef.current = createHandPointerFilter();
+  const handTargetRef = useRef({ ...makeHandState(0.6), vx: 0, vy: 0, dirX: 0, dirY: -1, depth: 1 });
+  const handShownRef  = useRef(makeHandState(0.6));
   const trailRef      = useRef([]);
   const onPathRef     = useRef(true);
   const touchActiveRef = useRef(false);
@@ -466,11 +487,13 @@ export default function LadybugGame() {
     };
   }, []);
 
-  /** Feed a raw sample through the EMA filter. */
-  const pushPointer = useCallback((pt) => {
+  /** Feed a sample in. `preFiltered` samples (the camera pointer, which has
+      already been through handPointerFilter) skip the EMA — smoothing an
+      already-smoothed signal only adds lag back. */
+  const pushPointer = useCallback((pt, preFiltered = false) => {
     if (!pt) return;
     const prev = pointerRef.current;
-    if (!prev) {
+    if (!prev || preFiltered) {
       pointerRef.current = { x: pt.x, y: pt.y };
     } else {
       pointerRef.current = {
@@ -478,6 +501,11 @@ export default function LadybugGame() {
         y: prev.y + (pt.y - prev.y) * EMA_ALPHA,
       };
     }
+    // the hand follows the same smoothed point the game aims with
+    const h = handTargetRef.current;
+    h.vx = pointerRef.current.x;
+    h.vy = pointerRef.current.y;
+    h.on = 1;
   }, []);
 
   /** Place the ladybug + write its transform. Called from the loop. */
@@ -497,11 +525,77 @@ export default function LadybugGame() {
      ═════════════════════════════════════════════════════════════════════════ */
   useEffect(() => {
     if (mode !== 'camera' || !isPlaying) return;
-    if (!landmarks || landmarks.length < 9) return;
+    if (!landmarks || landmarks.length < 18) {
+      handTargetRef.current.on = 0;   // hand left the frame: fade the pointer out
+      handFilterRef.current.lost();
+      return;
+    }
     const tip = landmarks[8];
     if (!tip) return;
-    pushPointer({ x: (1 - tip.x) * VW, y: tip.y * VH });
+
+    /* Distance-normalised, speed-adaptive, latency-compensated. The whole
+       point: an arm sweep covers the same amount of field whether the child
+       is leaning into the camera or sitting back from it. */
+    const p = handFilterRef.current.push(landmarks);
+    if (!p) return;
+    pushPointer({ x: p.x * VW, y: p.y * VH }, true);
+
+    /* Orientation for the drawn hand: knuckle→tip says where the finger points,
+       wrist→knuckle gives a little depth, and the side the little finger falls
+       on says whether to mirror it. Kept in virtual units here and converted to
+       pixels in the loop, where the field's two scale factors are known. */
+    const mcp = landmarks[5];
+    if (!mcp) return;
+    const h = handTargetRef.current;
+    const dx = (1 - tip.x) * VW - (1 - mcp.x) * VW;
+    const dy = tip.y * VH - mcp.y * VH;
+    if (Math.hypot(dx, dy) > 4) {
+      h.dirX = dx;
+      h.dirY = dy;
+      const little = landmarks[17];
+      if (little) {
+        h.flip = handFlip(dx, dy, (1 - mcp.x) * VW, mcp.y * VH,
+                          (1 - little.x) * VW, little.y * VH);
+      }
+    }
+    /* Depth from the same palm measurement the gain uses, rather than a wrist
+       span in virtual units — that one changed meaning with the field's
+       aspect ratio and collapsed whenever the palm tilted. */
+    h.depth = handDepthScale(p.span);
   }, [landmarks, mode, isPlaying, pushPointer]);
+
+  /* Hide the pointer whenever the game is not actually running. The filter's
+     motion state goes with it, so resuming does not carry a stale velocity
+     into the first frame; the learnt reach centre and distance survive,
+     because the child has not moved their chair. */
+  useEffect(() => {
+    if (!isPlaying) { handTargetRef.current.on = 0; handFilterRef.current.lost(); }
+  }, [isPlaying]);
+
+  /* Follow loop: virtual units -> field pixels, then ease and draw. */
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const el = fieldRef.current;
+      const node = handGroupRef.current;
+      if (el && node) {
+        const r = el.getBoundingClientRect();
+        const kx = r.width / VW;
+        const ky = r.height / VH;
+        const h = handTargetRef.current;
+        h.x = h.vx * kx;
+        h.y = h.vy * ky;
+        // the angle has to be measured in pixels: the field scales x and y differently
+        h.rot = steadyAngle(h.rot,
+          (Math.atan2(h.dirY * ky, h.dirX * kx) * 180) / Math.PI + 90);
+        h.scale = (r.height / VH) * 0.6 * h.depth;
+        followHand(h, handShownRef.current, node);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   /* ── Touch / mouse input ── */
   const handlePointerDown = useCallback((e) => {
@@ -878,22 +972,10 @@ export default function LadybugGame() {
     ctx.fillStyle = `rgba(${base}, 0.14)`;
     ctx.fill();
 
-    ctx.shadowBlur = 22;
-    ctx.shadowColor = `rgba(${base}, 0.85)`;
-
-    ctx.beginPath();
-    ctx.arc(sx, sy, 18, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${base}, 0.22)`;
-    ctx.fill();
-    ctx.lineWidth = 3.5;
-    ctx.strokeStyle = `rgba(${base}, 0.95)`;
-    ctx.stroke();
-
-    ctx.shadowBlur = 0;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 4.5, 0, Math.PI * 2);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fill();
+    /* The ring and the centre dot used to be drawn here. The hand pointer (an
+       SVG layer above this canvas) is the cursor now; the halo and the trail
+       stay, because they are what carries the grab / on-path / off-path
+       colour. */
   }, []);
 
   /* ═════════════════════════════════════════════════════════════════════════
@@ -1159,6 +1241,16 @@ export default function LadybugGame() {
 
           {/* Pointer overlay (glow + trail) */}
           <canvas className="lb-pointer-canvas" ref={pointerCanvasRef} />
+
+          {/* Hand pointer. Its transform is written by the loop above, so this
+              layer never re-renders while the hand moves. */}
+          <svg className="lb-hand-layer" aria-hidden="true">
+            <HandDefs theme="green" />
+            <g ref={handGroupRef} className="lb-hand-pointer">
+              {/* the garden is bright, so the hand gets its dark backing */}
+              <HandArt contrast />
+            </g>
+          </svg>
 
           {/* Ladybug */}
           <Ladybug ref={bugRef} />

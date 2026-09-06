@@ -38,6 +38,8 @@ import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/BubbleGame.css';
 
+import { HandDefs, HandArt, steadyAngle, followHand, makeHandState, handFlip } from '../components/game/HandPointer';
+import { createHandPointerFilter, handDepthScale } from '../utils/handPointerFilter';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — fixed virtual space, scaled to the rendered field, so difficulty
    tuning behaves identically on every screen size.
@@ -68,6 +70,9 @@ const LEVELS = {
 };
 
 /* ── Constants ──────────────────────────────────────────────────────────── */
+/* Touch and mouse only. The camera pointer is smoothed by
+   `handPointerFilter`, which adapts to speed and to how far away the child is
+   sitting; a fixed alpha on top of it would only put the lag back. */
 const EMA_ALPHA        = 0.35;
 const TRAIL_LENGTH     = 8;
 const BASE_POINTS      = 10;
@@ -85,7 +90,24 @@ const MOVE_START_SPEED = 60;    // px/s that counts as "the reach has begun"
 const CORRECTION_ANGLE = Math.PI / 2;  // >90° heading change = a correction
 const PARTICLES        = 8;
 const POP_MS           = 400;
-const REF_THROUGHPUT   = 3.5;   // bits/s — typical adult pointing performance
+/* ── Composite calibration ────────────────────────────────────────────────
+   The five sub-scores are what the exercise measures; the composite is what the
+   child and the therapist read. Scoring each sub-score against a perfect ideal
+   made the composite structurally unreachable: a fingertip tracked by a webcam
+   never travels in a straight line, never lands dead centre and never moves
+   without jitter, so path efficiency, smoothness and throughput were docked for
+   the camera rather than for the child.
+
+   Each sub-score is therefore measured against what a genuinely strong run
+   looks like ON CAMERA. Reaching the reference scores 100. The raw metrics
+   reported below are untouched — only the composite is normalised — so the
+   clinical numbers stay honest while the headline number becomes meaningful. */
+const REF_THROUGHPUT   = 2.6;   // bits/s — strong hand-tracked pointing (a mouse does ~3.5-4.5)
+const REF_ACCURACY     = 80;    // % — popping about a fifth of the radius from the centre
+const REF_PATH_EFF     = 82;    // % — a real reach curves; 100% would mean a ruler-straight line
+const REF_SMOOTHNESS   = 75;    // %
+const REF_HIT_RATE     = 88;    // % of the bubbles that appeared
+const JERK_CAP         = 3400;  // jerk that maps smoothness to 0 (webcam jitter inflates it)
 const SWEEP_EFFICIENCY = 35;    // below this %, movement reads as sweeping
 const COUNTDOWN_SECONDS = 3;
 const RULES_FLAG       = 'bubble_rules_seen';
@@ -149,8 +171,33 @@ export default function BubbleGame() {
   const lastTsRef   = useRef(0);
   const elapsedRef  = useRef(0);
   const pointerRef  = useRef(null);
+
+  /* ── Hand pointer ─────────────────────────────────────────────────────────
+     The same hand as the tracing game. Tracking writes where the hand is into
+     `handTargetRef`; the loop below eases the drawn pointer towards it and
+     writes the transform straight onto the node, so the pointer keeps up with
+     the camera without re-rendering the board. Coordinates are CSS pixels of
+     the field, because the field stretches the 1000x560 virtual space by a
+     different factor on each axis. */
+  const handGroupRef  = useRef(null);
+  /* Camera pointer conditioning — see src/utils/handPointerFilter.js. */
+  const handFilterRef = useRef(null);
+  if (!handFilterRef.current) handFilterRef.current = createHandPointerFilter();
+  const handTargetRef = useRef({ ...makeHandState(0.62), vx: 0, vy: 0, dirX: 0, dirY: -1, depth: 1 });
+  const handShownRef  = useRef(makeHandState(0.62));
   const trailRef    = useRef([]);
   const touchActiveRef = useRef(false);
+  /* Touch mode is a TAPPING task: touch a bubble, it pops. It is not a
+     dragging task — keeping a finger on the glass and steering it is a
+     different motor skill entirely, the one Ladybug trains. A tap is recorded
+     here and consumed by the game loop on the next frame, so a tap shorter
+     than one frame still counts, and it is scored against the bubble
+     positions of that exact frame. */
+  const tapPendingRef  = useRef(false);
+  /* Set when the pointer teleports (a new tap somewhere else) so the frame's
+     kinematics — path length, corrections, jerk — do not read the jump as a
+     violently fast hand movement. */
+  const ptrJumpedRef   = useRef(false);
   const nodesRef    = useRef([]);   // [{ root, circle, ring, ringLen }]
   const bubblesRef  = useRef([]);   // active bubble models, index-aligned to nodes
   const freeRef     = useRef([]);   // free node indices
@@ -239,39 +286,132 @@ export default function BubbleGame() {
     };
   }, []);
 
-  const pushPointer = useCallback((pt) => {
+  /** `preFiltered` samples (the camera pointer, already conditioned by
+      handPointerFilter) skip the EMA — smoothing a smoothed signal only puts
+      the lag back. */
+  const pushPointer = useCallback((pt, preFiltered = false) => {
     if (!pt) return;
     const prev = pointerRef.current;
-    pointerRef.current = prev
+    pointerRef.current = (prev && !preFiltered)
       ? { x: prev.x + (pt.x - prev.x) * EMA_ALPHA, y: prev.y + (pt.y - prev.y) * EMA_ALPHA }
       : { x: pt.x, y: pt.y };
+    // the hand follows the same smoothed point the game aims with
+    const h = handTargetRef.current;
+    h.vx = pointerRef.current.x;
+    h.vy = pointerRef.current.y;
+    h.on = 1;
   }, []);
 
   useEffect(() => {
     if (mode !== 'camera' || !isPlaying) return;
-    if (!landmarks || landmarks.length < 9) return;
+    if (!landmarks || landmarks.length < 18) {
+      handTargetRef.current.on = 0;   // hand left the frame: fade the pointer out
+      handFilterRef.current.lost();
+      return;
+    }
     const tip = landmarks[8];
     if (!tip) return;
-    pushPointer({ x: (1 - tip.x) * VW, y: tip.y * VH });
+
+    /* Distance-normalised, speed-adaptive, latency-compensated: the same
+       reach pops a bubble at the edge of the field whether the child is
+       leaning into the camera or sitting back from it. */
+    const p = handFilterRef.current.push(landmarks);
+    if (!p) return;
+    pushPointer({ x: p.x * VW, y: p.y * VH }, true);
+
+    /* Orientation for the drawn hand. The knuckle→tip vector says which way the
+       finger points, the wrist→knuckle span gives a little depth, and the side
+       the little finger falls on says whether to mirror the hand. Everything is
+       kept in virtual units here and converted to pixels in the loop, where the
+       field's two scale factors are known. */
+    const mcp = landmarks[5];
+    if (!mcp) return;
+    const h = handTargetRef.current;
+    const dx = (1 - tip.x) * VW - (1 - mcp.x) * VW;
+    const dy = tip.y * VH - mcp.y * VH;
+    if (Math.hypot(dx, dy) > 4) {
+      h.dirX = dx;
+      h.dirY = dy;
+      const little = landmarks[17];
+      if (little) {
+        h.flip = handFlip(dx, dy, (1 - mcp.x) * VW, mcp.y * VH,
+                          (1 - little.x) * VW, little.y * VH);
+      }
+    }
+    /* Depth from the same palm measurement the gain uses, rather than a wrist
+       span in virtual units — that one changed meaning with the field's
+       aspect ratio and collapsed whenever the palm tilted. */
+    h.depth = handDepthScale(p.span);
   }, [landmarks, mode, isPlaying, pushPointer]);
+
+  /* Hide the pointer whenever the game is not actually running. The filter's
+     motion state goes with it; the learnt reach centre and distance survive. */
+  useEffect(() => {
+    if (!isPlaying) { handTargetRef.current.on = 0; handFilterRef.current.lost(); }
+  }, [isPlaying]);
+
+  /* Follow loop: virtual units -> field pixels, then ease and draw. */
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const el = fieldRef.current;
+      const node = handGroupRef.current;
+      if (el && node) {
+        const r = el.getBoundingClientRect();
+        const kx = r.width / VW;
+        const ky = r.height / VH;
+        const h = handTargetRef.current;
+        h.x = h.vx * kx;
+        h.y = h.vy * ky;
+        // the angle has to be measured in pixels: the field scales x and y differently
+        h.rot = steadyAngle(h.rot,
+          (Math.atan2(h.dirY * ky, h.dirX * kx) * 180) / Math.PI + 90);
+        h.scale = (r.height / VH) * 0.62 * h.depth;
+        followHand(h, handShownRef.current, node);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   const handlePointerDown = useCallback((e) => {
     if (mode !== 'touch' || !isPlaying) return;
     touchActiveRef.current = true;
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* noop */ }
-    pushPointer(clientToVirtual(e.clientX, e.clientY));
+    /* The pointer JUMPS to the touch. It used to be eased in at EMA_ALPHA,
+       which meant a tap only moved it 35% of the way there: the child touched
+       a bubble, nothing popped, and the only way to finish the job was to keep
+       the finger down and drag the pointer the rest of the way. That is the
+       bug, and this is the fix. */
+    ptrJumpedRef.current = true;
+    pushPointer(clientToVirtual(e.clientX, e.clientY), true);
+    tapPendingRef.current = true;
   }, [mode, isPlaying, clientToVirtual, pushPointer]);
 
   const handlePointerMove = useCallback((e) => {
     if (mode !== 'touch' || !isPlaying) return;
     if (!touchActiveRef.current && e.pointerType === 'touch') return;
+    /* Dragging still works for a child who prefers to slide their finger
+       between bubbles — it just is not required any more. */
     pushPointer(clientToVirtual(e.clientX, e.clientY));
   }, [mode, isPlaying, clientToVirtual, pushPointer]);
 
   const handlePointerUp = useCallback((e) => {
     touchActiveRef.current = false;
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* noop */ }
-  }, []);
+    if (mode !== 'touch') return;
+    /* Lifting takes the pointer off the board. Leaving it parked where the
+       last tap landed meant the next bubble to float up through that spot
+       popped itself, with nobody touching anything. */
+    pointerRef.current = null;
+    handTargetRef.current.on = 0;
+    tapPendingRef.current = false;
+    /* The lift is where the reach to the NEXT bubble begins, so it is the
+       honest zero for movement time: everything before it was the child
+       deciding, everything after it is the child travelling. */
+    if (reachMovedAtRef.current == null) reachMovedAtRef.current = performance.now();
+  }, [mode]);
 
   /* ═════════════════════════════════════════════════════════════════════════
      SPAWN / DESPAWN
@@ -394,16 +534,36 @@ export default function BubbleGame() {
     const accuracy = mean(precisionsRef.current) * 100;
     const throughput = mean(tpsRef.current);
     const tpScore = clamp01(throughput / REF_THROUGHPUT) * 100;
+    /* ── Path-based metrics only exist if there WAS a path ────────────────
+       Touch mode is a tapping task: the finger travels through the air, not
+       across the glass, so between two taps there is nothing to measure. An
+       empty jerk buffer averages to zero, which used to come out as a perfect
+       100% smoothness, and a zero-length path came out as 100% efficiency —
+       two fabricated top marks that would have made every tap session look
+       better than every camera one. They are reported as "not measured"
+       instead, and the composite is renormalised over what was. */
     const pathEff = travelledRef.current > 0
       ? clamp01(straightRef.current / travelledRef.current) * 100
-      : 0;
-    const meanJerk = mean(jerkRef.current);
-    const smoothness = clamp01(1 - meanJerk / 2600) * 100;
+      : null;
+    const smoothness = jerkRef.current.length
+      ? clamp01(1 - mean(jerkRef.current) / JERK_CAP) * 100
+      : null;
     const attempted = Math.max(1, poppedRef.current + missedRef.current);
     const hitRate = (poppedRef.current / attempted) * 100;
 
+    /* Each sub-score against its reference (see the constants above), then a
+       weighted mean over the components that actually have data. */
+    const vs = (value, reference) => clamp01(value / reference) * 100;
+    const parts = [
+      [vs(accuracy, REF_ACCURACY), 0.30],
+      [tpScore, 0.25],
+      [pathEff == null ? null : vs(pathEff, REF_PATH_EFF), 0.20],
+      [smoothness == null ? null : vs(smoothness, REF_SMOOTHNESS), 0.15],
+      [vs(hitRate, REF_HIT_RATE), 0.10],
+    ].filter(([v]) => v != null);
+    const weight = parts.reduce((a, [, w]) => a + w, 0);
     const composite = Math.round(
-      accuracy * 0.30 + tpScore * 0.25 + pathEff * 0.20 + smoothness * 0.15 + hitRate * 0.10
+      parts.reduce((a, [v, w]) => a + v * w, 0) / (weight || 1)
     );
 
     setResults({
@@ -416,12 +576,12 @@ export default function BubbleGame() {
       movementMs: mtsRef.current.length ? Math.round(mean(mtsRef.current)) : null,
       throughput: Math.round(throughput * 100) / 100,
       meanID: Math.round(mean(idsRef.current) * 100) / 100,
-      pathEfficiency: Math.round(pathEff),
+      pathEfficiency: pathEff == null ? null : Math.round(pathEff),
       corrections: correctionsRef.current,
-      smoothness: Math.round(smoothness),
+      smoothness: smoothness == null ? null : Math.round(smoothness),
       hitRate: Math.round(hitRate),
       composite,
-      sweeping: pathEff > 0 && pathEff < SWEEP_EFFICIENCY,
+      sweeping: pathEff != null && pathEff > 0 && pathEff < SWEEP_EFFICIENCY,
     });
     setGamePhase('results');
     if (soundEnabled) soundManager.playCelebration();
@@ -449,7 +609,10 @@ export default function BubbleGame() {
 
       /* ── Pointer kinematics: path length, reach onset, corrections, jerk ── */
       if (ptr) {
-        if (lastPtrRef.current) {
+        if (!lastPtrRef.current) {
+          reachStartPosRef.current = { x: ptr.x, y: ptr.y };
+          reachStartTsRef.current = ts;
+        } else if (!ptrJumpedRef.current) {
           const dx = ptr.x - lastPtrRef.current.x;
           const dy = ptr.y - lastPtrRef.current.y;
           const dist = Math.hypot(dx, dy);
@@ -470,10 +633,8 @@ export default function BubbleGame() {
             }
             headingRef.current = heading;
           }
-        } else {
-          reachStartPosRef.current = { x: ptr.x, y: ptr.y };
-          reachStartTsRef.current = ts;
         }
+        ptrJumpedRef.current = false;
         lastPtrRef.current = { x: ptr.x, y: ptr.y };
       }
 
@@ -514,6 +675,21 @@ export default function BubbleGame() {
         if (ptr) {
           const d = Math.hypot(ptr.x - b.x, ptr.y - b.y);
           if (d <= b.r && d < hoverDist) { hoverDist = d; hoverIdx = i; }
+        }
+      }
+
+      /* ── A tap pops what it lands on, immediately ───────────────────────
+            Consumed here rather than in the event handler so it is judged
+            against this frame's bubble positions — they rise and sway, and
+            a bubble the child touched is a bubble they hit. */
+      if (tapPendingRef.current) {
+        tapPendingRef.current = false;
+        if (hoverIdx >= 0 && ptr) {
+          dwellIdxRef.current = hoverIdx;        // so despawn clears the highlight
+          dwellMinDistRef.current = hoverDist;   // the tap itself is the closest approach
+          popBubble(hoverIdx, ts, ptr);
+          hoverIdx = -1;
+          hoverDist = Infinity;
         }
       }
 
@@ -604,36 +780,8 @@ export default function BubbleGame() {
       ctx.fill();
     }
 
-    const pulse = 1 + 0.12 * Math.sin(ts / 220);
-    ctx.beginPath();
-    ctx.arc(sx, sy, 28 * pulse, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${base}, 0.12)`;
-    ctx.fill();
-
-    ctx.shadowBlur = 22;
-    ctx.shadowColor = `rgba(${base}, 0.9)`;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 17, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(${base}, 0.2)`;
-    ctx.fill();
-    ctx.lineWidth = 3.5;
-    ctx.strokeStyle = `rgba(${base}, 0.95)`;
-    ctx.stroke();
-
-    // Crosshair ticks make the aiming point unambiguous for a child.
-    ctx.beginPath();
-    ctx.moveTo(sx - 26, sy); ctx.lineTo(sx - 21, sy);
-    ctx.moveTo(sx + 21, sy); ctx.lineTo(sx + 26, sy);
-    ctx.moveTo(sx, sy - 26); ctx.lineTo(sx, sy - 21);
-    ctx.moveTo(sx, sy + 21); ctx.lineTo(sx, sy + 26);
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-
-    ctx.shadowBlur = 0;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 3.5, 0, Math.PI * 2);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fill();
+    /* The aiming reticle used to be drawn here. The hand pointer (an SVG layer
+       above this canvas) is the cursor now, so only its trail is drawn. */
   }, []);
 
   /* ═════════════════════════════════════════════════════════════════════════
@@ -730,6 +878,11 @@ export default function BubbleGame() {
     spawnAccRef.current = 0;
     dwellIdxRef.current = -1;
     dwellMinDistRef.current = Infinity;
+    pointerRef.current = null;
+    tapPendingRef.current = false;
+    ptrJumpedRef.current = false;
+    touchActiveRef.current = false;
+    handTargetRef.current.on = 0;
     for (let i = 0; i < bubblesRef.current.length; i++) despawn(i);
     freeRef.current = poolSpec.slice();
   }, [despawn, poolSpec]);
@@ -958,6 +1111,16 @@ export default function BubbleGame() {
           <canvas className="bg-fx-canvas" ref={fxCanvasRef} />
           <canvas className="bg-pointer-canvas" ref={pointerCanvasRef} />
 
+          {/* Hand pointer. Its transform is written by the loop above, so this
+              layer never re-renders while the hand moves. */}
+          <svg className="bg-hand-layer" aria-hidden="true">
+            <HandDefs theme="coral" />
+            <g ref={handGroupRef} className="bg-hand-pointer">
+              {/* the sea is bright, so the hand gets its dark backing */}
+              <HandArt contrast />
+            </g>
+          </svg>
+
           <div className="bg-cam-hidden">
             <video ref={videoRef} playsInline muted />
             <canvas ref={trackCanvasRef} />
@@ -1055,9 +1218,11 @@ export default function BubbleGame() {
                   value={results.movementMs == null ? '—' : `${(results.movementMs / 1000).toFixed(2)}s`} />
                 <Metric icon={<TrendingUp size={16} />} label="Throughput"
                   value={`${results.throughput} bit/s`} />
-                <Metric icon={<GitBranch size={16} />} label="Path Efficiency" value={`${results.pathEfficiency}%`} />
+                <Metric icon={<GitBranch size={16} />} label="Path Efficiency"
+                  value={results.pathEfficiency == null ? '—' : `${results.pathEfficiency}%`} />
                 <Metric icon={<RotateCcw size={16} />} label="Corrections"     value={results.corrections} />
-                <Metric icon={<Activity size={16} />}  label="Smoothness"      value={`${results.smoothness}%`} />
+                <Metric icon={<Activity size={16} />}  label="Smoothness"
+                  value={results.smoothness == null ? '—' : `${results.smoothness}%`} />
                 <Metric icon={<XCircle size={16} />}   label="Missed"          value={results.missed} />
               </div>
 
@@ -1094,9 +1259,11 @@ export default function BubbleGame() {
 /* ═══════════════════════════════════════════════════════════════════════════
    RULES MODAL
    ═══════════════════════════════════════════════════════════════════════════ */
-const RULES = [
+const rulesFor = (mode) => [
   { icon: '🫧', text: 'Bubbles float up from the bottom of the sea.' },
-  { icon: '☝️', text: 'Point at the centre of a bubble with your index finger to pop it.' },
+  mode === 'camera'
+    ? { icon: '☝️', text: 'Point at the centre of a bubble with your index finger to pop it.' }
+    : { icon: '👆', text: 'Tap a bubble to pop it — one touch is enough.' },
   { icon: '🎯', text: 'The closer to the centre you aim, the more points you earn.' },
   { icon: '🐠', text: 'Bubbles that reach the surface escape — be quick!' },
   { icon: '⏱️', text: 'Pop as many bubbles as you can before time runs out.' },
@@ -1139,7 +1306,7 @@ function RulesModal({ level, mode, cfg, onStart }) {
         </div>
 
         <ul className="bg-rules-list">
-          {RULES.map((r, i) => (
+          {rulesFor(mode).map((r, i) => (
             <motion.li key={i}
               initial={{ opacity: 0, x: -18 }} animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.12 + i * 0.07 }}>
@@ -1149,10 +1316,14 @@ function RulesModal({ level, mode, cfg, onStart }) {
           ))}
         </ul>
 
-        {mode === 'camera' && (
+        {mode === 'camera' ? (
           <p className="bg-rules-tip">
             💡 In camera mode, hold your finger on a bubble for a moment — the ring
             fills up, then it pops.
+          </p>
+        ) : (
+          <p className="bg-rules-tip">
+            💡 Tap and lift — you don&apos;t need to keep your finger on the screen.
           </p>
         )}
 
