@@ -206,9 +206,9 @@ export const GAMES = {
     modes: ['camera', 'touch'],
     steps: [
       'Hold your hand open in front of the camera.',
-      'A key lights up — tap it with the finger it names.',
-      'Keep the rhythm going to build your streak.',
-      'Finish the tune to complete the round.',
+      'A key lights up on the piano at the top of the screen.',
+      'The drawn hand below shows which finger to use — tap that finger in the air.',
+      'Move only that finger; finish the tune to complete the round.',
     ],
   },
   'trace-type': {
@@ -241,19 +241,24 @@ export const GAMES = {
       'Finish on the red dot to complete the shape.',
     ],
   },
+  /* LetterQuest is the spelling game (GamePage.jsx, route /play/game), set up
+     from the NesturePlay Options screen. This entry used to describe a map to
+     travel with stops to unlock — a game that does not exist. It was never
+     rendered, which is exactly why the invention survived; it is corrected here
+     so nothing downstream repeats it. */
   letterquest: {
     id: 'letterquest',
-    emoji: '🗺️',
+    emoji: '🔤',
     title: 'LetterQuest',
-    route: '/play/letterquest',
-    accent: ['#14B8A6', '#0D9488'],
-    subtitle: 'Travel the letter map and collect every letter you meet.',
+    route: '/play/difficulty',
+    accent: ['#1A8FA0', '#0D5E6B'],
+    subtitle: 'Spell the word by picking its letters out of the keyboard, one at a time.',
     modes: ['camera', 'touch'],
     steps: [
-      'Pick your route on the map.',
-      'Complete each letter challenge to unlock the next stop.',
-      'Collect stars along the way.',
-      'Reach the end of the map to finish the quest.',
+      'A word appears at the top of the screen.',
+      'Point at the letter you need and hold still — the ring fills, then the key is pressed.',
+      'Keep going until the whole word is spelled.',
+      'Pick a longer word list, a bigger keyboard or Self Expression from the options screen.',
     ],
   },
 };

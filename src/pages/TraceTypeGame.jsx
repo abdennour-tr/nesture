@@ -446,12 +446,75 @@ export default function TraceTypeGame() {
        time constant as the distance gain, so it never shifts mid-reach.
 
        Left off for Pop the Bubble and Follow the Ladybug, which the client
-       reported as working well — this is opt-in per screen. */
-    handFilterRef.current = createHandPointerFilter({ fitReach: true });
+       reported as working well — this is opt-in per screen.
+
+       THE TWO OVERRIDES BELOW go with the change of what 0..1 is stretched
+       over (see `boundsRef`). The pointer no longer crosses the window, it
+       crosses the card — a square of at most 560px — so the numbers that were
+       right for a 1400px viewport are not right here.
+
+         `reachTarget` 1.05, up from the global 0.76. Inside a card, "reach the
+         whole thing" is what matters: the letter's own waypoints run from 17%
+         to 88% across and 13% to 90% down the card, so a child whose reach only
+         covered 75% x 66% — which 0.76 gives — could not physically get to the
+         top or the bottom of the letter. 1.05 gives 89% x 79%, which clears it.
+
+         `stillEps` 0.012, up from 0.008. The deadband is scaled by the gain in
+         use, and that gain is higher here; 0.012 works out at about 15px of the
+         card, comfortably inside the ~58px the game accepts as touching a
+         waypoint, and it is what takes the held pointer from 5.8 direction
+         changes a second down to 2.3.
+
+       Measured, hand held on a target for 4s (webcam noise + a 6Hz tremor):
+
+                                 wander   travel while held   reversals/s
+           over the window        37 px       71 px/s             9.8
+           in the card (now)      13 px        4 px/s             2.3
+    */
+    handFilterRef.current = createHandPointerFilter({
+      fitReach: true,
+      reachTarget: 1.05,
+      stillEps: 0.012,
+      /* …and `minCutoff` goes back UP to 1.0, against the global 0.6.
+         The global value is low because out there the deadband is small and the
+         smoothing has to do the stabilising on its own. In here the deadband is
+         doing that job already, so the heavy smoothing was buying nothing and
+         only costing response. Measured in the card:
+
+                            wander   travel while held   reversals/s   lag
+             minCutoff 0.6   13.2px      4 px/s              2.3      167 ms
+             minCutoff 1.0   13.5px      4 px/s              1.8      133 ms
+
+         Just as steady, and it stops feeling stuck when the child sets off. */
+      minCutoff: 1.0,
+    });
   }
   const handTargetRef = useRef({ x: 150, y: 150, rot: 0, scale: HAND_SCALE, flip: 1, on: 0 });
   const handShownRef  = useRef({ x: 150, y: 150, rot: 0, scale: HAND_SCALE, flip: 1, on: 0 });
   const traceAreaRef = useRef(null);
+  /* The Find / Type card. Same role as `traceAreaRef` for step 1: it is the
+     box the pointer is allowed to move inside. */
+  const stepCardRef  = useRef(null);
+  /* ── Where the pointer is allowed to go ──────────────────────────────────
+     The hand used to be mapped across the whole window. On a laptop that meant
+     a card roughly 400px wide sitting inside a 1400px viewport, so the child's
+     entire reach was spread over three and a half times more pixels than the
+     letter actually occupies — the pointer crossed the card in a flick, and
+     every wobble of the hand was magnified by the same factor.
+
+     It is now mapped into the CARD of the step being played: the letter box
+     while tracing, the keyboard card while finding and typing. The filter still
+     returns 0..1; only what that 0..1 is stretched over changes.
+
+     Two things fall out of it. The pointer cannot leave the card, and the same
+     hand tremor now moves it about a third as far in pixels — which is the
+     "make it more fixed" half of the request, for free.
+
+     The rect is cached rather than read every frame: the pointer transform is
+     written to the DOM on the same rAF tick, and reading a rect after a write
+     forces the browser to re-layout each frame. It is refreshed when the step
+     changes, when the card resizes, and on scroll. */
+  const boundsRef = useRef(null);
   /* The 300x300 tracing SVG. The full-screen pointer maps its viewport
      position back into this element's user space via getScreenCTM(), so the
      hand can roam the whole window and still trace accurately. */
@@ -462,9 +525,46 @@ export default function TraceTypeGame() {
      This always-current ref bridges the gap. */
   const processTraceRef = useRef(null);
 
+  /* Keep `boundsRef` pointing at the card of the step being played. Measured
+     here, outside the pointer loop, so the loop never triggers a layout. */
+  useEffect(() => {
+    const el = step === 'trace' ? traceAreaRef.current : stepCardRef.current;
+    if (!el) { boundsRef.current = null; return undefined; }
+
+    const measure = () => {
+      const r = el.getBoundingClientRect();
+      /* A card with no size yet (mid-transition) would trap the pointer in a
+         single pixel, so it is ignored until it has one. */
+      boundsRef.current = r.width > 40 && r.height > 40
+        ? { left: r.left, top: r.top, width: r.width, height: r.height }
+        : null;
+    };
+    measure();
+
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    /* The Find / Type card arrives with a spring animation, so its rect is
+       still moving for the first few hundred milliseconds. */
+    const settle = setTimeout(measure, 420);
+
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+      clearTimeout(settle);
+    };
+    /* `currentLetterIdx`, not `currentLetter`: the derived letter is declared
+       further down this component, and naming it here would evaluate a const
+       in its temporal dead zone during render. The index changes at exactly the
+       same moment. */
+  }, [step, currentLetterIdx]);
+
   /* ── Global pointer (Find & Type) ────────────────────────────────────────
-     The same hand, over the whole viewport this time, so the child points at
-     the keys with the pointer they already learned to use while tracing.
+     The same hand, inside the card of the step being played, so the child
+     points at the keys with the pointer they already learned to use while
+     tracing.
      Driven the same way: tracking writes to the target ref, the rAF loop below
      eases the on-screen value towards it and writes the transform onto the DOM
      node. `gDwellRef` carries the dwell-to-click progress so the ring around
@@ -709,8 +809,12 @@ export default function TraceTypeGame() {
        reach in the first place. */
     const p = handFilterRef.current.push(landmarks);
     if (!p) return;
-    const sx = p.x * window.innerWidth;
-    const sy = p.y * window.innerHeight;
+    /* Stretch the filter's 0..1 over the current step's card (see `boundsRef`).
+       Falling back to the window keeps the pointer usable for the one frame
+       between a step change and the new rect being measured. */
+    const b = boundsRef.current;
+    const sx = b ? b.left + p.x * b.width  : p.x * window.innerWidth;
+    const sy = b ? b.top  + p.y * b.height : p.y * window.innerHeight;
 
     /* Orientation is no longer computed: the pointer is always drawn upright.
        The angle a fingertip implies swings several degrees on a one-pixel
@@ -2107,6 +2211,7 @@ export default function TraceTypeGame() {
             {step !== 'trace' && (
               <motion.div
                 key={`${currentLetter}-${step}`}
+                ref={stepCardRef}
                 className={`tt-step-container step-${step}`}
                 initial={{ opacity: 0, x: 50 }}
                 animate={{ opacity: 1, x: 0 }}

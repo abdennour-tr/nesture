@@ -38,54 +38,74 @@
  * from where the strokes meet. The three used to be able to disagree; now they
  * cannot.
  *
- * STROKE ORDER
- * ------------
- * Formation follows the capital-letter sequence used in Handwriting Without
- * Tears, the curriculum most pediatric OT programmes teach from — which suits
- * an app that reports OT scores. Its rules, and how they show up here:
+ * STROKE ORDER — the "retrace" model
+ * ---------------------------------
+ * Shapes, start points and directions come from the capital-letter sequence
+ * used in Handwriting Without Tears, the curriculum most pediatric OT
+ * programmes teach from:
  *
  *   • Every capital starts at the top. The round letters (C, G, O, Q, S) start
  *     at "1 o'clock" and travel anti-clockwise — the "magic c" start.
- *   • "Frog jump" capitals (B D E F M N P R) are a big line down, then the pen
- *     jumps back to the top for the rest. Those are the strokes below.
  *   • Corner starters (H K L U V W X Y Z) start at the top-left corner.
- *   • Horizontal strokes always run left → right; vertical strokes top → bottom.
+ *   • Horizontal strokes run left → right; vertical strokes top → bottom.
  *
- * Each stroke also carries the curriculum's own name for it ("big line down",
- * "little line across"), so the game can coach in the same words a therapist
- * uses instead of showing a bare number.
+ * WHAT IS DIFFERENT, AND WHY
+ * HWT's "frog jump" capitals (B D E F H I K M N P R T Y) are a big line down
+ * and then a PEN LIFT back to the top. That instruction has no meaning in this
+ * game: the child is tracing in the air, and a finger cannot be lifted off
+ * anything. All the lift did was leave a gap where nothing was being taught
+ * and the trace could wander.
+ *
+ * So wherever HWT lifts the pen back to the top of a stem, the finger travels
+ * back UP the stem instead — the principle the D'Nealian family uses to build
+ * towards joined writing. The letter is drawn in exactly the same order and the
+ * same directions; only the journey between the parts changes.
+ *
+ * The result: 23 of the 26 capitals are now ONE unbroken stroke. Only three
+ * still lift, because their parts genuinely do not touch — A's crossbar, X's
+ * second slant, and Q's tail.
+ *
+ * A retraced run lands its waypoints back on top of the ones going the other
+ * way. That is safe: the game accepts waypoints strictly in order (it only ever
+ * tests `waypoints[reached.length]`), so a dot touched on the way down cannot
+ * satisfy the same dot on the way back up, and the direction arrow and the
+ * target glow both move back up the stem to show the child where to go.
+ *
+ * Each stroke also carries a plain-language name for it ("big line down, back
+ * up to the top…"), so the game can coach in the words a therapist uses
+ * instead of showing a bare number.
  */
 
 /* ── The letters. One path per letter; `M` starts a new stroke. ───────────── */
 export const LETTER_PATHS = {
-  A: 'M150,40 L50,260 M150,40 L250,260 M100,170 L200,170',
-  B: 'M70,40 L70,260 M70,40 Q230,40 230,100 Q230,150 70,150 Q240,150 240,210 Q240,260 70,260',
+  A: 'M150,40 L50,260 L150,40 L250,260 M91,170 L209,170',
+  B: 'M70,40 L70,260 L70,40 Q230,40 230,100 Q230,150 70,150 Q240,150 240,210 Q240,260 70,260',
   C: 'M230,80 Q150,20 70,80 Q40,150 70,220 Q150,280 230,230',
-  D: 'M70,40 L70,260 M70,40 Q260,40 260,150 Q260,260 70,260',
-  E: 'M70,40 L70,260 M70,40 L210,40 M70,150 L180,150 M70,260 L210,260',
-  F: 'M70,40 L70,260 M70,40 L210,40 M70,150 L180,150',
+  D: 'M70,40 L70,260 L70,40 Q260,40 260,150 Q260,260 70,260',
+  E: 'M70,40 L210,40 L70,40 L70,150 L180,150 L70,150 L70,260 L210,260',
+  F: 'M70,40 L210,40 L70,40 L70,150 L180,150 L70,150 L70,260',
   G: 'M230,80 Q150,20 70,80 Q40,150 70,220 Q150,280 230,220 L230,160 L170,160',
-  H: 'M70,40 L70,260 M230,40 L230,260 M70,150 L230,150',
-  I: 'M150,40 L150,260 M100,40 L200,40 M100,260 L200,260',
+  H: 'M70,40 L70,260 L70,150 L230,150 L230,40 L230,260',
+  I: 'M100,40 L200,40 L150,40 L150,260 L100,260 L200,260',
   J: 'M190,40 L190,210 Q190,270 120,250 Q80,240 80,220',
-  K: 'M70,40 L70,260 M220,40 L70,160 L220,260',
+  K: 'M70,40 L70,260 L70,160 L220,40 L70,160 L220,260',
   L: 'M70,40 L70,260 L220,260',
-  M: 'M50,40 L50,260 M50,40 L150,160 L250,40 L250,260',
-  N: 'M70,40 L70,260 M70,40 L230,260 L230,40',
+  M: 'M50,40 L50,260 L50,40 L150,160 L250,40 L250,260',
+  N: 'M70,40 L70,260 L70,40 L230,260 L230,40',
   O: 'M150,40 Q50,40 50,150 Q50,260 150,260 Q250,260 250,150 Q250,40 150,40',
-  P: 'M70,40 L70,260 M70,40 Q240,40 240,100 Q240,160 70,160',
+  P: 'M70,40 L70,260 L70,40 Q240,40 240,100 Q240,160 70,160',
   /* The tail starts ON the ring (215,215), not inside it. It used to begin at
      (200,210), a point floating in the middle of the O, so the child was asked
      to lift the pen to a spot that is not on the letter. */
   Q: 'M150,40 Q50,40 50,150 Q50,260 150,260 Q250,260 250,150 Q250,40 150,40 M215,215 L265,270',
-  R: 'M70,40 L70,260 M70,40 Q240,40 240,100 Q240,160 70,160 L230,260',
+  R: 'M70,40 L70,260 L70,40 Q240,40 240,100 Q240,160 70,160 L230,260',
   S: 'M220,70 Q150,20 80,70 Q50,120 150,150 Q250,180 220,230 Q170,280 70,230',
-  T: 'M150,40 L150,260 M50,40 L250,40',
+  T: 'M50,40 L250,40 L150,40 L150,260',
   U: 'M70,40 L70,200 Q70,270 150,270 Q230,270 230,200 L230,40',
   V: 'M50,40 L150,260 L250,40',
   W: 'M30,40 L90,260 L150,120 L210,260 L270,40',
   X: 'M60,40 L240,260 M240,40 L60,260',
-  Y: 'M50,40 L150,150 M250,40 L150,150 L150,260',
+  Y: 'M50,40 L150,150 L250,40 L150,150 L150,260',
   Z: 'M60,40 L240,40 L60,260 L240,260',
 };
 
@@ -94,31 +114,31 @@ export const LETTER_PATHS = {
    than "waypoint 4". Lengths must match the number of `M` commands above —
    verified by assertStrokeNames() at the bottom of this file in development. */
 export const STROKE_NAMES = {
-  A: ['Big slant down to the left', 'Big slant down to the right', 'Little line across'],
-  B: ['Big line down', 'Two little curves — top bump, then bottom bump'],
+  A: ['Big slant down to the left, back up to the top, then a big slant down to the right', 'Little line across'],
+  B: ['Big line down, back up to the top, then two little curves — top bump, then bottom bump'],
   C: ['Big curve — start at the top and go round to the left'],
-  D: ['Big line down', 'Big curve round to the bottom'],
-  E: ['Big line down', 'Little line across the top', 'Little line across the middle', 'Little line across the bottom'],
-  F: ['Big line down', 'Little line across the top', 'Little line across the middle'],
+  D: ['Big line down, back up to the top, then a big curve round to the bottom'],
+  E: ['Little line across the top and back, big line down to the middle, little line across and back, big line down to the bottom, then a little line across'],
+  F: ['Little line across the top and back, big line down to the middle, little line across and back, then a big line down to the bottom'],
   G: ['Big curve round, then up and a little line back to the left'],
-  H: ['Big line down', 'Another big line down', 'Little line across the middle'],
-  I: ['Big line down', 'Little line across the top', 'Little line across the bottom'],
+  H: ['Big line down, back up to the middle, little line across, up to the top, then another big line down'],
+  I: ['Little line across the top, back to the middle, big line down, then a little line across the bottom'],
   J: ['Big line down, then curve to the left'],
-  K: ['Big line down', 'Slant in to the middle, then slant out to the corner'],
+  K: ['Big line down, back up to the middle, slant out to the top corner, back to the middle, then slant out to the bottom corner'],
   L: ['Big line down, then a little line across'],
-  M: ['Big line down', 'Slant down, slant up, then a big line down'],
-  N: ['Big line down', 'Big slant down, then a big line up'],
+  M: ['Big line down, back up to the top, slant down, slant up, then a big line down'],
+  N: ['Big line down, back up to the top, big slant down, then a big line up'],
   O: ['Big curve all the way round'],
-  P: ['Big line down', 'Little curve round to the middle'],
+  P: ['Big line down, back up to the top, then a little curve round to the middle'],
   Q: ['Big curve all the way round', 'Little slant for the tail'],
-  R: ['Big line down', 'Little curve to the middle, then a slant to the corner'],
+  R: ['Big line down, back up to the top, little curve to the middle, then a slant to the corner'],
   S: ['Curve back, round, and back again'],
-  T: ['Big line down', 'Little line across the top'],
+  T: ['Little line across the top, back to the middle, then a big line down'],
   U: ['Big line down, curve, then a big line up'],
   V: ['Big slant down, then a big slant up'],
   W: ['Slant down, up, down, up'],
   X: ['Big slant down to the right', 'Big slant down to the left'],
-  Y: ['Slant down to the middle', 'Slant down to the middle, then a big line down'],
+  Y: ['Slant down to the middle, up to the other top corner, back down to the middle, then a big line down'],
   Z: ['Little line across, big slant down, little line across'],
 };
 

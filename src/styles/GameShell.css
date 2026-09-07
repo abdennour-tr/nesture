@@ -34,6 +34,7 @@
   --gs-bg-grad-3: rgba(34, 211, 238, 0.10);   /* cyan     */
 
   --gs-surface:     rgba(13, 26, 29, 0.60);
+  --gs-surface-solid: #132529;                /* tt-surface-solid — the panels */
   --gs-surface-2:   rgba(255, 255, 255, 0.06);
   --gs-border:      rgba(255, 255, 255, 0.06);
   --gs-ink:         #C8E8ED;
@@ -78,6 +79,7 @@
 /* Light theme — the same swap Trace → Find → Type's `.tt-light-mode` makes,
    so the shared theme toggle behaves identically everywhere. */
 [data-game-theme='light'] {
+  --gs-surface-solid: #FFFFFF;
   --gs-bg-base-start: #F8FAFC;
   --gs-bg-base-mid:   #EEF2FF;
   --gs-bg-base-end:   #E0E7FF;
@@ -149,78 +151,117 @@
   .gs-page { height: auto; overflow-y: auto; }
 }
 
-/* ── Top bar: back on the left, title pill centre, actions on the right ── */
+/* ── TOP BAR ──────────────────────────────────────────────────────────────
+   The same bar the games show while playing (`.tt-header`): the game's emoji
+   and name on the left, a row of 38px glass icon buttons on the right. The
+   level screen used to have a centred gradient "title pill" instead, which is
+   why it did not read as the same product as the screen it leads into. */
 .gs-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-shrink: 0;
-  margin-bottom: var(--gs-gap);
-}
-
-.gs-back,
-.gs-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;                 /* child-friendly touch target */
-  padding: 0 16px;
-  border: 1px solid var(--gs-border);
-  border-radius: var(--gs-radius-btn);
+  margin: calc(-1 * var(--gs-pad-top)) calc(-1 * var(--gs-pad-x)) var(--gs-gap);
+  padding: 12px var(--gs-pad-x);
   background: var(--gs-surface);
-  backdrop-filter: blur(24px);
-  color: var(--gs-ink);
-  font: 700 0.88rem/1 'Inter', sans-serif;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--gs-border);
+}
+
+.gs-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.gs-game-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--gs-ink-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gs-game-title .gs-title-icon { font-size: 1.3rem; }
+
+.gs-actions { display: flex; align-items: center; gap: 10px; }
+
+/* 38px square glass buttons — `.tt-icon-btn`. */
+.gs-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 12px;
+  background: var(--gs-surface-2);
+  border: 1px solid var(--gs-border);
+  color: var(--gs-ink-soft);
   cursor: pointer;
-  transition: transform 0.18s var(--gs-ease), background 0.18s;
+  transition: all 0.2s ease;
 }
-.gs-back:hover,
 .gs-action:hover {
-  transform: translateY(-2px);
-  border-color: var(--gs-accent);
-  box-shadow: 0 0 20px var(--gs-accent-glow);
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--gs-ink);
+  transform: scale(1.05);
 }
-.gs-back:focus-visible,
-.gs-action:focus-visible { outline: 3px solid var(--gs-accent); outline-offset: 2px; }
+.gs-action:focus-visible { outline: 2px solid var(--gs-accent); outline-offset: 2px; }
 
-.gs-action--icon { padding: 0; width: 44px; justify-content: center; }
-
-.gs-title-pill {
+/* The Back button keeps its label, so it is a pill rather than a square. */
+.gs-back {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 18px;
-  border-radius: var(--gs-radius-pill);
-  background: linear-gradient(135deg, var(--gs-accent), var(--gs-accent-2));
-  color: var(--gs-on-accent);
-  font-weight: 800;
-  font-size: 0.95rem;
-  white-space: nowrap;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--gs-surface-2);
+  border: 1px solid var(--gs-border);
+  color: var(--gs-ink-soft);
+  font: 700 0.85rem/1 'Inter', sans-serif;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
-
-.gs-actions { display: flex; align-items: center; gap: 8px; }
+.gs-back:hover { background: rgba(255, 255, 255, 0.10); color: var(--gs-ink); }
+.gs-back:focus-visible { outline: 2px solid var(--gs-accent); outline-offset: 2px; }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   2. HEADER — compact, no dead space above the fold
+   2. HEADER — the small capsule caption the game uses over the play area
    ═══════════════════════════════════════════════════════════════════════ */
-.gs-head { text-align: center; flex-shrink: 0; margin-bottom: var(--gs-gap); }
+.gs-head {
+  text-align: center;
+  flex-shrink: 0;
+  margin: 0 auto var(--gs-gap);
+  padding: 10px 26px;
+  max-width: 720px;
+  border-radius: 20px;
+  background: var(--gs-surface-solid);
+  border: 1px solid var(--gs-border);
+}
 
 .gs-head h1 {
   margin: 0 0 4px;
-  font-size: var(--gs-title);
-  font-weight: 900;
-  letter-spacing: -0.02em;
-  color: var(--gs-ink-bright);
-  line-height: 1.1;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gs-ink-soft);
+  line-height: 1.2;
 }
 .gs-head p {
   margin: 0 auto;
   max-width: 620px;
   font-size: var(--gs-sub);
-  line-height: 1.45;
-  color: var(--gs-ink-soft);
+  line-height: 1.4;
+  color: var(--gs-ink);
   font-weight: 600;
 }
 
@@ -240,21 +281,23 @@
   gap: 8px;
   min-height: 44px;
   padding: 0 20px;
-  border: 1px solid var(--gs-border);
-  border-radius: var(--gs-radius-pill);
-  background: var(--gs-surface);
-  backdrop-filter: blur(24px);
-  color: var(--gs-ink);
+  /* `.tt-step-pill`: flat dark when inactive, indigo→purple gradient when
+     selected, exactly like the TRACE / FIND / TYPE pills in the game. */
+  border: 1px solid transparent;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--gs-ink-soft);
   font-weight: 700;
-  font-size: 0.88rem;
+  font-size: 0.85rem;
   cursor: pointer;
-  transition: all 0.2s var(--gs-ease);
+  transition: all 0.4s var(--gs-ease);
 }
 .gs-mode-btn.active {
-  background: linear-gradient(135deg, var(--gs-accent), var(--gs-accent-2));
+  background: linear-gradient(135deg, #6366F1, #8B5CF6);
   border-color: transparent;
-  color: var(--gs-on-accent);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.30);
+  transform: scale(1.05);
 }
 .gs-mode-sub {
   text-align: center;
@@ -273,11 +316,18 @@
   min-height: 0;                                  /* lets the row shrink, not overflow */
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)); /* equal tracks = equal widths */
+  /* The ROW is sized to its tallest card and centred in the free space, rather
+     than stretched to fill it. Stretching gave every card the full height of
+     the flex area, which opened a large empty band in the middle of each one
+     and pushed the row over the footnote. */
+  grid-auto-rows: minmax(0, max-content);
+  align-content: center;
+  align-items: stretch;                            /* cards in the row stay equal */
   gap: clamp(12px, 1.6vw, 22px);
-  align-items: stretch;                            /* equal heights */
   width: 100%;
   max-width: 1120px;
   margin: 0 auto;
+  overflow: hidden;
 }
 
 .gs-card {
@@ -287,11 +337,12 @@
   text-align: center;
   height: 100%;
   min-width: 0;
-  padding: clamp(14px, 2vh, 24px) clamp(12px, 1.4vw, 20px);
+  padding: clamp(16px, 2.2vh, 26px) clamp(14px, 1.5vw, 22px);
+  /* `.tt-step-container`: a solid panel with a hairline border and a coloured
+     3px bar across the top — not a translucent card with a heavy frame. */
   border: 1px solid var(--gs-border);
-  border-radius: var(--gs-radius-card);
-  background: var(--gs-surface);
-  backdrop-filter: blur(24px);
+  border-radius: 24px;
+  background: var(--gs-surface-solid);
   box-shadow: var(--gs-shadow-card);
   cursor: pointer;
   transition: all 0.3s var(--gs-ease);
@@ -309,22 +360,38 @@
 
 .gs-card::before {                                /* accent bar, same on every card */
   content: '';
-  position: absolute; inset: 0 0 auto 0; height: 4px;
-  background: linear-gradient(90deg, var(--lvl), transparent);
-  border-radius: var(--gs-radius-card) var(--gs-radius-card) 0 0;
+  position: absolute; inset: 0 0 auto 0; height: 3px;
+  background: linear-gradient(90deg, var(--lvl), var(--lvl-2, var(--lvl)));
+  border-radius: 24px 24px 0 0;
+}
+
+/* The 28px rounded-square number the game uses to label each step. */
+.gs-card-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #fff;
+  background: var(--lvl);
+  margin-bottom: 10px;
 }
 
 .gs-card-emoji {
-  font-size: clamp(1.9rem, 4.2vh, 2.9rem);
+  font-size: clamp(1.6rem, 3.4vh, 2.4rem);
   line-height: 1;
   margin-bottom: 6px;
 }
 .gs-card-name {
   margin: 0 0 4px;
-  font-size: clamp(1.02rem, 2.1vh, 1.32rem);
-  font-weight: 900;
-  color: var(--lvl);
-  letter-spacing: -0.01em;
+  font-size: clamp(0.78rem, 1.5vh, 0.9rem);
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gs-ink-bright);
 }
 .gs-card-desc {
   margin: 0 0 10px;
@@ -335,25 +402,32 @@
 }
 
 /* Free-form preview slot (bubbles, path, coin, letters, gestures…).
-   Fixed flexible height so all three cards stay identical whatever's inside. */
+   A bounded band, not a greedy one: `flex: 1` here is what stretched a card
+   into a tall empty panel. All three cards stay the same height because the
+   grid row does that for them. */
 .gs-card-preview {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 1 auto;
   width: 100%;
+  min-height: clamp(56px, 9vh, 84px);
+  max-height: clamp(72px, 13vh, 120px);
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   flex-wrap: wrap;
   overflow: hidden;
-  margin-bottom: 10px;
+  margin: 4px 0 12px;
 }
 
 .gs-card-specs {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  align-content: flex-start;
   gap: 6px;
+  /* Reserves the space two rows of chips need, so a card whose chips wrap does
+     not sit taller than its neighbours before the grid equalises them. */
+  min-height: 52px;
   margin-bottom: 12px;
 }
 .gs-spec {
@@ -367,12 +441,44 @@
   white-space: nowrap;
 }
 
+/* ── Named token chip, for previews that must quote the game's own symbol ──
+   Finger Piano names each finger with a numbered coloured dot, in the legend,
+   on the lit key and in the end-of-round table. The level card shows the very
+   same dot, so the child recognises it the moment the round starts. `--fc` is
+   the token colour, set inline by the caller. */
+.gs-finger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 3px;
+  border-radius: var(--gs-radius-pill);
+  background: var(--gs-surface-2);
+  border: 1px solid var(--gs-border);
+  color: var(--gs-ink);
+  font-size: 0.74rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.gs-finger-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  background: var(--fc);
+  color: #14103A;          /* the same ink the in-game dot uses */
+  font-size: 0.68rem;
+  font-weight: 900;
+}
+
 /* The Start button is pushed to the bottom of every card, so all three
    buttons sit on exactly the same horizontal line. */
 .gs-card-play {
   margin-top: auto;
   width: 100%;
   min-height: 46px;
+  border-radius: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -391,6 +497,8 @@
 /* Footer hint — never pushes content off-screen */
 .gs-foot {
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
   text-align: center;
   margin-top: var(--gs-gap);
   font-size: 0.8rem;
@@ -570,16 +678,8 @@
 }
 .gs-btn-danger:hover { filter: brightness(1.06); }
 
-/* When a game's own header class is used for the button, the flag icon and
-   label still need to read as the destructive action in that header. */
-.gs-end-btn {
-  color: #FCA5A5 !important;
-  border-color: rgba(239, 68, 68, 0.45) !important;
-}
-.gs-end-btn:hover {
-  background: rgba(239, 68, 68, 0.18) !important;
-  color: #FEE2E2 !important;
-}
+/* `.gs-end-btn` is styled in section 11, alongside the icon buttons it sits
+   next to — with doubled-class specificity rather than `!important`. */
 
 /* The end-game confirm is portalled into <body> and must sit above every
    in-game layer, including Trace → Find → Type's fixed hand-pointer overlay
@@ -748,3 +848,336 @@
   transition: transform 0.2s var(--gs-ease), filter 0.2s;
 }
 .gs-rules-start:hover { transform: translateY(-2px); filter: brightness(1.08); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   11. GAME FRAME — the level screen's chrome, applied to the games themselves
+   ---------------------------------------------------------------------------
+   The level screen and the game it leads into were still two different rooms:
+   each game painted its own page (#1B7FB8 sea blue for Bubble, #7FCB74 grass
+   green for Ladybug, #EBD9BE sand for Pinch the Coin, #1A1040 for Finger
+   Piano) and dressed its header in a matching tint.
+
+   WHY THE SELECTORS ARE DOUBLED (`.bg-page.bg-page`)
+   -------------------------------------------------
+   Not a typo, and not decoration — it is the whole reason this section works.
+
+   A first attempt wrote these as plain single-class rules and relied on load
+   order, adding `import '../styles/GameShell.css'` AFTER each game's own
+   stylesheet. That import does nothing: an ES module is evaluated once, at its
+   FIRST import, and every game already pulls GameShell.css in earlier through
+   `GameRules` / `EndGameControl` / `GameHUD`. So GameShell.css is always
+   emitted BEFORE the game's stylesheet, and single-class rules here always
+   lose. The games looked completely unchanged.
+
+   Repeating the class raises specificity from (0,1,0) to (0,2,0) without
+   `!important`, so these win wherever they sit in the file order. A game can
+   still override deliberately with its own two-class or nested selector.
+
+   WHAT IS DELIBERATELY NOT TOUCHED: the play field itself — `.bg-field`,
+   `.lb-field`, `.pcg-field`, the piano keyboard. The sea, the meadow and the
+   piggy bank are the GAME, not the furniture, and a child needs them. Only the
+   frame around them is unified.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.bg-page.bg-page,
+.lb-page.lb-page,
+.pcg-page.pcg-page,
+.fpp-page.fpp-page,
+.fc-page.fc-page {
+  background:
+    radial-gradient(circle at 15% 50%, var(--gs-bg-grad-1), transparent 40%),
+    radial-gradient(circle at 85% 30%, var(--gs-bg-grad-2), transparent 45%),
+    radial-gradient(circle at 50% 85%, var(--gs-bg-grad-3), transparent 50%),
+    linear-gradient(135deg, var(--gs-bg-base-start) 0%, var(--gs-bg-base-mid) 50%, var(--gs-bg-base-end) 100%);
+  background-size: 100% 100%;
+  background-attachment: fixed;
+  color: var(--gs-ink);
+}
+
+/* ── Top bar ───────────────────────────────────────────────────────────── */
+.bg-header.bg-header,
+.lb-header.lb-header,
+.pcg-header.pcg-header,
+.fpp-header.fpp-header,
+.fc-header.fc-header {
+  padding: 12px 24px;
+  background: var(--gs-surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--gs-border);
+  box-shadow: none;
+}
+
+/* ── Icon buttons — `.tt-icon-btn`, 38px glass squares ─────────────────── */
+.bg-icon-btn.bg-icon-btn,
+.lb-icon-btn.lb-icon-btn,
+.pcg-icon-btn.pcg-icon-btn,
+.fpp-icon-btn.fpp-icon-btn,
+.fc-sound-btn.fc-sound-btn,
+.tt-icon-btn.tt-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  background: var(--gs-surface-2);
+  border: 1px solid var(--gs-border);
+  color: var(--gs-ink-soft);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.bg-icon-btn.bg-icon-btn:hover,
+.lb-icon-btn.lb-icon-btn:hover,
+.pcg-icon-btn.pcg-icon-btn:hover,
+.fpp-icon-btn.fpp-icon-btn:hover,
+.fc-sound-btn.fc-sound-btn:hover,
+.tt-icon-btn.tt-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--gs-ink);
+  transform: scale(1.05);
+}
+.bg-icon-btn.bg-icon-btn:disabled,
+.lb-icon-btn.lb-icon-btn:disabled,
+.pcg-icon-btn.pcg-icon-btn:disabled,
+.fpp-icon-btn.fpp-icon-btn:disabled { opacity: 0.45; cursor: default; transform: none; }
+
+/* The destructive "End game" button keeps its red tint on top of the above. */
+.gs-end-btn.gs-end-btn { color: #FCA5A5; border-color: rgba(239, 68, 68, 0.45); }
+.gs-end-btn.gs-end-btn:hover { background: rgba(239, 68, 68, 0.18); color: #FEE2E2; }
+
+/* ── Level chip and stat pills in the game headers ─────────────────────── */
+.bg-level-chip.bg-level-chip,
+.lb-level-chip.lb-level-chip,
+.pcg-level-chip.pcg-level-chip,
+.fpp-level-chip.fpp-level-chip,
+.bg-stat.bg-stat,
+.lb-stat.lb-stat,
+.pcg-stat.pcg-stat,
+.fpp-stat.fpp-stat,
+.fc-timer.fc-timer {
+  background: var(--gs-surface-2);
+  border: 1px solid var(--gs-border);
+  color: var(--gs-ink);
+}
+
+/* The exit button in Magic Finger Copy is a labelled pill, not a square. */
+.fc-exit-btn.fc-exit-btn {
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--gs-surface-2);
+  border: 1px solid var(--gs-border);
+  color: var(--gs-ink-soft);
+}
+.fc-exit-btn.fc-exit-btn:hover { background: rgba(255, 255, 255, 0.10); color: var(--gs-ink); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   12. OPTIONS PAGE — a level screen with more than three choices
+   ---------------------------------------------------------------------------
+   LetterQuest's setup is genuinely richer than "Easy / Medium / Hard": five
+   content modes, three keyboard sizes, an input mode, a stats strip, an Atlas
+   recommendation and a live config summary.
+
+   It still must not scroll, at any window size — the same rule as every other
+   level screen. That is achieved the same way: a flex column pinned to the
+   viewport where every vertical measurement is a `vh`-based clamp, so the page
+   gets denser on a short window instead of growing past it. The two option
+   grids are the parts allowed to shrink; the Start button never is.
+
+   The stats chips live in the TOP BAR rather than in the page body — they are
+   context, not a choice, and moving them reclaimed ~90px of the budget.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.gs-page--options {
+  --gs-gap: clamp(6px, 1.1vh, 16px);
+  padding-bottom: clamp(8px, 1.4vh, 18px);
+}
+
+.gs-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  gap: var(--gs-gap);
+}
+
+/* ── Section ───────────────────────────────────────────────────────────── */
+.gs-section {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.gs-section-title {
+  flex: none;
+  font-size: clamp(0.6rem, 1.1vh, 0.72rem);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gs-ink-soft);
+}
+.gs-section-hint {
+  flex: none;
+  font-size: clamp(0.7rem, 1.2vh, 0.82rem);
+  color: var(--gs-ink-soft);
+  margin: 2px 0 6px;
+  line-height: 1.35;
+}
+
+/* ── Option grid ───────────────────────────────────────────────────────── */
+.gs-opt-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  gap: clamp(6px, 0.9vw, 12px);
+  grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+  align-items: stretch;
+}
+@media (max-width: 900px) { .gs-opt-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 620px) { .gs-opt-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.gs-opt {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(2px, 0.5vh, 6px);
+  min-height: 0;
+  padding: clamp(8px, 1.4vh, 16px) clamp(6px, 0.8vw, 12px);
+  border: 1px solid var(--gs-border);
+  border-radius: 16px;
+  background: var(--gs-surface-solid);
+  color: var(--gs-ink);
+  text-align: center;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.25s var(--gs-ease), box-shadow 0.25s var(--gs-ease),
+              transform 0.25s var(--gs-ease);
+}
+.gs-opt:hover:not(:disabled) {
+  border-color: var(--opt, var(--gs-accent));
+  transform: translateY(-2px);
+}
+.gs-opt.active {
+  border-color: var(--opt, var(--gs-accent));
+  box-shadow: 0 0 0 1px var(--opt, var(--gs-accent));
+}
+.gs-opt:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.gs-opt-emoji { font-size: clamp(1.05rem, 2.2vh, 1.55rem); line-height: 1; }
+.gs-opt-label {
+  font-weight: 800;
+  font-size: clamp(0.72rem, 1.4vh, 0.88rem);
+  line-height: 1.15;
+  color: var(--gs-ink-bright);
+}
+.gs-opt.active .gs-opt-label { color: var(--opt, var(--gs-accent)); }
+
+/* The description is the first thing to go on a short window: it is helpful,
+   but not worth a scrollbar. */
+.gs-opt-desc {
+  font-size: clamp(0.62rem, 1.1vh, 0.74rem);
+  line-height: 1.3;
+  color: var(--gs-ink-soft);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+@media (max-height: 740px) { .gs-opt-desc { -webkit-line-clamp: 2; } }
+@media (max-height: 640px) { .gs-opt-desc { display: none; } }
+
+.gs-opt-tag {
+  position: absolute; top: 5px; right: 5px;
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 6px; border-radius: 999px;
+  font-size: 0.55rem; font-weight: 800; letter-spacing: 0.05em;
+  background: var(--gs-surface-2); border: 1px solid var(--gs-border);
+  color: var(--gs-ink-soft);
+}
+.gs-opt-tag--warn { color: #FCA5A5; border-color: rgba(239, 68, 68, 0.4); }
+
+/* Keyboard-size preview: little keys that shrink with the option. */
+.gs-key-preview {
+  display: flex; align-items: flex-end; gap: 3px;
+  height: clamp(14px, 2.4vh, 24px);
+}
+.gs-key-preview i {
+  display: block; border-radius: 3px; background: var(--gs-ink-soft);
+  max-height: 100%;
+}
+.gs-opt.active .gs-key-preview i { background: var(--opt, var(--gs-accent)); }
+.gs-key-more { font-size: 0.58rem; font-weight: 700; color: var(--gs-ink-soft); }
+
+/* ── Stats chips — in the top bar ──────────────────────────────────────── */
+.gs-stat-chip {
+  display: flex; align-items: center; gap: 7px;
+  height: 38px; padding: 0 12px; border-radius: 12px;
+  background: var(--gs-surface-2); border: 1px solid var(--gs-border);
+  white-space: nowrap;
+}
+.gs-stat-chip svg { color: var(--gs-accent); flex: none; }
+.gs-stat-val { font-weight: 800; font-size: 0.85rem; color: var(--gs-ink-bright); line-height: 1.1; }
+.gs-stat-lbl { font-size: 0.62rem; color: var(--gs-ink-soft); line-height: 1.1; }
+@media (max-width: 1180px) { .gs-stat-chip .gs-stat-lbl { display: none; } }
+@media (max-width: 900px)  { .gs-stats-inline { display: none; } }
+
+.gs-stats-inline { display: flex; align-items: center; gap: 8px; }
+
+/* ── Inline note (Atlas suggestion, Self Expression banner) ────────────── */
+.gs-note {
+  flex: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: clamp(6px, 1vh, 10px) 12px;
+  border-radius: 12px;
+  background: var(--gs-surface-2);
+  border: 1px dashed var(--gs-border);
+  color: var(--gs-ink-soft);
+  font-size: clamp(0.7rem, 1.2vh, 0.82rem);
+  line-height: 1.35;
+}
+.gs-note strong { color: var(--gs-ink-bright); }
+.gs-note-title { font-weight: 800; color: var(--gs-ink-bright); }
+
+/* ── Config summary + start ────────────────────────────────────────────── */
+.gs-summary {
+  flex: none;
+  display: flex; align-items: center; justify-content: center;
+  flex-wrap: wrap; gap: 7px;
+  padding: clamp(6px, 1vh, 10px);
+  border-radius: 14px;
+  background: var(--gs-surface-2); border: 1px solid var(--gs-border);
+}
+.gs-summary-label {
+  font-size: 0.66rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--gs-ink-soft);
+}
+.gs-summary-badge {
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--gs-surface-solid);
+  border: 1px solid var(--bd, var(--gs-border));
+  color: var(--fg, var(--gs-ink));
+  font-weight: 700; font-size: clamp(0.7rem, 1.2vh, 0.8rem); white-space: nowrap;
+}
+.gs-summary-plus { color: var(--gs-ink-soft); font-weight: 700; }
+
+.gs-start-btn {
+  flex: none;
+  width: 100%;
+  min-height: clamp(42px, 6.2vh, 54px);
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  border: none; border-radius: 14px;
+  background: linear-gradient(135deg, var(--gs-accent), var(--gs-accent-2));
+  color: #fff; font-size: clamp(0.92rem, 1.9vh, 1.05rem); font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 10px 30px -8px var(--gs-accent-glow);
+  transition: transform 0.2s var(--gs-ease), filter 0.2s;
+}
+.gs-start-btn:hover { transform: translateY(-2px); filter: brightness(1.08); }
+
+/* The tip is the last thing worth keeping on a very short window. */
+@media (max-height: 680px) { .gs-page--options .gs-foot { display: none; } }

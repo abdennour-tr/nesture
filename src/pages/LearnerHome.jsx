@@ -168,9 +168,10 @@ const GAMES = [
     accent: '#7C3AED',
     bg: 'linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%)',
     enabled: true,
-    /* Still in development. The card stays visible and inviting, but tapping
-       it opens the notice below instead of starting a session -- a half-built
-       game that scores a child is worse than no game at all. */
+    /* Sealed on request. The card opens the "almost ready" notice instead of
+       the game. This flag and the two redirects in App.js must always agree —
+       to unseal, drop this line, put the routes back, and uncomment App.js's
+       two imports. */
     comingSoon: true,
     route: '/play/finger-piano-difficulty',
     badge: 'COMING SOON',

@@ -50,27 +50,41 @@ import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
 import GameRules from '../components/game/GameRules';
 import { otComposite, otRound, otPct, FINISH } from '../utils/otScore';
+import { PIANO_LEVELS, PIANO_FINGERS } from './fingerPianoLevels';
 import EndGameControl from '../components/game/EndGameControl';
+import PianoHand from '../components/game/PianoHand';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/FingerPianoGame.css';
+/* NOTE: GameShell.css is NOT imported here on purpose. It is already pulled in
+   by GameRules / EndGameControl above, and an ES module is evaluated once at
+   its FIRST import — so a later import would be a no-op and could not change
+   the CSS order. The shared game frame wins by SPECIFICITY instead: see
+   section 11 of GameShell.css. */
 
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — virtual space scaled to the field
    ═══════════════════════════════════════════════════════════════════════════ */
 const VW = 1000;
 const VH = 560;
-const KB_TOP = 384;         // top of the white keys
-const KB_H = 150;
+/* Where a strike's ripple is born. The keys used to live inside the field, so
+   the ripple started at the keys' own y. The keyboard is now above the field,
+   in its cabinet, so the ripple starts at the field's top edge — directly under
+   the key that was struck — and the beam falls away from it. */
+const FX_Y = 8;
 
 /* ── Fingers ────────────────────────────────────────────────────────────── */
-const FINGERS = [
-  { key: 'thumb',  n: 1, label: 'Thumb',  color: '#4ADE80', tip: 4,  pip: 3,  mcp: 2  },
-  { key: 'index',  n: 2, label: 'Index',  color: '#38BDF8', tip: 8,  pip: 6,  mcp: 5  },
-  { key: 'middle', n: 3, label: 'Middle', color: '#FB923C', tip: 12, pip: 10, mcp: 9  },
-  { key: 'ring',   n: 4, label: 'Ring',   color: '#F472B6', tip: 16, pip: 14, mcp: 13 },
-  { key: 'little', n: 5, label: 'Little', color: '#A78BFA', tip: 20, pip: 18, mcp: 17 },
-];
+/* MediaPipe landmark indices per finger — detection detail, game-only. The
+   number/label/colour come from fingerPianoLevels.js so the level card shows
+   the SAME dot the child will see here. */
+const LANDMARKS = {
+  thumb:  { tip: 4,  pip: 3,  mcp: 2  },
+  index:  { tip: 8,  pip: 6,  mcp: 5  },
+  middle: { tip: 12, pip: 10, mcp: 9  },
+  ring:   { tip: 16, pip: 14, mcp: 13 },
+  little: { tip: 20, pip: 18, mcp: 17 },
+};
+const FINGERS = PIANO_FINGERS.map((f) => ({ ...f, ...LANDMARKS[f.key] }));
 const FINGER_BY_KEY = Object.fromEntries(FINGERS.map((f) => [f.key, f]));
 
 /* ── Keyboard: one and a half octaves from C4 ───────────────────────────── */
@@ -86,35 +100,42 @@ const midiToFreq = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
 /* ── Difficulty. The difficulty page advertises 3 fingers on level 1 and all
       five on 2-3, so the pools must match what the child was shown. ─────── */
-const LEVELS = {
-  1: {
-    id: 1, label: 'Beginner', emoji: '🌱', color: '#10B981',
-    fingers: ['thumb', 'index', 'middle'], whiteKeys: 5, notes: 20,
-    timeoutMs: 6000, restMs: 550,
-  },
-  2: {
-    id: 2, label: 'Intermediate', emoji: '⚡', color: '#E8841A',
-    fingers: ['thumb', 'index', 'middle', 'ring', 'little'], whiteKeys: 7, notes: 30,
-    timeoutMs: 4500, restMs: 420,
-  },
-  3: {
-    id: 3, label: 'Expert', emoji: '🔥', color: '#EF4444',
-    fingers: ['thumb', 'index', 'middle', 'ring', 'little'], whiteKeys: 10, notes: 40,
-    timeoutMs: 3200, restMs: 300,
-  },
-};
+/* The level tuning lives in fingerPianoLevels.js so the level-select cards read
+   the SAME numbers the round will run. They were maintained separately before,
+   and the cards had drifted into promising features that do not exist. */
+const LEVELS = PIANO_LEVELS;
 
 /* ── Detection constants (validated against synthetic hands) ────────────── */
 const EMA_ALPHA   = 0.40;
 /* Board units below which a movement is hand tremor, not intent. */
 const STILL_EPS   = 2.5;
-/* Air-tap thresholds, validated against synthetic flexion traces. */
-const ARM_LEVEL   = 1.90;   // extension above which a finger is armed
-const FIRE_LEVEL  = 1.65;   // crossing below this while armed = a tap
-const MIN_RATE    = 2.5;    // min flexion speed (1/s) — rejects a slow curl
+/* ── Air-tap thresholds ────────────────────────────────────────────────────
+   These used to be ABSOLUTE readings of tip→MCP over PIP→MCP, with one pair of
+   levels (arm 1.90, fire 1.65) for all five fingers. That silently made the
+   THUMB impossible to play. A straight thumb only reaches ≈1.81 on that ratio —
+   its two bones are nearly the same length, where a long finger's three
+   phalanges reach ≈2.04 — so the thumb sat BELOW the arming level at rest and
+   could never be armed, and therefore could never fire. Worse, the motion a
+   child actually makes for a thumb tap is swinging it across the palm, which
+   that ratio does not see at all: 40° of adduction leaves it at 1.807, exactly
+   where it started.
+
+   So thresholds are now a SHARE of each finger's own straight-hand reading (see
+   `metricOf` for the thumb's own measure and `calibrate` for the reference).
+   The fractions below are the old levels divided by a long finger's straight
+   value, so the four long fingers behave exactly as they did before, and the
+   thumb finally works on its own scale. */
+const ARM_FRAC    = 0.93;   // ≥93% of its own straight reading = armed  (1.90/2.04)
+const FIRE_FRAC   = 0.81;   // dropping below 81% while armed = a tap    (1.65/2.04)
+const MIN_RATE_U  = 1.2;    // min flexion speed (straight-units/s) — rejects a slow curl
 const REARM_MS    = 90;     // a finger cannot re-tap sooner than this
-const GOOD_AMPL   = 0.85;   // flexion depth of a decisive tap
-const GOOD_RATE   = 9.0;    // flexion speed of a decisive tap
+const GOOD_AMPL_U = 0.42;   // flexion depth of a decisive tap
+const GOOD_RATE_U = 4.4;    // flexion speed of a decisive tap
+/* Calibration guard rails: a straight-hand reference outside these bands came
+   from a misdetected frame, not from a hand. */
+const CAL_BAND    = { thumb: [0.40, 1.50], long: [1.55, 2.80] };
+const CAL_RISE    = 1.0;    // a straighter reading is believed at once
+const CAL_FALL    = 0.02;   // …a smaller one only seeps in, ~2%/frame
 const PAUSE_MS    = 900;    // gap above which the child counts as hesitating
 const COUNTDOWN_SECONDS = 3;
 const RULES_FLAG  = 'fingerpiano_rules_seen';
@@ -272,44 +293,95 @@ class PianoSynth {
    ═══════════════════════════════════════════════════════════════════════════ */
 const dist2d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
-/** tip→MCP over PIP→MCP. Self-normalising per finger, so the short thumb and
- *  the long middle are judged on the same scale, and unaffected by how far the
- *  hand is from the camera. */
+/** tip→MCP over PIP→MCP, for the four long fingers. Internal to the finger, so
+ *  it is unaffected by how far the hand is from the camera or how it is turned. */
 function extensionOf(lm, f) {
   const base = dist2d(lm[f.pip], lm[f.mcp]) || 1e-6;
   return dist2d(lm[f.tip], lm[f.mcp]) / base;
 }
 
-/** Per-finger flexion state machine. See the file header for why this reads
- *  flexion rather than fingertip height. */
+/** The thumb needs its own measure: THUMB OPENNESS — the distance from the
+ *  thumb tip to the index knuckle, over the width of the palm.
+ *
+ *  The ratio used for the long fingers reads bending at the finger's own
+ *  joints. A thumb tap is mostly not that: the child swings the thumb inwards
+ *  across the palm, and the thumb's own joints barely move. Openness sees both
+ *  motions, because bending the thumb AND swinging it in both bring the tip
+ *  closer to the index knuckle. Dividing by the palm width (index knuckle to
+ *  little knuckle) keeps it independent of hand size and camera distance, just
+ *  like the ratio it replaces.
+ *
+ *  Measured on the model hand: open ≈0.70, 20° of swing ≈0.50, 40° ≈0.29. */
+function thumbOpennessOf(lm) {
+  const palm = dist2d(lm[5], lm[17]) || 1e-6;
+  return dist2d(lm[4], lm[5]) / palm;
+}
+
+/** The one reading this game watches, per finger. */
+function metricOf(lm, f) {
+  return f.key === 'thumb' ? thumbOpennessOf(lm) : extensionOf(lm, f);
+}
+
+/**
+ * Per-finger flexion state machine. See the file header for why this reads
+ * flexion rather than fingertip height.
+ *
+ * Everything below works in STRAIGHT UNITS: 1 = this finger, on this child, as
+ * straight as it has been seen. `calibrate` maintains that reference and hands
+ * back the normalised reading; the thresholds are then the same fractions for
+ * every finger, which is what makes the thumb playable (see ARM_FRAC).
+ */
 function makeTapDetector() {
+  const blank = () => ({ u: 1, armed: true, lastFire: -1e9, peakRate: 0, top: 0, ref: null });
   const st = {};
-  for (const f of FINGERS) {
-    st[f.key] = { e: 2.4, armed: true, lastFire: -1e9, peakRate: 0, top: 2.4 };
-  }
+  for (const f of FINGERS) st[f.key] = blank();
+
   return {
-    reset() {
+    reset() { for (const f of FINGERS) st[f.key] = blank(); },
+
+    /**
+     * One camera frame of RAW readings in; normalised readings out.
+     *
+     * The reference follows a straighter reading immediately and a smaller one
+     * only very slowly, so it settles on the child's real straight hand and is
+     * not dragged down by the taps themselves. Readings outside the plausible
+     * band for that measure come from a misdetected frame and are ignored, so
+     * one bad frame cannot recalibrate the finger out of the game.
+     */
+    calibrate(raw) {
+      const u = {};
       for (const f of FINGERS) {
-        st[f.key] = { e: 2.4, armed: true, lastFire: -1e9, peakRate: 0, top: 2.4 };
+        const e = raw[f.key];
+        if (e == null) continue;
+        const [lo, hi] = CAL_BAND[f.key === 'thumb' ? 'thumb' : 'long'];
+        const s = st[f.key];
+        if (e >= lo && e <= hi) {
+          if (s.ref == null) s.ref = e;
+          else if (e > s.ref) s.ref += (e - s.ref) * CAL_RISE;
+          else if (s.armed && e > s.ref * ARM_FRAC) s.ref += (e - s.ref) * CAL_FALL;
+        }
+        if (s.ref) u[f.key] = e / s.ref;
       }
+      return u;
     },
-    /** One frame in; a tap event out, or null. */
+
+    /** One frame in — normalised readings; a tap event out, or null. */
     update(ext, ts, dt) {
       const fired = [];
       for (const f of FINGERS) {
         const s = st[f.key];
         const e = ext[f.key];
         if (e == null) continue;
-        const rate = (s.e - e) / Math.max(dt, 1e-6);
+        const rate = (s.u - e) / Math.max(dt, 1e-6);
         if (rate > s.peakRate) s.peakRate = rate;
         if (s.armed && e > s.top) s.top = e;
-        if (s.armed && e < FIRE_LEVEL && rate >= MIN_RATE && ts - s.lastFire > REARM_MS) {
+        if (s.armed && e < FIRE_FRAC && rate >= MIN_RATE_U && ts - s.lastFire > REARM_MS) {
           fired.push({ finger: f.key, amplitude: s.top - e, rate: s.peakRate });
           s.armed = false;
           s.lastFire = ts;
         }
-        if (!s.armed && e > ARM_LEVEL) { s.armed = true; s.peakRate = 0; s.top = e; }
-        s.e = e;
+        if (!s.armed && e > ARM_FRAC) { s.armed = true; s.peakRate = 0; s.top = e; }
+        s.u = e;
       }
       if (!fired.length) return null;
 
@@ -324,12 +396,16 @@ function makeTapDetector() {
       }
       const t = fired[0];
       const others = FINGERS.filter((f) => f.key !== t.finger);
-      const still = others.filter((f) => (ext[f.key] ?? 2.4) > ARM_LEVEL).length;
+      /* "Still" is now also per finger. On the old absolute scale the thumb
+         never cleared the bar, so it counted as moving on EVERY tap and quietly
+         docked the isolation score of every other finger. */
+      const still = others.filter((f) => (ext[f.key] ?? 1) > ARM_FRAC).length;
       t.isolation = others.length ? still / others.length : 1;
       t.ambiguous = false;
       return t;
     },
-    /** Live extension per finger, for the on-screen hand read-out. */
+
+    /** Live state per finger, for the on-screen hand read-out. */
     peek() { return st; },
   };
 }
@@ -338,11 +414,12 @@ function makeTapDetector() {
    RULES
    ═══════════════════════════════════════════════════════════════════════════ */
 const RULES = [
-  { icon: '🎹', text: 'One key lights up at a time, in the colour of a finger.' },
-  { icon: '☝️', text: 'The number on the key tells you which finger to use.' },
+  { icon: '🎹', text: 'The piano is at the top. Every key keeps its own number, always the same one.' },
+  { icon: '💡', text: 'One key lights up at a time, in the colour of a finger.' },
+  { icon: '🖐️', text: 'The hand below shows WHICH finger: it is the one glowing.' },
   { icon: '👆', text: 'Tap that finger in the air — nothing to touch, no need to aim.' },
   { icon: '✋', text: 'Move only that finger; keep the others still and straight.' },
-  { icon: '🔊', text: 'The key lights up, the note plays, and the next key glows.' },
+  { icon: '🖱️', text: 'On Touch / Mouse, just click the keyboard instead.' },
   { icon: '⏸️', text: 'You can pause at any time.' },
 ];
 
@@ -396,7 +473,6 @@ export default function FingerPianoGame() {
   const [uiScore, setUiScore] = useState(0);
   const [uiHit, setUiHit] = useState(0);
   const [uiElapsed, setUiElapsed] = useState(0);
-  const [uiNextFinger, setUiNextFinger] = useState(cfg.fingers[0]);
   const [litKey, setLitKey] = useState(null);   // { keyIdx, fingerKey, midi }
   const [toast, setToast] = useState(null);
   const [results, setResults] = useState(null);
@@ -408,6 +484,7 @@ export default function FingerPianoGame() {
   const fxCanvasRef = useRef(null);
   const handCanvasRef = useRef(null);
   const keyRefs    = useRef([]);
+  const handCardRef = useRef(null);   // the wireframe hand, driven from the loop
 
   /* ── Loop state ── */
   const rafRef     = useRef(null);
@@ -501,6 +578,7 @@ export default function FingerPianoGame() {
     const prevExt = extRef.current;
     const tips = {};
     const ext = {};
+    const raw = {};
     for (const f of FINGERS) {
       const p = landmarks[f.tip];
       if (!p) continue;
@@ -518,7 +596,17 @@ export default function FingerPianoGame() {
       } else {
         tips[f.key] = { x: nx, y: ny };
       }
-      const e = extensionOf(landmarks, f);
+      raw[f.key] = metricOf(landmarks, f);
+    }
+    /* Raw readings are turned into "share of this finger's own straight hand"
+       here, once per camera frame, so every threshold downstream — the tap
+       detector, the isolation check and the flex rings on the hand — speaks the
+       same normalised language. */
+    if (!tapperRef.current) tapperRef.current = makeTapDetector();
+    const u = tapperRef.current.calibrate(raw);
+    for (const f of FINGERS) {
+      const e = u[f.key];
+      if (e == null) continue;
       ext[f.key] = prevExt && prevExt[f.key] != null
         ? prevExt[f.key] + (e - prevExt[f.key]) * EMA_ALPHA
         : e;
@@ -555,7 +643,6 @@ export default function FingerPianoGame() {
     if (!spec) { targetRef.current = null; setLitKey(null); return; }
     targetRef.current = { ...spec, shownAt: ts };
     setLitKey({ keyIdx: spec.keyIdx, fingerKey: spec.fingerKey, midi: spec.midi });
-    setUiNextFinger(spec.fingerKey);
   }, []);
 
   /**
@@ -592,7 +679,7 @@ export default function FingerPianoGame() {
       pf.asked += 1;
       if (soundEnabled) synthRef.current?.playDull(midiToFreq(t.midi));
       flashKey(t.keyIdx, 'fpp-key-wrong');
-      fxRef.current.push({ x: k.cx, y: KB_TOP, t0: ts, color: '#FB923C', weak: true });
+      fxRef.current.push({ x: k.cx, y: FX_Y, t0: ts, color: '#FB923C', weak: true });
       setToast({ text: `Use finger ${wanted.n}`, kind: 'warn' });
     } else {
       hitRef.current += 1;
@@ -607,11 +694,11 @@ export default function FingerPianoGame() {
       if (isolation != null) { isolationsRef.current.push(isolation); pf.iso.push(isolation); }
       if (tap) { amplitudesRef.current.push(tap.amplitude); ratesRef.current.push(tap.rate); }
       /* A crisp, well-isolated tap is worth more than a hesitant one. */
-      const crisp = tap ? clamp01(tap.amplitude / GOOD_AMPL) * clamp01(tap.rate / GOOD_RATE) : 0.6;
+      const crisp = tap ? clamp01(tap.amplitude / GOOD_AMPL_U) * clamp01(tap.rate / GOOD_RATE_U) : 0.6;
       scoreRef.current += 10 + Math.round(5 * crisp);
       if (soundEnabled) synthRef.current?.play(midiToFreq(t.midi), 0.7 + 0.3 * crisp);
       flashKey(t.keyIdx, 'fpp-key-hit');
-      fxRef.current.push({ x: k.cx, y: KB_TOP, t0: ts, color: wanted.color, weak: false });
+      fxRef.current.push({ x: k.cx, y: FX_Y, t0: ts, color: wanted.color, weak: false });
       setToast({ text: crisp > 0.75 ? 'Perfect!' : 'Great!', kind: 'ok' });
     }
 
@@ -665,8 +752,8 @@ export default function FingerPianoGame() {
        landmarks, not inferred. */
     const tapQuality = amplitudesRef.current.length
       ? clamp01(
-          clamp01(mean(amplitudesRef.current) / GOOD_AMPL) *
-          clamp01(mean(ratesRef.current) / GOOD_RATE)
+          clamp01(mean(amplitudesRef.current) / GOOD_AMPL_U) *
+          clamp01(mean(ratesRef.current) / GOOD_RATE_U)
         ) * 100
       : null;
 
@@ -824,12 +911,14 @@ export default function FingerPianoGame() {
       ctx.stroke();
 
       if (!e.weak) {
-        const grd = ctx.createLinearGradient(cx, cy, cx, cy - 150);
+        /* The beam now falls from the keyboard into the field, following the
+           direction the sound comes from. */
+        const grd = ctx.createLinearGradient(cx, cy, cx, cy + 150);
         grd.addColorStop(0, e.color);
         grd.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.globalAlpha = (1 - u) * 0.5;
         ctx.fillStyle = grd;
-        ctx.fillRect(cx - 22, cy - 150 * u, 44, 150 * u);
+        ctx.fillRect(cx - 22, cy, 44, 150 * u);
       }
 
       const n = e.weak ? 5 : 10;
@@ -863,18 +952,28 @@ export default function FingerPianoGame() {
 
     const tips = tipsRef.current;
     const ext = extRef.current;
-    if (!tips || !ext) return;
+    if (!tips || !ext) { handCardRef.current?.clear(); return; }
     const kx = rect.width / VW, ky = rect.height / VH;
     const wanted = targetRef.current?.fingerKey;
+
+    /* Feed the same flexion to the hand card, so the drawn hand bends with the
+       child's. It writes a CSS variable on the DOM node directly — no React
+       state, so this costs nothing per frame. */
+    const cardFlex = {};
+    for (const f of FINGERS) {
+      const e = ext[f.key];
+      if (e != null) cardFlex[f.key] = clamp01((ARM_FRAC - e) / (ARM_FRAC - FIRE_FRAC));
+    }
+    handCardRef.current?.setFlex(cardFlex);
 
     for (const f of FINGERS) {
       const t = tips[f.key];
       if (!t) continue;
-      const e = ext[f.key] ?? 2.4;
+      const e = ext[f.key] ?? 1;
       const x = t.x * kx, y = t.y * ky;
       /* The ring fills as the finger bends, so the child can see how close the
          tap is to registering — and that the others are not moving. */
-      const flex = clamp01((ARM_LEVEL - e) / (ARM_LEVEL - FIRE_LEVEL));
+      const flex = clamp01((ARM_FRAC - e) / (ARM_FRAC - FIRE_FRAC));
       const isWanted = f.key === wanted;
 
       ctx.beginPath();
@@ -1091,7 +1190,6 @@ export default function FingerPianoGame() {
      ═════════════════════════════════════════════════════════════════════════ */
   const progressPct = clamp01(uiHit / cfg.notes) * 100;
   const stars = [0.4, 0.7, 0.95].map((t) => uiHit / cfg.notes >= t);
-  const activeFingers = FINGERS.filter((f) => cfg.fingers.includes(f.key));
 
   return (
     <div className="fpp-page">
@@ -1148,16 +1246,21 @@ export default function FingerPianoGame() {
       </header>
 
       <main className="fpp-stage">
-        <div
-          className="fpp-field"
-          ref={fieldRef}
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          style={{ touchAction: 'none' }}
-        >
-          {/* keyboard — one key lights up at a time in the finger's colour */}
-          <div className="fpp-keyboard" aria-hidden="true">
+        {/* ── The piano itself, at the top of the page, in its cabinet ───────
+            Each white key carries its OWN number, printed once and never
+            changed — the way a learning piano is stickered. It used to be the
+            finger's number, which changed with every note, so the same key
+            said "2" then "5" then "1" and the number named nothing the child
+            could learn. Which finger to use is now shown on the hand below. */}
+        <div className="fpp-piano">
+          <div className="fpp-piano-lid" aria-hidden="true" />
+          <div
+            className="fpp-keyboard"
+            onPointerDown={handlePointerDown}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            style={{ touchAction: 'none' }}
+          >
             {keys.white.map((k) => {
               const lit = litKey && litKey.keyIdx === k.i;
               const col = lit ? FINGER_BY_KEY[litKey.fingerKey].color : null;
@@ -1172,11 +1275,7 @@ export default function FingerPianoGame() {
                     ...(col ? { '--fc': col } : {}),
                   }}
                 >
-                  {lit && (
-                    <span className="fpp-key-badge">
-                      {FINGER_BY_KEY[litKey.fingerKey].n}
-                    </span>
-                  )}
+                  <span className="fpp-key-num">{k.i + 1}</span>
                   <span className="fpp-key-name">{k.name}</span>
                 </div>
               );
@@ -1189,8 +1288,21 @@ export default function FingerPianoGame() {
               />
             ))}
           </div>
+          <div className="fpp-piano-foot" aria-hidden="true" />
+        </div>
 
-          {/* the finger being asked for, shown large above the keyboard */}
+        <div
+          className="fpp-field"
+          ref={fieldRef}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          style={{ touchAction: 'none' }}
+        >
+          {/* The ask, then the hand it points at. Both are IN FLOW, stacked and
+              centred by .fpp-field, so they cannot land on top of each other at
+              any window size — which is exactly what happened while the banner
+              was absolutely positioned over the middle of the field. */}
           <AnimatePresence>
             {litKey && (
               <motion.div key={`${litKey.keyIdx}-${litKey.fingerKey}`} className="fpp-ask"
@@ -1207,26 +1319,20 @@ export default function FingerPianoGame() {
             )}
           </AnimatePresence>
 
+          {/* the hand: the finger being asked for lights up on it */}
+          <PianoHand
+            ref={handCardRef}
+            active={cfg.fingers}
+            wanted={litKey ? litKey.fingerKey : null}
+            label={litKey ? FINGER_BY_KEY[litKey.fingerKey].label.toLowerCase() : ''}
+          />
+
           <canvas className="fpp-fx-canvas" ref={fxCanvasRef} />
           {mode === 'camera' && <canvas className="fpp-hand-canvas" ref={handCanvasRef} />}
 
-          {/* finger legend */}
-          <div className="fpp-legend">
-            <div className="fpp-legend-title">Use these fingers</div>
-            <div className="fpp-legend-row">
-              {activeFingers.map((f) => (
-                <span key={f.key} className="fpp-legend-dot" style={{ '--fc': f.color }}>{f.n}</span>
-              ))}
-            </div>
-            <ul className="fpp-legend-list">
-              {activeFingers.map((f) => (
-                <li key={f.key} className={uiNextFinger === f.key ? 'active' : ''}>
-                  <span className="fpp-legend-dot sm" style={{ '--fc': f.color }}>{f.n}</span>
-                  {f.label}
-                </li>
-              ))}
-            </ul>
-          </div>
+          {/* The "Use these fingers" legend used to sit here. The hand card
+              says the same thing better: the fingers this level uses are the
+              ones drawn bright, and the one being asked for is the one lit. */}
 
           <AnimatePresence>
             {toast && (
@@ -1399,7 +1505,7 @@ export default function FingerPianoGame() {
                     {results.perFinger.map((p) => (
                       <tr key={p.key}>
                         <td>
-                          <span className="fpp-legend-dot sm" style={{ '--fc': p.color }}>{p.n}</span>
+                          <span className="fpp-finger-dot" style={{ '--fc': p.color }}>{p.n}</span>
                           {p.label}
                         </td>
                         <td>{p.hit}/{p.asked}</td>

@@ -30,11 +30,8 @@ import FingerCopyDifficulty   from './pages/FingerCopyDifficulty';
 import FingerCopyGame         from './pages/FingerCopyGame';
 import TraceTypeDifficulty    from './pages/TraceTypeDifficulty';
 import TraceTypeGame          from './pages/TraceTypeGame';
-/* Finger Piano is under construction; its routes redirect to the game picker.
-   The imports stay commented rather than deleted so re-enabling the game is a
-   two-line change, and so the build does not warn about unused imports. */
-// import FingerPianoDifficulty  from './pages/FingerPianoDifficulty';
-// import FingerPianoGame        from './pages/FingerPianoGame';
+import FingerPianoDifficulty  from './pages/FingerPianoDifficulty';
+import FingerPianoGame        from './pages/FingerPianoGame';
 import PinchCoinDifficulty    from './pages/PinchCoinDifficulty';
 import PinchCoinGame          from './pages/PinchCoinGame';
 import LadybugDifficulty      from './pages/LadybugDifficulty';
@@ -305,16 +302,17 @@ export default function App() {
           <Route path="/play/trace-type-game" element={
             <ProtectedRoute allowedRoles={['learner']}><TraceTypeGame /></ProtectedRoute>
           } />
-          {/* Finger Piano is still being built. The card in the game picker
-              opens a notice instead of launching it, and these two routes are
-              sealed as well so a bookmark or a typed URL cannot slip past the
-              picker into an unfinished game. The redirect carries ?locked so
-              the learner home shows the same explanation. */}
+          {/* Finger Piano was sealed while it was still being built — both the
+              picker card and these routes, so a bookmark or a typed URL could
+              not slip past the picker into an unfinished game. It is unlocked
+              now. If it ever needs sealing again, put BOTH back: the redirects
+              here and `comingSoon: true` on the card in LearnerHome.jsx. One
+              without the other leaves a hole. */}
           <Route path="/play/finger-piano-difficulty" element={
-            <Navigate to="/play?locked=fingerpiano" replace />
+            <ProtectedRoute allowedRoles={['learner']}><FingerPianoDifficulty /></ProtectedRoute>
           } />
           <Route path="/play/finger-piano-game" element={
-            <Navigate to="/play?locked=fingerpiano" replace />
+            <ProtectedRoute allowedRoles={['learner']}><FingerPianoGame /></ProtectedRoute>
           } />
           <Route path="/play/pinch-coin-difficulty" element={
             <ProtectedRoute allowedRoles={['learner']}><PinchCoinDifficulty /></ProtectedRoute>

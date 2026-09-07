@@ -150,6 +150,15 @@
   border-radius: 26px;
   overflow: hidden;
   cursor: pointer;
+  /* The ask and the hand are laid out here, in flow and centred, so they stack
+     instead of overlapping. Everything else in the field (canvases, toast,
+     hidden camera) is an absolute overlay and ignores this. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(6px, 1.8vh, 18px);
+  padding: clamp(10px, 2vh, 22px);
   background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%201000%20560%22%20preserveAspectRatio%3D%22none%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22night%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%231A1040%22%2F%3E%3Cstop%20offset%3D%2242%25%22%20stop-color%3D%22%23241456%22%2F%3E%3Cstop%20offset%3D%2276%25%22%20stop-color%3D%22%232E1868%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%233B1D7A%22%2F%3E%3C%2FlinearGradient%3E%3CradialGradient%20id%3D%22stageGlow%22%20cx%3D%2250%25%22%20cy%3D%2294%25%22%20r%3D%2262%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23A78BFA%22%20stop-opacity%3D%22.5%22%2F%3E%3Cstop%20offset%3D%2255%25%22%20stop-color%3D%22%237C3AED%22%20stop-opacity%3D%22.16%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%237C3AED%22%20stop-opacity%3D%220%22%2F%3E%3C%2FradialGradient%3E%3CradialGradient%20id%3D%22spot1%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%2367E8F9%22%20stop-opacity%3D%22.26%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%2367E8F9%22%20stop-opacity%3D%220%22%2F%3E%3C%2FradialGradient%3E%3CradialGradient%20id%3D%22spot2%22%20cx%3D%2250%25%22%20cy%3D%2250%25%22%20r%3D%2250%25%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23F472B6%22%20stop-opacity%3D%22.22%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23F472B6%22%20stop-opacity%3D%220%22%2F%3E%3C%2FradialGradient%3E%3ClinearGradient%20id%3D%22beamL%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220.4%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%23C4B5FD%22%20stop-opacity%3D%22.18%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23C4B5FD%22%20stop-opacity%3D%220%22%2F%3E%3C%2FlinearGradient%3E%3ClinearGradient%20id%3D%22floorG%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%25%22%20stop-color%3D%22%233B1D7A%22%20stop-opacity%3D%220%22%2F%3E%3Cstop%20offset%3D%22100%25%22%20stop-color%3D%22%23120A2E%22%20stop-opacity%3D%22.85%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%221000%22%20height%3D%22560%22%20fill%3D%22url(%23night)%22%2F%3E%3Cellipse%20cx%3D%22140%22%20cy%3D%22120%22%20rx%3D%22240%22%20ry%3D%22180%22%20fill%3D%22url(%23spot1)%22%2F%3E%3Cellipse%20cx%3D%22880%22%20cy%3D%2290%22%20rx%3D%22220%22%20ry%3D%22170%22%20fill%3D%22url(%23spot2)%22%2F%3E%3Cpath%20d%3D%22M150%20-20%20L330%20-20%20L250%20420%20L60%20420%20Z%22%20fill%3D%22url(%23beamL)%22%2F%3E%3Cpath%20d%3D%22M760%20-20%20L940%20-20%20L960%20420%20L790%20420%20Z%22%20fill%3D%22url(%23beamL)%22%20opacity%3D%22.8%22%2F%3E%3Cg%20fill%3D%22%23FFFFFF%22%3E%3Ccircle%20cx%3D%2288%22%20%20cy%3D%2272%22%20%20r%3D%221.9%22%20opacity%3D%22.7%22%2F%3E%3Ccircle%20cx%3D%22212%22%20cy%3D%2246%22%20%20r%3D%221.3%22%20opacity%3D%22.5%22%2F%3E%3Ccircle%20cx%3D%22318%22%20cy%3D%22104%22%20r%3D%222.2%22%20opacity%3D%22.65%22%2F%3E%3Ccircle%20cx%3D%22432%22%20cy%3D%2258%22%20%20r%3D%221.4%22%20opacity%3D%22.45%22%2F%3E%3Ccircle%20cx%3D%22556%22%20cy%3D%2292%22%20%20r%3D%221.8%22%20opacity%3D%22.6%22%2F%3E%3Ccircle%20cx%3D%22668%22%20cy%3D%2242%22%20%20r%3D%221.2%22%20opacity%3D%22.4%22%2F%3E%3Ccircle%20cx%3D%22742%22%20cy%3D%22122%22%20r%3D%222%22%20%20%20opacity%3D%22.55%22%2F%3E%3Ccircle%20cx%3D%22864%22%20cy%3D%2266%22%20%20r%3D%221.5%22%20opacity%3D%22.5%22%2F%3E%3Ccircle%20cx%3D%22948%22%20cy%3D%22146%22%20r%3D%221.7%22%20opacity%3D%22.45%22%2F%3E%3Ccircle%20cx%3D%2252%22%20%20cy%3D%22196%22%20r%3D%221.4%22%20opacity%3D%22.4%22%2F%3E%3Ccircle%20cx%3D%22270%22%20cy%3D%22180%22%20r%3D%221.2%22%20opacity%3D%22.35%22%2F%3E%3Ccircle%20cx%3D%22612%22%20cy%3D%22168%22%20r%3D%221.6%22%20opacity%3D%22.45%22%2F%3E%3Ccircle%20cx%3D%22404%22%20cy%3D%22212%22%20r%3D%221.1%22%20opacity%3D%22.3%22%2F%3E%3Ccircle%20cx%3D%22820%22%20cy%3D%22212%22%20r%3D%221.3%22%20opacity%3D%22.35%22%2F%3E%3C%2Fg%3E%3Cg%20fill%3D%22%23C4B5FD%22%20opacity%3D%22.22%22%3E%3Cg%20transform%3D%22translate(120%2C250)%20rotate(-12)%22%3E%3Cellipse%20cx%3D%220%22%20cy%3D%220%22%20rx%3D%229%22%20ry%3D%227%22%2F%3E%3Crect%20x%3D%227%22%20y%3D%22-34%22%20width%3D%223.4%22%20height%3D%2234%22%2F%3E%3Cpath%20d%3D%22M10.4%20-34%20q14%204%2014%2014%20q-6%20-8%20-14%20-6%20z%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(878%2C238)%20rotate(14)%22%3E%3Cellipse%20cx%3D%220%22%20cy%3D%220%22%20rx%3D%228%22%20ry%3D%226.2%22%2F%3E%3Crect%20x%3D%226.2%22%20y%3D%22-30%22%20width%3D%223%22%20height%3D%2230%22%2F%3E%3Cpath%20d%3D%22M9.2%20-30%20q12%203.4%2012%2012%20q-5%20-7%20-12%20-5%20z%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(318%2C300)%20rotate(-6)%22%20opacity%3D%22.7%22%3E%3Cellipse%20cx%3D%220%22%20cy%3D%220%22%20rx%3D%227%22%20ry%3D%225.4%22%2F%3E%3Cellipse%20cx%3D%2226%22%20cy%3D%22-5%22%20rx%3D%227%22%20ry%3D%225.4%22%2F%3E%3Crect%20x%3D%225.4%22%20y%3D%22-30%22%20width%3D%222.6%22%20height%3D%2230%22%2F%3E%3Crect%20x%3D%2231.4%22%20y%3D%22-35%22%20width%3D%222.6%22%20height%3D%2230%22%2F%3E%3Cpath%20d%3D%22M5.4%20-30%20h28.6%20v7%20h-28.6%20z%22%2F%3E%3C%2Fg%3E%3Cg%20transform%3D%22translate(700%2C318)%20rotate(9)%22%20opacity%3D%22.6%22%3E%3Cellipse%20cx%3D%220%22%20cy%3D%220%22%20rx%3D%226.4%22%20ry%3D%225%22%2F%3E%3Crect%20x%3D%224.8%22%20y%3D%22-26%22%20width%3D%222.4%22%20height%3D%2226%22%2F%3E%3Cpath%20d%3D%22M7.2%20-26%20q10%203%2010%2010%20q-4.4%20-6%20-10%20-4.4%20z%22%2F%3E%3C%2Fg%3E%3C%2Fg%3E%3Crect%20y%3D%22300%22%20width%3D%221000%22%20height%3D%22260%22%20fill%3D%22url(%23floorG)%22%2F%3E%3Cellipse%20cx%3D%22500%22%20cy%3D%22548%22%20rx%3D%22520%22%20ry%3D%22150%22%20fill%3D%22url(%23stageGlow)%22%2F%3E%3Cg%20stroke%3D%22%237C3AED%22%20stroke-width%3D%221.4%22%20opacity%3D%22.2%22%3E%3Cpath%20d%3D%22M0%20470%20H1000%22%2F%3E%3Cpath%20d%3D%22M0%20508%20H1000%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E");
   /* 100% 100% with preserveAspectRatio="none" in the SVG keeps the backdrop in
      the same virtual 1000x560 space the game positions everything in. */
@@ -164,10 +173,8 @@
    THE ASK — which finger the lit key is calling for
    ═══════════════════════════════════════════════════════════════════════════ */
 .fpp-ask {
-  position: absolute;
-  left: 50%;
-  top: 44%;
-  transform: translate(-50%, -50%);
+  position: relative;
+  flex: 0 0 auto;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -207,13 +214,55 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    KEYBOARD
    ═══════════════════════════════════════════════════════════════════════════ */
+/* ── The piano cabinet ─────────────────────────────────────────────────────
+   The keyboard used to be parked 68.6% down inside the night-sky field, which
+   put it at the BOTTOM of the screen with nothing above it but sky. It now sits
+   at the top of the page in a black case, the way a real piano is built: a lid
+   over the keys, the keybed below them. */
+.fpp-piano {
+  position: relative;
+  flex: 0 0 auto;
+  height: clamp(132px, 23vh, 210px);
+  margin-bottom: 12px;
+  padding: 0 clamp(10px, 1.6vw, 20px);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, #23262E 0%, #14161B 20%, #0A0B0E 100%);
+  box-shadow:
+    0 22px 48px rgba(0, 0, 0, 0.62),
+    inset 0 1px 0 rgba(255, 255, 255, 0.10),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+}
+
+/* the lid: a thin lacquered strip with a highlight, above the keys */
+.fpp-piano-lid {
+  flex: 0 0 clamp(12px, 2.4vh, 20px);
+  margin: 0 calc(-1 * clamp(10px, 1.6vw, 20px));
+  border-radius: 18px 18px 0 0;
+  background: linear-gradient(180deg, #3A3E48 0%, #1B1E25 55%, #101216 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22),
+              0 3px 10px rgba(0, 0, 0, 0.5);
+}
+
+/* the keybed: the sliver of case the keys appear to rest in */
+.fpp-piano-foot {
+  flex: 0 0 clamp(8px, 1.6vh, 14px);
+  margin: 0 calc(-1 * clamp(10px, 1.6vw, 20px));
+  border-radius: 0 0 18px 18px;
+  background: linear-gradient(180deg, #05060A 0%, #101218 100%);
+  box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.7);
+}
+
 .fpp-keyboard {
-  position: absolute;
-  left: 0; right: 0;
-  top: 68.6%;                 /* KB_TOP / VH */
-  height: 26.8%;              /* KB_H / VH */
+  position: relative;
+  flex: 1;
+  min-height: 0;
   z-index: 6;
-  pointer-events: none;
+  /* The keys are the touch target now, so they must receive pointers. */
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 .fpp-key {
@@ -230,17 +279,45 @@
   border-top: 2px solid #FFFFFF;
   box-shadow: inset -3px 0 6px rgba(15, 23, 42, 0.12),
               0 6px 14px rgba(0, 0, 0, 0.34);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding-bottom: 8px;
+}
+
+/* The whole key is the target — its full height, edge to edge. A child aiming
+   with a mouse or a fingertip does not have to find a small badge. */
+.fpp-key-white:active { transform: translateY(2px); filter: brightness(0.96); }
+
+/* ── The number printed on every key ───────────────────────────────────────
+   Fixed for the life of the round, like the stickers on a learning piano. It
+   is a big, high-contrast target: on a laptop it is what the child clicks. */
+.fpp-key-num {
+  position: absolute;
+  left: 50%;
+  bottom: 26%;
+  transform: translateX(-50%);
+  display: grid;
+  place-items: center;
+  min-width: clamp(20px, 2.1vw, 30px);
+  height: clamp(20px, 2.1vw, 30px);
+  border-radius: 50%;
+  background: #E8EDF5;
+  color: #475569;
+  font-size: clamp(0.72rem, 1.1vw, 0.95rem);
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  box-shadow: inset 0 0 0 1px rgba(71, 85, 105, 0.18);
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
 }
 
 .fpp-key-name {
+  position: absolute;
+  left: 50%;
+  bottom: 7%;
+  transform: translateX(-50%);
   font-size: 0.62rem;
   font-weight: 800;
   color: #94A3B8;
   letter-spacing: 0.03em;
+  pointer-events: none;
 }
 
 .fpp-key-black {
@@ -288,23 +365,16 @@
   pointer-events: none;
 }
 
-.fpp-key-badge {
-  position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
+/* The lit key's own number takes the finger's colour and grows, so the key
+   being asked for is unmistakable without printing a second, changing number
+   on top of it. (`.fpp-key-badge` used to do that and is gone.) */
+.fpp-key-lit .fpp-key-num {
   background: var(--fc);
   color: #14103A;
-  font-size: 1.02rem;
-  font-weight: 900;
-  border: 3px solid rgba(255, 255, 255, 0.95);
+  transform: translateX(-50%) scale(1.25);
   box-shadow: 0 0 18px color-mix(in srgb, var(--fc) 85%, transparent);
 }
+.fpp-key-lit .fpp-key-name { color: #64748B; }
 
 /* struck with the right finger */
 .fpp-key-hit {
@@ -337,68 +407,177 @@
 /* ═══════════════════════════════════════════════════════════════════════════
    FINGER LEGEND
    ═══════════════════════════════════════════════════════════════════════════ */
-.fpp-legend {
-  position: absolute;
-  left: 16px;
-  top: 16px;
-  z-index: 10;
-  padding: 13px 15px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  pointer-events: none;
-}
-.fpp-legend-title {
-  font-size: 0.78rem;
-  font-weight: 900;
-  color: var(--fpp-ink);
-  margin-bottom: 9px;
-}
-.fpp-legend-row { display: flex; gap: 6px; margin-bottom: 10px; }
-
-.fpp-legend-dot {
-  width: 26px;
-  height: 26px;
+/* The "Use these fingers" legend was removed with its markup — the hand card
+   says the same thing, on a hand. The end-of-round table still names each
+   finger with its coloured number, so that one dot lives on here. */
+.fpp-finger-dot {
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   display: inline-grid;
   place-items: center;
+  flex-shrink: 0;
+  margin-right: 8px;
+  vertical-align: middle;
   background: var(--fc);
   color: #14103A;
-  font-size: 0.82rem;
+  font-size: 0.68rem;
   font-weight: 900;
-  flex-shrink: 0;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.22);
 }
-.fpp-legend-dot.sm { width: 20px; height: 20px; font-size: 0.68rem; }
 
-.fpp-legend-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE HAND CARD
+   A drawn hand in the middle of the field. The finger the lit key is asking
+   for glows in its own colour; the fingers this level does not use are faint.
+   In camera mode each finger also bends with the child's own, driven from the
+   game loop through the `--flex` variable (0 straight → 1 bent enough to fire).
+   ═══════════════════════════════════════════════════════════════════════════ */
+.fpp-handcard {
+  position: relative;
+  /* Never shrink the card: squeezing the box left the drawing and the label
+     hanging out below its own background. The drawing is sized in vh instead,
+     so on a short window the hand gets smaller and the card stays whole. */
+  flex: 0 0 auto;
+  /* above the live fingertip read-out drawn on .fpp-hand-canvas (z 8), so the
+     instruction is never covered by it */
+  z-index: 9;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 20px 14px;
+  border-radius: 22px;
+  background: rgba(10, 12, 26, 0.55);
+  border: 1px solid rgba(148, 163, 255, 0.22);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(7px);
+  pointer-events: none;
 }
-.fpp-legend-list li {
+
+.fpp-handcard-title {
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: rgba(199, 210, 254, 0.75);
+}
+
+.fpp-hand-svg {
+  width: clamp(140px, 24vh, 280px);
+  height: auto;
+  overflow: visible;
+}
+
+/* the palm: a translucent shell with the mesh showing through */
+.fpp-hand-fill { fill: rgba(125, 211, 252, 0.13); }
+.fpp-hand-edge {
+  fill: none;
+  stroke: rgba(165, 214, 255, 0.45);
+  stroke-width: 1.4;
+}
+
+/* ── one finger ── */
+.fpp-hand-finger {
+  --flex: 0;
+  transition: opacity 0.2s ease;
+}
+/* the soft body — takes on the finger's colour as the finger bends */
+.fpp-hand-body {
+  fill: none;
+  stroke: color-mix(in srgb, var(--fc) calc(var(--flex) * 70%),
+                    rgba(125, 211, 252, 0.30));
+  stroke-width: 21;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* the wireframe texture, laid over the body at the same width */
+.fpp-hand-mesh {
+  fill: none;
+  stroke: url(#fppMesh);
+  stroke-width: 21;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.9;
+}
+.fpp-hand-bone {
+  fill: none;
+  stroke: rgba(186, 230, 253, 0.6);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.fpp-hand-joint { fill: rgba(224, 242, 254, 0.75); }
+.fpp-hand-num {
+  font-size: 13px;
+  font-weight: 900;
+  text-anchor: middle;
+  fill: rgba(199, 210, 254, 0.55);
+}
+
+/* fingers this level does not use */
+.fpp-hand-finger.is-off { opacity: 0.22; }
+
+/* THE finger being asked for */
+.fpp-hand-finger.is-wanted .fpp-hand-body {
+  stroke: color-mix(in srgb, var(--fc) 78%, transparent);
+  stroke-width: 24;
+  animation: fppHandPulse 1.15s ease-in-out infinite;
+}
+.fpp-hand-finger.is-wanted .fpp-hand-bone { stroke: #FFFFFF; stroke-width: 2.2; }
+.fpp-hand-finger.is-wanted .fpp-hand-joint { fill: #FFFFFF; }
+.fpp-hand-finger.is-wanted .fpp-hand-num { fill: var(--fc); font-size: 13px; }
+
+@keyframes fppHandPulse {
+  0%, 100% { opacity: 0.78; }
+  50%      { opacity: 1; }
+}
+
+.fpp-handcard-foot {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 3px 8px 3px 3px;
-  border-radius: 999px;
+  min-height: 26px;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #E2E8F0;
+  text-transform: capitalize;
+}
+.fpp-handcard-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--fc);
+  color: #14103A;
+  font-size: 0.78rem;
+  font-weight: 900;
+  box-shadow: 0 0 16px color-mix(in srgb, var(--fc) 80%, transparent);
+}
+.fpp-handcard-wait {
   font-size: 0.8rem;
   font-weight: 700;
-  color: #475569;
-  transition: background 0.2s ease, color 0.2s ease;
+  color: rgba(199, 210, 254, 0.5);
+  text-transform: none;
 }
-/* the finger the next note is asking for */
-.fpp-legend-list li.active {
-  background: #EDE9FE;
-  color: #5B21B6;
-  animation: fppNext 1.1s ease-in-out infinite;
+
+@media (max-height: 720px) {
+  .fpp-handcard { padding: 8px 14px 10px; gap: 3px; }
+  .fpp-handcard-title { font-size: 0.64rem; }
 }
-@keyframes fppNext {
-  0%, 100% { transform: translateX(0); }
-  50%      { transform: translateX(3px); }
+
+/* Short windows (a 16:10 laptop with browser chrome, a half-height window).
+   The piano keeps its shape and the hand keeps its detail — both simply get
+   smaller — so the screen still never scrolls. */
+@media (max-height: 620px) {
+  .fpp-piano { height: clamp(96px, 19vh, 132px); margin-bottom: 8px; }
+  .fpp-hand-svg { width: clamp(104px, 19vh, 150px); }
+  .fpp-ask { padding: 9px 18px 9px 10px; gap: 10px; }
+  .fpp-ask-dot { width: 38px; height: 38px; font-size: 1.1rem; }
+  .fpp-ask-txt { font-size: 0.9rem; }
+  .fpp-handcard-foot { font-size: 0.8rem; min-height: 20px; }
+  .fpp-handcard-dot { width: 20px; height: 20px; font-size: 0.7rem; }
 }
 
 /* ── Toast ── */
@@ -870,8 +1049,6 @@
   .fpp-header { flex-wrap: wrap; }
   .fpp-header-center { order: 3; flex-basis: 100%; }
   .fpp-metrics { grid-template-columns: repeat(2, 1fr); }
-  .fpp-legend { padding: 9px 11px; }
-  .fpp-legend-list { display: none; }
 }
 @media (max-width: 560px) {
   .fpp-stage { padding: 10px 10px 14px; }

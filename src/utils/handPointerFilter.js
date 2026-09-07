@@ -92,14 +92,30 @@ export const DEFAULTS = {
      steadier, but a stationary target takes longer to settle on); `beta` is
      how fast that opens up as the hand speeds up (higher = snappier reaches,
      but jitter starts to come through mid-movement). */
-  minCutoff: 1.4,
-  beta: 2.0,
+  /* Lowered 1.4 → 0.6 after "the hand is not fixed, it vibrates fast".
+     `minCutoff` is the filtering that applies when the hand is NOT moving, and
+     at 1.4 it let through enough of the raw landmark jitter to buzz. Measured
+     on a hand HELD on a target for 4 s (webcam noise plus a 6 Hz finger
+     tremor), on a 1000px screen: the pointer changed direction 8.8 times a
+     second and covered 29px of travel while the hand stood still. */
+  minCutoff: 0.6,
+  /* Lowered 2.0 → 1.5 in the same round. `beta` is how fast the smoothing gets
+     out of the way once the hand moves; at 2.0 it stepped aside almost
+     completely, so a quick reach arrived raw and snapped. At 1.5 the reach
+     keeps some smoothing all the way through, which is most of why the pointer
+     no longer overshoots the target and bounces back (1.6% of the screen
+     before, 0.1% now, and it settles in one frame instead of two). */
+  beta: 1.5,
   dCutoff: 1.0,
 
   /* Latency compensation. Tracking is always behind the hand; this puts the
      pointer back where the hand is now. Raise it and the pointer starts to
      overshoot on direction changes, which reads as nervous. */
-  predictMs: 55,
+  /* Halved 55 → 28 in the same round. Prediction puts the pointer where the
+     hand is ABOUT to be, which is literally "the pointer runs ahead of my
+     hand" — the complaint, in one setting. 28 ms still covers the camera's own
+     lag without the pointer leading a deliberate reach. */
+  predictMs: 28,
   maxPredict: 0.07,
   /* Below this speed there is nothing worth predicting and the derivative is
      mostly noise, so prediction fades out rather than switching off. */
@@ -148,9 +164,46 @@ export const DEFAULTS = {
      Left off by default so the games that were reported working — Pop the
      Bubble, Follow the Ladybug — keep the exact feel they have today. */
   fitReach: false,
-  /* Fraction of the screen the child's observed reach should cover. Slightly
-     under 1 because softEdge compresses the last 10% anyway. */
-  reachTarget: 0.92,
+  /* ── THE SPEED / REACH DIAL ────────────────────────────────────────────
+     Fraction of the screen the child's observed reach should cover.
+
+     How much of the screen a full reach should cover. It sets the FAR end of
+     the curve; `expo` below sets how gentle the near end is. They are separate
+     dials now — raising this no longer makes small movements faster, which is
+     what made "calm pointer" and "reachable corners" mutually exclusive before.
+
+     Raise it if the corners are still out of reach; lower `expo` (towards 1)
+     if the pointer feels sluggish when the child is aiming carefully.
+
+     LOWERED 0.88 → 0.76 on the fourth "the hand is too fast".
+
+     The three rounds before this one reshaped the curve — they made the centre
+     calmer and left the middle of the reach where it was. Measured, that is
+     exactly what they did: how much screen the pointer covers per unit of hand
+     movement, held steady, for a seated child (34% frame sweep):
+
+                       hand 4%   hand 8%   hand 15%   hand 22%
+         expo 2.0        0.39x     1.13x      2.26x      2.09x
+         expo 2.4        0.19x     0.83x      2.14x      2.11x
+         expo 2.8        0.03x     0.56x      2.00x      2.12x
+
+     Raising `expo` empties out the centre and barely touches the middle — and
+     the middle is where a child spends a round. So `expo` was the wrong dial.
+
+     The middle of that curve is set by THIS number, and only by it: the child's
+     own reach is mapped onto `reachTarget` of the screen, so a 34% sweep across
+     88% of the screen IS 2.6x, whatever shape the curve has in between. Slower
+     therefore means a smaller number here, and it costs screen:
+
+                      hand 15%   pointer can reach   peak speed
+         0.88 (was)      2.26x      86% x 74%          1.12 /s
+         0.76 (now)      1.93x      77% x 66%          0.89 /s
+         0.70            1.77x      74% x 61%          0.81 /s
+
+     That is the whole trade, honestly: 15% slower through the middle, and the
+     child now has to reach further to touch the very edges of the screen. Put
+     it back to 0.88 to undo this and nothing else changes. */
+  reachTarget: 0.76,
   /* Never believe a reach smaller than this (per axis, in frame units). It is
      the guard that stops the gain running away when a child holds still and
      the observed extremes collapse towards each other. */
@@ -162,13 +215,62 @@ export const DEFAULTS = {
   /* The measured reach grows immediately but shrinks very slowly (per second),
      so a moment of stillness does not make the pointer twitchy. */
   reachDecay: 0.02,
+  /* ── Expo: how the reach is SHAPED, not just how far it stretches ──────
+     Client feedback, twice: "the hand is too fast".
+
+     With a single gain the two things the client wants are the same dial —
+     a calm pointer and reachable corners cannot both exist, because one number
+     scales small and large movements alike. Turning it down for calm loses the
+     corners; that is the trade-off table above `reachTarget`.
+
+     An expo curve separates them. The offset from the reach centre is put
+     through a shaped transfer function instead of multiplied by a scalar, so
+     the pointer is GENTLE near where the hand rests and gets progressively
+     faster the further the child reaches. Measured for a seated child
+     (34% frame sweep), all at 92% screen coverage:
+
+         expo  linear | gain at centre   mid    edge
+          1.0   1.00  |      2.71       2.71   2.71   ← one gain, "too fast"
+          1.6   0.30  |      1.00       2.81   3.84
+          1.8   0.25  |      0.77       2.77   4.33
+          2.0   0.20  |      0.58       2.71   4.87   ← current
+          2.2   0.18  |      0.44       2.62   5.30
+          2.4   0.15  |      0.31       2.48   5.86   ← centre starts to feel dead
+
+     Raising `expo` slows the CENTRE without costing reach — measured on a
+     seated child, coverage stays at 84% x 81% from 1.8 all the way to 2.4.
+     That is the whole point of the curve: the two ends move independently.
+
+     Because the curve holds the centre calm, `reachTarget` could go back UP
+     from the 0.74 it had been dialled down to. End to end, for a seated child:
+
+                          centre gain   screen covered
+         before (linear)      1.98         77% x 77%
+         expo 1.8             1.09         84% x 82%
+         expo 2.0 (current)   0.81         84% x 81%
+
+     Calmer AND further — the two stopped being the same dial. A centre gain
+     below 1.0 means the pointer travels LESS than the hand near the aim point,
+     which is what makes fine targeting feel steady.
+
+     This is a POSITION curve, not a speed curve. Speed-based acceleration
+     would have to change the gain mid-reach, and with this filter's absolute
+     mapping (position = anchor + shaped offset) that teleports the pointer.
+     Shaping the offset is stable by construction.
+
+     `expo` 1 with `expoLinear` 1 reproduces the old linear behaviour exactly. */
+  expo: 2.0,
+  expoLinear: 0.20,
+  /* How far past the measured reach the curve still responds, before the soft
+     edge takes over. Without it a child who stretches further than usual would
+     hit a wall. */
+  expoOvershoot: 1.6,
+
   /* Independent, wider gain limits for the fitted axes. */
   fitMinGain: 1.0,
-  /* 4.2 is where the benefit plateaus in simulation: below it a child who
-     makes only small movements cannot reach the edges, above it nothing
-     further is gained (the reach floor and the soft edges bind first) and
-     the pointer only gets more sensitive to tracking noise. */
-  fitMaxGain: 4.2,
+  /* Paired with reachTarget above — see the table there. This is the ceiling
+     that stops a child who barely moves from getting a runaway pointer. */
+  fitMaxGain: 2.2,
 
   /* ── Holding still ─────────────────────────────────────────────────────
      Client feedback: the pointer would not stay put when the hand was held
@@ -191,15 +293,48 @@ export const DEFAULTS = {
      is, the anchor and the reach measurement are frozen. `stillEps` is a
      micro-deadband: movement smaller than this does not move the pointer at
      all. It is applied as a soft ramp rather than a hard freeze, so there is
-     no jump when the child starts moving again. */
-  stillSpeed: 0.055,
-  stillEps: 0.0045,
+     no jump when the child starts moving again.
+
+     RAISED in the same round as `minCutoff`, and this pair is what actually
+     stopped the buzzing. The old deadband (0.0045, about 10px once the gain is
+     applied) was SMALLER than the tremor it had to absorb, so the pointer
+     faithfully followed the shake. Held on a target for 4 s:
+
+                                          travel while    direction
+                                          held still      reversals/s   deadband
+         minCutoff 1.4  eps .0045 (was)      29 px/s          8.8         10 px
+         minCutoff 0.6  eps .007              4 px/s          2.5         15 px
+         minCutoff 0.6  eps .008 (now)        3 px/s          0.5         18 px
+         minCutoff 0.6  eps .010              3 px/s          0.5         22 px
+
+     0.008 is where the vibration stops; 0.010 buys nothing more and only costs
+     precision. The 18px deadband stays well inside the tracing game's ~31px
+     touch tolerance, so it cannot make a waypoint unreachable.
+
+     What it costs: the pointer takes one extra frame to leave a target when
+     the child starts a reach (133ms → 167ms). The reach itself is unchanged —
+     196px of pointer travel for the same hand movement, against 201px before —
+     so the speed set in the previous round is untouched. */
+  stillSpeed: 0.08,
+  stillEps: 0.008,
 };
 
 /* One-Euro's frame-rate-independent smoothing factor. */
 function alphaFor(dt, cutoff) {
   const tau = 1 / (2 * Math.PI * cutoff);
   return 1 / (1 + tau / dt);
+}
+
+/* Shape an offset expressed in units of half the child's reach.
+   Returns a value in the same units, gentle near 0 and steeper towards 1.
+   `linear` is how much of the plain straight-line response to keep, so the
+   centre never goes completely dead (a pure power curve has zero gain at 0,
+   which reads as a dead zone). */
+function expoShape(u, expo, linear, overshoot) {
+  const c = clamp(u, -overshoot, overshoot);
+  const a = Math.abs(c);
+  const shaped = linear * a + (1 - linear) * Math.pow(a, expo);
+  return c < 0 ? -shaped : shaped;
 }
 
 /* Compress the outer `k` of the range instead of walling it off. Continuous
@@ -283,10 +418,19 @@ export function createHandPointerFilter(options = {}) {
       lastT = t;
       gain = rawGain;
       if (loX === hiX) { loX = hiX = rx; loY = hiY = ry; }
-      const gx0 = o.fitReach ? gainX : gain;
-      const gy0 = o.fitReach ? gainY : gain;
-      const mx = softEdge(0.5 + (rx - anchorX) * gx0, o.edgeKnee);
-      const my = softEdge(0.5 + (ry - anchorY) * gy0, o.edgeKnee);
+      /* The re-acquire path must use the SAME transfer as the main loop, or
+         the pointer lands somewhere else the moment the hand comes back. */
+      let mx;
+      let my;
+      if (o.fitReach) {
+        const halfX = Math.max(reachX, o.minReach) / 2;
+        const halfY = Math.max(reachY, o.minReach) / 2;
+        mx = softEdge(0.5 + expoShape((rx - anchorX) / halfX, o.expo, o.expoLinear, o.expoOvershoot) * (o.reachTarget / 2), o.edgeKnee);
+        my = softEdge(0.5 + expoShape((ry - anchorY) / halfY, o.expo, o.expoLinear, o.expoOvershoot) * (o.reachTarget / 2), o.edgeKnee);
+      } else {
+        mx = softEdge(0.5 + (rx - anchorX) * gain, o.edgeKnee);
+        my = softEdge(0.5 + (ry - anchorY) * gain, o.edgeKnee);
+      }
       outX = prevMX = clamp(mx, 0, 1);
       outY = prevMY = clamp(my, 0, 1);
       velX = velY = 0;
@@ -359,8 +503,21 @@ export function createHandPointerFilter(options = {}) {
     }
 
     // ── The mapping itself ───────────────────────────────────────────────
-    const mx = softEdge(0.5 + (rx - anchorX) * gx, o.edgeKnee);
-    const my = softEdge(0.5 + (ry - anchorY) * gy, o.edgeKnee);
+    let mx;
+    let my;
+    if (o.fitReach) {
+      /* Offset measured in halves of the child's own reach, shaped, then laid
+         onto `reachTarget` of the screen. See the `expo` note in DEFAULTS. */
+      const halfX = Math.max(reachX, o.minReach) / 2;
+      const halfY = Math.max(reachY, o.minReach) / 2;
+      const sx = expoShape((rx - anchorX) / halfX, o.expo, o.expoLinear, o.expoOvershoot);
+      const sy = expoShape((ry - anchorY) / halfY, o.expo, o.expoLinear, o.expoOvershoot);
+      mx = softEdge(0.5 + sx * (o.reachTarget / 2), o.edgeKnee);
+      my = softEdge(0.5 + sy * (o.reachTarget / 2), o.edgeKnee);
+    } else {
+      mx = softEdge(0.5 + (rx - anchorX) * gx, o.edgeKnee);
+      my = softEdge(0.5 + (ry - anchorY) * gy, o.edgeKnee);
+    }
 
     // ── 2. One-Euro ──────────────────────────────────────────────────────
     const dAlpha = alphaFor(dt, o.dCutoff);

@@ -38,6 +38,37 @@ Game card  →  [Instructions]  →  Level select  →  Play (HUD)  →  Result
 A game's own `*Difficulty.jsx` should be **a config object and nothing else** —
 look at `BubbleDifficulty.jsx` (40 lines) for the shape.
 
+## 2b. One design: Trace → Find → Type
+
+Trace → Find → Type is the reference. Its palette, top bar, panels and rules
+card are what `GameShell.css` contains, and every other screen uses them:
+
+* **Palette** — dark base `#090B14 → #111424` with indigo / purple / cyan
+  pools, glass surfaces, teal + indigo accents. Dark is the default; light is
+  the opt-in. There are **no per-game backgrounds** — a game is identified by
+  its emoji and title, not by repainting the furniture. Giving each game its own
+  gradient is what made them look like different products in the first place.
+* **Top bar** — emoji + title on the left, 38px glass icon buttons on the right
+  (`.gs-topbar` / `.gs-action`, ported from `.tt-header` / `.tt-icon-btn`).
+  The level screen and the game it leads into use the same bar.
+* **Level cards** — solid panels with a hairline border and a 3px difficulty bar
+  on top (`.tt-step-container`), plus the 28px numbered square
+  (`.tt-step-number`).
+* **Rules** — one component, `GameRules.jsx`. Games supply CONTENT only. That
+  includes Trace → Find → Type itself: keeping a private copy in the reference
+  game is exactly how the six games drifted apart.
+* **Theme** — one value in `gameShell.js`, with `subscribeGameTheme` so every
+  toggle stays in sync, and `applyStoredGameTheme()` called once in `index.js`
+  so `<html>` carries the attribute before the first paint (portalled dialogs
+  live outside every page's DOM and cannot inherit it otherwise).
+
+Section 11 of `GameShell.css` applies the same frame to the games themselves.
+It overrides each game's page background, header and icon buttons — and
+deliberately leaves the **play field** alone. The sea, the meadow and the piggy
+bank are the game, not the furniture. Those overrides are single-class
+selectors, so every game must import `GameShell.css` **after** its own
+stylesheet.
+
 ## 3. Difficulty is Easy / Medium / Hard. Always.
 
 Never show "Level 1 / 2 / 3" to a learner. Some engines still switch on numeric
@@ -89,6 +120,12 @@ If a feature exists in one game it exists in all of them. As of this pass:
   shell and HUD, persisted in `localStorage` under `nesture.gameTheme`.
 * **Camera / Touch-Mouse switch** — on the level-select screen and mid-game.
 * **Pause** — in the HUD.
+* **End game** — in every in-game header, via `EndGameControl`. It runs that
+  game's own finish routine (`finishRef.current()`, or `setGamePhase('results')`
+  where the score is computed by a phase-keyed effect), so a session stopped
+  early is scored and saved exactly like a completed one, from whatever has
+  been done. LetterQuest's "End session" button was the model; unlike it, ours
+  confirms first, because it sits in the header where a stray tap is likely.
 
 Adding a feature to one game and not the others is a bug, not a nice-to-have.
 

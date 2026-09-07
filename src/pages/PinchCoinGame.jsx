@@ -40,6 +40,11 @@ import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/PinchCoinGame.css';
+/* NOTE: GameShell.css is NOT imported here on purpose. It is already pulled in
+   by GameRules / EndGameControl above, and an ES module is evaluated once at
+   its FIRST import — so a later import would be a no-op and could not change
+   the CSS order. The shared game frame wins by SPECIFICITY instead: see
+   section 11 of GameShell.css. */
 
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — fixed virtual space scaled to the field, so tuning is identical
