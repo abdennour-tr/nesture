@@ -40,6 +40,9 @@ import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import '../styles/PinchCoinGame.css';
+import roomBg from '../assets/pinch-coin/room.jpg';
+import piggyImg from '../assets/pinch-coin/piggy.png';
+import tutorialHandImg from '../assets/pinch-coin/tutorial-pinch-hand-v2.png';
 /* NOTE: GameShell.css is NOT imported here on purpose. It is already pulled in
    by GameRules / EndGameControl above, and an ES module is evaluated once at
    its FIRST import — so a later import would be a no-op and could not change
@@ -53,8 +56,8 @@ import '../styles/PinchCoinGame.css';
 const VW = 1000;
 const VH = 560;
 const TABLE_Y   = 430;   // top of the wooden surface in the backdrop
-const SLOT_X    = 700;   // the coin slot — the real release target
-const SLOT_Y    = 260;
+const SLOT_X    = 740;   // the coin slot — the real release target
+const SLOT_Y    = 124;
 
 /* ── Difficulty (level ids stay numeric: the difficulty page sends 1|2|3) ──
    Client feedback: "it does say coin size is bigger to smaller across levels,
@@ -135,9 +138,12 @@ const STEP_HINT = {
 /* ═══════════════════════════════════════════════════════════════════════════
    COIN — CSS/SVG, thick 3D rim, engraved star, specular sweep
    ═══════════════════════════════════════════════════════════════════════════ */
-const Coin = React.forwardRef(function Coin(_props, ref) {
+const Coin = React.forwardRef(function Coin({ coinR }, ref) {
+  /* coinR is the radius in virtual-space pixels (VW = 1000).
+     Convert to a percentage width so the visual matches the hitbox. */
+  const widthPct = `${(coinR * 2 / VW) * 100}%`;
   return (
-    <div className="pcg-coin" ref={ref} aria-hidden="true">
+    <div className="pcg-coin" ref={ref} aria-hidden="true" style={{ width: widthPct }}>
       <div className="pcg-coin-glow" />
       <svg viewBox="0 0 100 100" width="100%" height="100%">
         <defs>
@@ -172,192 +178,45 @@ const Coin = React.forwardRef(function Coin(_props, ref) {
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   PIGGY BANK — the slot is the true target for Release Accuracy
+   PIGGY BANK — illustrated image with interactive SVG overlays
    ═══════════════════════════════════════════════════════════════════════════ */
 function PiggyBank() {
   return (
     <div className="pcg-piggy" aria-hidden="true">
-      {/* viewBox anchors are load-bearing: the slot sits at y=-88 and the feet
-          at y=+88, which is what the CSS placement maths uses to line the slot
-          up with SLOT_X/SLOT_Y. Move either and the drop target drifts off the
-          hole the coin is scored against. */}
-      <svg viewBox="-150 -170 300 280" width="100%" height="100%">
+      {/* The illustrated piggy bank image provides the main visual.
+          The SVG overlay on top preserves interactive elements:
+          slot halo (glows when coin approaches), slot highlight, and
+          spark burst on successful drop. */}
+      <img
+        src={piggyImg}
+        alt=""
+        className="pcg-piggy-img"
+        draggable={false}
+      />
+      {/* Interactive SVG overlay — same viewBox as before so the slot
+          lines up with SLOT_X/SLOT_Y in the game loop. */}
+      <svg
+        className="pcg-piggy-overlay"
+        viewBox="-150 -170 300 280"
+        width="100%"
+        height="100%"
+      >
         <defs>
-          {/* Ceramic body: one light source, upper-left, with a deep falloff
-              into the lower-right. Every other shape below obeys it. */}
-          <radialGradient id="pcgBody" cx="32%" cy="20%" r="86%">
-            <stop offset="0%"   stopColor="#FFE7F1" />
-            <stop offset="22%"  stopColor="#FCC3DC" />
-            <stop offset="52%"  stopColor="#F49CC2" />
-            <stop offset="80%"  stopColor="#DF74A2" />
-            <stop offset="100%" stopColor="#B84C7B" />
-          </radialGradient>
-          {/* Occlusion pooled under the belly, where the light cannot reach. */}
-          <radialGradient id="pcgAO" cx="46%" cy="92%" r="62%">
-            <stop offset="0%"   stopColor="#8E2A56" stopOpacity="0" />
-            <stop offset="58%"  stopColor="#8E2A56" stopOpacity="0" />
-            <stop offset="100%" stopColor="#7D2049" stopOpacity=".34" />
-          </radialGradient>
-          <linearGradient id="pcgLegNear" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor="#F09FC2" />
-            <stop offset="55%"  stopColor="#DE7BA6" />
-            <stop offset="100%" stopColor="#B85180" />
-          </linearGradient>
-          {/* The far pair is darker, not just smaller: depth comes from value. */}
-          <linearGradient id="pcgLegFar" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor="#C86592" />
-            <stop offset="100%" stopColor="#9A3D68" />
-          </linearGradient>
-          <radialGradient id="pcgSnout" cx="34%" cy="24%" r="78%">
-            <stop offset="0%"   stopColor="#FFE6F0" />
-            <stop offset="52%"  stopColor="#FBB7D4" />
-            <stop offset="100%" stopColor="#DE7BA6" />
-          </radialGradient>
-          <linearGradient id="pcgEarOut" x1="0.15" y1="0" x2="0.85" y2="1">
-            <stop offset="0%"   stopColor="#FBBFDA" />
-            <stop offset="100%" stopColor="#C95686" />
-          </linearGradient>
-          <linearGradient id="pcgEarIn" x1="0" y1="0" x2="0.2" y2="1">
-            <stop offset="0%"   stopColor="#F7A9C9" />
-            <stop offset="100%" stopColor="#D9749F" />
-          </linearGradient>
-          {/* Slot: a dark cavity that gets lighter towards the bottom, so the
-              eye reads depth rather than a black sticker. */}
-          <linearGradient id="pcgSlotCav" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%"   stopColor="#2E0C1D" />
-            <stop offset="48%"  stopColor="#521B38" />
-            <stop offset="100%" stopColor="#7E3357" />
-          </linearGradient>
           <radialGradient id="pcgCast" cx="50%" cy="50%" r="50%">
             <stop offset="0%"   stopColor="#4A2A0C" stopOpacity=".36" />
             <stop offset="58%"  stopColor="#4A2A0C" stopOpacity=".15" />
             <stop offset="100%" stopColor="#4A2A0C" stopOpacity="0" />
           </radialGradient>
-          {/* Glaze and occlusion are clipped to the silhouette so they can be
-              drawn as free strokes without leaking past the edge. */}
-          <clipPath id="pcgBodyClip">
-            <path d="M-112 -14
-                     C -114 -60, -86 -94, -34 -99
-                     C -14 -101, 4 -101, 24 -99
-                     C 82 -93, 113 -60, 113 -12
-                     C 113 30, 66 60, -2 60
-                     C -70 60, -110 30, -112 -14 Z" />
-          </clipPath>
         </defs>
 
         <ellipse className="pcg-pig-shadow" cx="2" cy="90" rx="120" ry="18" fill="url(#pcgCast)" />
         <circle className="pcg-slot-halo" cx="0" cy="-88" r="56" />
 
         <g className="pcg-pig-body">
-          {/* Legs first, so the belly overlaps their tops and they read as
-              limbs the body sits on rather than blocks glued to the front. */}
-          <path d="M-58 4 C -64 30 -64 56 -60 76 C -58 87 -34 87 -32 76 C -28 56 -28 30 -34 4 Z"
-            fill="url(#pcgLegFar)" />
-          <path d="M34 4 C 28 30 28 56 32 76 C 34 87 58 87 60 76 C 64 56 64 30 58 4 Z"
-            fill="url(#pcgLegFar)" />
-          <path d="M-61 74 C -59 87 -33 87 -31 74 C -31 84 -33 90 -46 90 C -59 90 -61 84 -61 74 Z"
-            fill="#8A3159" opacity=".55" />
-          <path d="M31 74 C 33 87 59 87 61 74 C 61 84 59 90 46 90 C 33 90 31 84 31 74 Z"
-            fill="#8A3159" opacity=".55" />
-
-          <path d="M-96 2 C -103 30 -103 56 -98 74 C -96 85 -68 85 -66 74 C -61 56 -61 30 -68 2 Z"
-            fill="url(#pcgLegNear)" />
-          <path d="M52 2 C 45 30 45 56 50 74 C 52 85 80 85 82 74 C 87 56 87 30 80 2 Z"
-            fill="url(#pcgLegNear)" />
-          <path d="M-99 72 C -97 85 -67 85 -65 72 C -65 82 -68 88 -82 88 C -96 88 -99 82 -99 72 Z"
-            fill="#A94272" />
-          <path d="M49 72 C 51 85 81 85 83 72 C 83 82 80 88 66 88 C 52 88 49 82 49 72 Z"
-            fill="#A94272" />
-
-          {/* ── ears: the far one is dimmed so it sits behind the head ── */}
-          <path d="M-72 -76 C -90 -110 -62 -132 -38 -116 C -24 -106 -28 -84 -41 -71 Z"
-            fill="url(#pcgEarOut)" />
-          <path d="M-66 -82 C -78 -104 -58 -118 -45 -106 C -37 -99 -40 -85 -48 -76 Z"
-            fill="url(#pcgEarIn)" />
-          <path d="M64 -74 C 84 -108 58 -130 36 -113 C 23 -102 28 -80 41 -68 Z"
-            fill="url(#pcgEarOut)" opacity=".82" />
-          <path d="M59 -80 C 72 -102 53 -116 41 -104 C 33 -96 37 -82 45 -74 Z"
-            fill="url(#pcgEarIn)" opacity=".82" />
-
-          {/* ── tail: dark core, lit body, thin highlight along the curl ── */}
-          <path d="M104 -20 C 128 -24 142 -38 139 -54 C 136 -68 118 -70 113 -58 C 109 -46 122 -38 133 -44"
-            fill="none" stroke="#B34C79" strokeWidth="13" strokeLinecap="round" />
-          <path d="M104 -20 C 128 -24 142 -38 139 -54 C 136 -68 118 -70 113 -58 C 109 -46 122 -38 133 -44"
-            fill="none" stroke="#E886B0" strokeWidth="7.5" strokeLinecap="round" />
-          <path d="M107 -22 C 126 -26 137 -37 135 -50"
-            fill="none" stroke="#FBC7DD" strokeWidth="2.8" strokeLinecap="round" opacity=".75" />
-
-          {/* ── body ── */}
-          <path d="M-112 -14
-                   C -114 -60, -86 -94, -34 -99
-                   C -14 -101, 4 -101, 24 -99
-                   C 82 -93, 113 -60, 113 -12
-                   C 113 30, 66 60, -2 60
-                   C -70 60, -110 30, -112 -14 Z"
-            fill="url(#pcgBody)" />
-
-          <g clipPath="url(#pcgBodyClip)">
-            <path d="M-112 -14
-                     C -114 -60, -86 -94, -34 -99
-                     C -14 -101, 4 -101, 24 -99
-                     C 82 -93, 113 -60, 113 -12
-                     C 113 30, 66 60, -2 60
-                     C -70 60, -110 30, -112 -14 Z"
-              fill="url(#pcgAO)" />
-            {/* A jaw break, so the head is not just the left end of a barrel. */}
-            <path d="M-58 -96 C -46 -56 -50 -18 -74 10"
-              fill="none" stroke="#C4608C" strokeWidth="3" opacity=".22" strokeLinecap="round" />
-            {/* Glaze: three strokes that follow the silhouette instead of a
-                floating ellipse. A rotated blob reads as a smudge across the
-                face; a crescent hugging the lit edge reads as glazed ceramic. */}
-            <path d="M-99 -34 C -92 -72, -58 -92, -12 -94"
-              fill="none" stroke="#FFFFFF" strokeWidth="20" opacity=".16" strokeLinecap="round" />
-            <path d="M-92 -40 C -85 -70, -56 -85, -22 -87"
-              fill="none" stroke="#FFFFFF" strokeWidth="7" opacity=".30" strokeLinecap="round" />
-            <path d="M-80 -60 C -72 -72, -58 -79, -44 -81"
-              fill="none" stroke="#FFFFFF" strokeWidth="4" opacity=".55" strokeLinecap="round" />
-            {/* Warm bounce light on the shaded flank. */}
-            <path d="M104 6 C 112 -12 113 -32 108 -48"
-              fill="none" stroke="#FFC7DD" strokeWidth="6" opacity=".26" strokeLinecap="round" />
-            {/* Where the belly meets the legs. */}
-            <ellipse cx="-4" cy="66" rx="96" ry="20" fill="#8E2A56" opacity=".18" />
-          </g>
-
-          <path d="M-105 -38 C -100 -74, -66 -95, -20 -98"
-            fill="none" stroke="#FFFFFF" strokeWidth="4.5" opacity=".34" strokeLinecap="round" />
-
-          {/* ── snout, raised off the face by its own contact shadow ── */}
-          <ellipse cx="-93" cy="4" rx="33" ry="28" fill="#B84C7B" opacity=".26" />
-          <ellipse cx="-95" cy="0" rx="33" ry="28" fill="url(#pcgSnout)" />
-          <ellipse cx="-95" cy="0" rx="33" ry="28" fill="none" stroke="#D06E9C" strokeWidth="1.8" opacity=".5" />
-          <ellipse cx="-104" cy="-3" rx="5.4" ry="8.4" fill="#9E3765" />
-          <ellipse cx="-87"  cy="-3" rx="5.4" ry="8.4" fill="#9E3765" />
-          <ellipse cx="-104" cy="-19" rx="12" ry="5" fill="#FFFFFF" opacity=".42"
-            transform="rotate(-16 -104 -19)" />
-
-          {/* ── eye ── */}
-          <ellipse cx="-48" cy="-46" rx="11.5" ry="13" fill="#FFFFFF" />
-          <ellipse cx="-48" cy="-46" rx="11.5" ry="13" fill="none" stroke="#D06E9C" strokeWidth="1.5" opacity=".5" />
-          <circle cx="-46.5" cy="-44.5" r="6.8" fill="#3B2136" />
-          <circle cx="-44" cy="-47.5" r="2.6" fill="#FFFFFF" />
-          <circle cx="-49.5" cy="-40" r="1.4" fill="#FFFFFF" opacity=".7" />
-          <path className="pcg-pig-lid" d="M-59.5 -46 A 11.5 13 0 0 1 -36.5 -46 Z" fill="#EE87B4" />
-          <path d="M-61 -62 q13 -8 25 -2" stroke="#BE5786" strokeWidth="3.4"
-            fill="none" strokeLinecap="round" opacity=".55" />
-
-          {/* ── smile + blush ── */}
-          <path d="M-70 16 q15 12 31 3" stroke="#B04A77" strokeWidth="3.4"
-            fill="none" strokeLinecap="round" opacity=".5" />
-          <ellipse cx="-66" cy="-14" rx="13" ry="7.5" fill="#EF5D95" opacity=".26" />
-
-          {/* ── coin slot: cavity, lip, and a bright rim while it beckons ── */}
+          {/* Invisible slot area for visual feedback */}
           <g className="pcg-slot-group">
-            <ellipse cx="0" cy="-82" rx="46" ry="12" fill="#B84C7B" opacity=".22" />
-            <rect x="-38" y="-97" width="76" height="18" rx="9" fill="url(#pcgSlotCav)" />
-            <rect x="-38" y="-97" width="76" height="5.5" rx="2.75" fill="#280A19" />
-            <rect x="-33" y="-82.5" width="66" height="2.6" rx="1.3" fill="#FFC2DC" opacity=".45" />
             <rect className="pcg-slot" x="-38" y="-97" width="76" height="18" rx="9"
-              fill="none" stroke="#F7BFD9" strokeWidth="2" opacity=".9" />
+              fill="none" stroke="rgba(247,191,217,0)" strokeWidth="2" opacity="0" />
           </g>
         </g>
 
@@ -608,6 +467,10 @@ export default function PinchCoinGame() {
     lastCoinRef.current = null;
     headingRef.current = null;
     stepRef.current = 'pinch';
+    if (fieldRef.current) {
+      fieldRef.current.style.setProperty('--pcg-tutorial-x', `${(x / VW) * 100}%`);
+      fieldRef.current.style.setProperty('--pcg-tutorial-y', `${(y / VH) * 100}%`);
+    }
     setUiStep('pinch');
   }, []);
 
@@ -854,6 +717,10 @@ export default function PinchCoinGame() {
             coin.falling = true;
             coin.vx = 0;
             coin.vy = 0;
+            if (fieldRef.current) {
+              fieldRef.current.style.setProperty('--pcg-tutorial-x', `${(coin.x / VW) * 100}%`);
+              fieldRef.current.style.setProperty('--pcg-tutorial-y', `${(coin.y / VH) * 100}%`);
+            }
             stepRef.current = 'pinch';
             setUiStep('pinch');
           }
@@ -909,7 +776,7 @@ export default function PinchCoinGame() {
       }
 
       paintCoin();
-      drawViz(ts, pinched);
+      drawViz(pinched);
 
       if (ts - lastUi > 200) {
         lastUi = ts;
@@ -928,7 +795,7 @@ export default function PinchCoinGame() {
      threshold made visible. This is the direct read-out of what the game
      measures: the child sees their own gesture, the therapist sees the cutoff.
      ═════════════════════════════════════════════════════════════════════════ */
-  const drawViz = useCallback((ts, pinched) => {
+  const drawViz = useCallback((pinched) => {
     const cv = vizCanvasRef.current;
     if (!cv) return;
     const ctx = cv.getContext('2d');
@@ -969,20 +836,6 @@ export default function PinchCoinGame() {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // Grab radius around the pinch midpoint while reaching.
-    const coin = coinRef2.current;
-    if (!coin.held) {
-      const mx = (tx + nx) / 2, my = (ty + ny) / 2;
-      const pulse = 1 + 0.08 * Math.sin(ts / 240);
-      ctx.beginPath();
-      ctx.arc(mx, my, (cfg.coinR + GRAB_PAD) * kx * pulse, 0, Math.PI * 2);
-      ctx.lineWidth = 2;
-      ctx.setLineDash([7, 8]);
-      ctx.strokeStyle = `rgba(${col}, ${0.25 + 0.45 * close})`;
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
     // Fingertips
     for (const [px, py, lbl] of [[tx, ty, 'T'], [nx, ny, 'I']]) {
       ctx.beginPath();
@@ -1001,7 +854,7 @@ export default function PinchCoinGame() {
       ctx.textAlign = 'center';
       ctx.fillText(lbl, px, py - 19);
     }
-  }, [cfg.pinchOn, cfg.coinR]);
+  }, [cfg.pinchOn]);
 
   /* ═════════════════════════════════════════════════════════════════════════
      COUNTDOWN + RESET
@@ -1197,6 +1050,8 @@ export default function PinchCoinGame() {
   );
   const progressPct = clamp01(uiCollected / cfg.coinsToCollect) * 100;
   const nearSlot = uiStep === 'release';
+  const tutorialActive = gamePhase === 'playing' && !isPaused && uiCollected === 0 && uiStep === 'pinch';
+  const tutorialCoinPct = Math.min(55, (cfg.coinR * 2 / (VW * 0.18)) * 100);
 
   return (
     <div className="pcg-page">
@@ -1252,16 +1107,68 @@ export default function PinchCoinGame() {
 
       <main className="pcg-stage">
         <div
-          className={`pcg-field ${nearSlot ? 'pcg-near-slot' : ''}`}
+          className={`pcg-field ${nearSlot ? 'pcg-near-slot' : ''} ${tutorialActive ? 'pcg-tutorial-active' : ''}`}
           ref={fieldRef}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
-          style={{ touchAction: 'none' }}
+          style={{ touchAction: 'none', backgroundImage: `url(${roomBg})` }}
         >
+          {/* The demonstration is shown for the first coin and comes back after
+              an unsuccessful release. It disappears as soon as the real coin
+              is pinched so it never competes with the player's tracked hand. */}
+          {tutorialActive && (
+            <>
+              <div className="pcg-pro-arrow" aria-hidden="true">
+                <div className="pcg-arrow-glow" />
+                <svg viewBox="0 0 40 60" className="pcg-arrow-svg">
+                  <defs>
+                    <linearGradient id="arrowGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#FEF08A" />
+                      <stop offset="50%" stopColor="#F59E0B" />
+                      <stop offset="100%" stopColor="#B45309" />
+                    </linearGradient>
+                    <filter id="arrowShadow" x="-30%" y="-30%" width="160%" height="160%">
+                      <feDropShadow dx="0" dy="6" stdDeviation="5" floodOpacity="0.5" />
+                    </filter>
+                  </defs>
+                  <path
+                    d="M14 2 L26 2 L26 36 L38 36 L20 58 L2 36 L14 36 Z"
+                    fill="url(#arrowGrad)"
+                    stroke="#FFFFFF"
+                    strokeWidth="2.5"
+                    strokeLinejoin="round"
+                    filter="url(#arrowShadow)"
+                  />
+                </svg>
+              </div>
+
+              <div
+                className="pcg-tutorial-group"
+                style={{ '--pcg-tutorial-coin-size': `${tutorialCoinPct}%` }}
+                aria-hidden="true"
+              >
+                <div className="pcg-tutorial-label pcg-tutorial-label-pinch">1 · PINCH</div>
+                <div className="pcg-tutorial-label pcg-tutorial-label-move">2 · HOLD + MOVE</div>
+                <div className="pcg-tutorial-label pcg-tutorial-label-release">3 · RELEASE</div>
+                <div className="pcg-tutorial-fake-coin">
+                  <svg viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="45" fill="#FBBF24" stroke="#F59E0B" strokeWidth="5" />
+                    <polygon points="50,15 61,35 83,38 67,54 71,76 50,65 29,76 33,54 17,38 39,35" fill="#FDE68A" />
+                  </svg>
+                </div>
+                <img
+                  src={tutorialHandImg}
+                  className="pcg-tutorial-hand-model"
+                  alt=""
+                  draggable={false}
+                />
+              </div>
+            </>
+          )}
           <PiggyBank />
-          <Coin ref={coinRef} />
+          <Coin ref={coinRef} coinR={cfg.coinR} />
           <canvas className="pcg-viz-canvas" ref={vizCanvasRef} />
 
           {/* Step panel */}

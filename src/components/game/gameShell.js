@@ -205,10 +205,10 @@ export const GAMES = {
     subtitle: 'Tap the lit key with the matching finger and play the tune.',
     modes: ['camera', 'touch'],
     steps: [
-      'Hold your hand open in front of the camera.',
-      'A key lights up on the piano at the top of the screen.',
-      'The drawn hand below shows which finger to use — tap that finger in the air.',
-      'Move only that finger; finish the tune to complete the round.',
+      'Open your right palm. The hand figure glows when the camera detects you.',
+      'Each key keeps its own number, colour and finger. Look for the highlighted key.',
+      'Gently bend the highlighted finger, then relax it open. In Touch / Mouse mode, press the lit key.',
+      'Take your time. Easy introduces 3, then 5, then 10 keys with both hands.',
     ],
   },
   'trace-type': {

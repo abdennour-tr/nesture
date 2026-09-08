@@ -17,7 +17,7 @@
  * no per-frame re-render.
  *
  * Pointer rendering follows the same model as TraceTypeGame: index tip is
- * landmark 8, x mirrored, EMA-smoothed, drawn with a glow + fading trail.
+ * landmark 8, x mirrored, speed-adaptive smoothing, glow + fading trail.
  *
  * Route: /play/ladybug-game?level=easy|medium|hard&mode=camera|touch
  */
@@ -42,7 +42,7 @@ import '../styles/LadybugGame.css';
    section 11 of GameShell.css. */
 
 import { HandDefs, HandArt, followHand, makeHandState } from '../components/game/HandPointer';
-import { createHandPointerFilter, handDepthScale } from '../utils/handPointerFilter';
+import { createHandPointerFilter, handDepthScale, STABLE_POINTER_OPTIONS } from '../utils/handPointerFilter';
 import { otComposite, otRound, otPct, FINISH } from '../utils/otScore';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — the play field uses a fixed virtual coordinate space that is
@@ -72,10 +72,9 @@ const LEVELS = {
 };
 
 /* ── Tracking / scoring constants ───────────────────────────────────────── */
-/* Touch and mouse only. The camera pointer is smoothed by
-   `handPointerFilter`, which adapts to speed and to how far away the child is
-   sitting; a fixed alpha on top of it would only put the lag back. */
+/* Touch and mouse only. Camera samples use the shared speed-adaptive filter. */
 const EMA_ALPHA          = 0.35;  // pointer smoothing (touch/mouse input)
+const TRACKING_HOLD_MS   = 180;   // visual grace only; missing samples never score
 const BUG_LERP           = 0.5;   // how tightly the bug trails the finger
 const ANGLE_LERP         = 0.18;  // rotation smoothing so the bug doesn't twitch
 const RELEASE_FACTOR     = 2.0;   // release radius = grabRadius × this
@@ -388,13 +387,9 @@ export default function LadybugGame() {
   /* Camera pointer conditioning — see src/utils/handPointerFilter.js. */
   const handFilterRef = useRef(null);
   if (!handFilterRef.current) {
-    /* `fitReach` scales each axis to the child's OBSERVED range of motion, so
-       the corners of the board are reachable without stretching: the fingertip
-       position MediaPipe reports is normalised to the camera frame, and a
-       seated child's comfortable reach covers only about a third of it.
-       See src/utils/handPointerFilter.js. */
-    handFilterRef.current = createHandPointerFilter({ fitReach: true });
+    handFilterRef.current = createHandPointerFilter(STABLE_POINTER_OPTIONS);
   }
+  const cameraInputRef = useRef({ at: 0, processedAt: -1, accepted: false, key: null });
   const handTargetRef = useRef({ ...makeHandState(0.6), vx: 0, vy: 0, depth: 1 })   // no dirX/dirY: the pointer never rotates;
   const handShownRef  = useRef(makeHandState(0.6));
   const trailRef      = useRef([]);
@@ -446,8 +441,9 @@ export default function LadybugGame() {
   const isPlaying = gamePhase === 'playing' && !isPaused;
   const trackingEnabled = mode === 'camera' && (gamePhase === 'countdown' || gamePhase === 'playing');
 
-  const { landmarks, isTracking, isSimulationMode, releaseCamera } = useHandTracking(
-    videoRef, trackCanvasRef, trackingEnabled, isPaused, 1
+  const { landmarks, trackingTimestamp, activeHandKey, isTracking, isSimulationMode, releaseCamera } = useHandTracking(
+    videoRef, trackCanvasRef, trackingEnabled, isPaused, 2,
+    { stableSelection: true }
   );
 
   /* ── Turn the camera off when the round ends ────────────────────────────
@@ -508,75 +504,84 @@ export default function LadybugGame() {
       `rotate(${bugAngleRef.current.toFixed(1)}deg) scale(${grabbedRef.current ? 1.15 : 1})`;
   }, []);
 
-  /* ═════════════════════════════════════════════════════════════════════════
-     INPUT — MediaPipe (landmark 8, mirrored) mapped into virtual space.
-     Mirrors TraceTypeGame's mapping model, scaled to the play field.
-     ═════════════════════════════════════════════════════════════════════════ */
+  /* Discrete transitions discard old motion before accepting a fresh sample. */
+  useEffect(() => {
+    pointerRef.current = null;
+    cameraInputRef.current = { at: 0, processedAt: -1, accepted: false, key: null };
+    handFilterRef.current.reset();
+    handTargetRef.current.on = 0;
+    handShownRef.current.on = 0;
+    trailRef.current = [];
+  }, [mode, isPlaying]);
+
+  /* Camera samples condition the target once. Rendering and hit testing both
+     use the same interpolated fingertip in the animation loop below. */
   useEffect(() => {
     if (mode !== 'camera' || !isPlaying) return;
-    if (!landmarks || landmarks.length < 18) {
-      handTargetRef.current.on = 0;   // hand left the frame: fade the pointer out
+    const input = cameraInputRef.current;
+    if (input.processedAt === trackingTimestamp) return;
+    input.processedAt = trackingTimestamp;
+    if (!landmarks || performance.now() - trackingTimestamp > TRACKING_HOLD_MS) {
+      input.accepted = false;
+      pointerRef.current = null;
       handFilterRef.current.lost();
       return;
     }
-    const tip = landmarks[8];
-    if (!tip) return;
-
-    /* Distance-normalised, speed-adaptive, latency-compensated. The whole
-       point: an arm sweep covers the same amount of field whether the child
-       is leaning into the camera or sitting back from it. */
-    const p = handFilterRef.current.push(landmarks);
+    if (input.key !== activeHandKey) {
+      handFilterRef.current.reset();
+      handShownRef.current.on = 0;
+      pointerRef.current = null;
+      trailRef.current = [];
+      input.key = activeHandKey;
+    }
+    const p = handFilterRef.current.push(landmarks, trackingTimestamp);
+    input.accepted = !!p && p.accepted !== false;
+    if (!input.accepted) pointerRef.current = null;
     if (!p) return;
-    pushPointer({ x: p.x * VW, y: p.y * VH }, true);
-
-    /* Orientation for the drawn hand: knuckle→tip says where the finger points,
-       wrist→knuckle gives a little depth, and the side the little finger falls
-       on says whether to mirror it. Kept in virtual units here and converted to
-       pixels in the loop, where the field's two scale factors are known. */
-    const mcp = landmarks[5];
-    if (!mcp) return;
+    input.at = trackingTimestamp;
     const h = handTargetRef.current;
-    /* Orientation is no longer computed: the pointer is always drawn upright.
-       The angle a fingertip implies swings several degrees on a one-pixel
-       landmark wobble, so the hand rocked constantly, and the little-finger
-       test could mirror the whole hand mid-reach. Neither moved the cursor —
-       the cursor IS the fingertip — so both were noise. This also saves an
-       atan2 and a cross product every frame. */
-    /* Depth from the same palm measurement the gain uses, rather than a wrist
-       span in virtual units — that one changed meaning with the field's
-       aspect ratio and collapsed whenever the palm tilted. */
+    h.vx = p.x * VW;
+    h.vy = p.y * VH;
     h.depth = handDepthScale(p.span);
-  }, [landmarks, mode, isPlaying, pushPointer]);
+    if (p.reacquired) {
+      handShownRef.current.on = 0;
+      trailRef.current = [];
+      lastMoveRef.current = null;
+      headingRef.current = null;
+    }
+  }, [landmarks, trackingTimestamp, activeHandKey, mode, isPlaying]);
 
-  /* Hide the pointer whenever the game is not actually running. The filter's
-     motion state goes with it, so resuming does not carry a stale velocity
-     into the first frame; the learnt reach centre and distance survive,
-     because the child has not moved their chair. */
-  useEffect(() => {
-    if (!isPlaying) { handTargetRef.current.on = 0; handFilterRef.current.lost(); }
-  }, [isPlaying]);
-
-  /* Follow loop: virtual units -> field pixels, then ease and draw. */
+  /* Follow loop: virtual units -> field pixels. Camera hit testing follows
+     the drawn hotspot, with no second position filter or stale interaction. */
   useEffect(() => {
     let raf = 0;
-    const tick = () => {
+    const tick = (ts) => {
       const el = fieldRef.current;
       const node = handGroupRef.current;
+      const h = handTargetRef.current;
+      const input = cameraInputRef.current;
+      const fresh = isPlaying && input.at > 0 && ts - input.at <= TRACKING_HOLD_MS;
+      if (mode === 'camera') {
+        h.on = fresh ? 1 : 0;
+        if (!fresh || !input.accepted) pointerRef.current = null;
+      }
       if (el && node) {
         const r = el.getBoundingClientRect();
         const kx = r.width / VW;
         const ky = r.height / VH;
-        const h = handTargetRef.current;
         h.x = h.vx * kx;
         h.y = h.vy * ky;
         h.scale = (r.height / VH) * 0.6 * h.depth;
-        followHand(h, handShownRef.current, node);
+        const shown = followHand(h, handShownRef.current, node, ts);
+        if (mode === 'camera' && fresh && input.accepted && kx > 0 && ky > 0) {
+          pointerRef.current = { x: shown.x / kx, y: shown.y / ky };
+        }
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [mode, isPlaying]);
 
   /* ── Touch / mouse input ── */
   const handlePointerDown = useCallback((e) => {
@@ -717,6 +722,15 @@ export default function LadybugGame() {
       const grabR = cfg.grabRadius;
       const releaseR = grabR * RELEASE_FACTOR;
 
+      /* A lost tracking frame holds the artwork briefly but cannot carry,
+         earn points, or count as a movement correction. */
+      if (!ptr) {
+        lastMoveRef.current = null;
+        headingRef.current = null;
+        slowSinceRef.current = null;
+        if (offSinceRef.current != null) offSinceRef.current += dtMs;
+      }
+
       /* ── Fly-back animation: the bug is out of the child's hands ───────── */
       if (returningRef.current) {
         const u = clamp01((ts - returnStartRef.current) / RETURN_MS);
@@ -771,8 +785,9 @@ export default function LadybugGame() {
       if (grabbedRef.current && ptr) {
         carryMsRef.current += dtMs;
         const bp = bugPosRef.current;
-        const nx = bp.x + (ptr.x - bp.x) * BUG_LERP;
-        const ny = bp.y + (ptr.y - bp.y) * BUG_LERP;
+        const carryAlpha = 1 - Math.pow(1 - BUG_LERP, dtMs / (1000 / 60));
+        const nx = bp.x + (ptr.x - bp.x) * carryAlpha;
+        const ny = bp.y + (ptr.y - bp.y) * carryAlpha;
 
         // Orient the bug along its own direction of travel (head points forward).
         const mdx = nx - bp.x;
@@ -782,7 +797,7 @@ export default function LadybugGame() {
           let diff = target - bugAngleRef.current;
           while (diff > 180) diff -= 360;
           while (diff < -180) diff += 360;
-          bugAngleRef.current += diff * ANGLE_LERP;
+          bugAngleRef.current += diff * (1 - Math.pow(1 - ANGLE_LERP, dtMs / (1000 / 60)));
         }
         bugPosRef.current = { x: nx, y: ny };
       }
@@ -803,7 +818,7 @@ export default function LadybugGame() {
       }
 
       /* ── Off-path grace, then fly the bug back to the last good point ──── */
-      if (grabbedRef.current && !onPath) {
+      if (grabbedRef.current && ptr && !onPath) {
         if (offSinceRef.current == null) offSinceRef.current = ts;
         if (ts - offSinceRef.current >= cfg.graceMs) {
           // Time's up: the ladybug escapes back to the furthest point reached.
@@ -824,7 +839,7 @@ export default function LadybugGame() {
          the path. Before this, racing to the leaf left `tMax` behind, the
          finish condition never fired, and the game simply stopped responding
          with no explanation. */
-      if (grabbedRef.current && onPath && proj.t > tMaxRef.current) {
+      if (grabbedRef.current && ptr && onPath && proj.t > tMaxRef.current) {
         const maxAdvance = MAX_T_RATE * dt;
         if (proj.t - tMaxRef.current <= maxAdvance) {
           tMaxRef.current = proj.t;
@@ -842,7 +857,7 @@ export default function LadybugGame() {
       }
 
       /* ── Kinematics on the bug's own trajectory ────────────────────────── */
-      if (grabbedRef.current) {
+      if (grabbedRef.current && ptr) {
         if (lastMoveRef.current) {
           const dx = bugPos.x - lastMoveRef.current.x;
           const dy = bugPos.y - lastMoveRef.current.y;
@@ -887,7 +902,7 @@ export default function LadybugGame() {
       }
 
       /* ── Scoring ───────────────────────────────────────────────────────── */
-      if (grabbedRef.current && onPath) {
+      if (grabbedRef.current && ptr && onPath) {
         onPathMsRef.current += dtMs;
         scoreRef.current += POINTS_PER_SECOND * dt;
         if (soundEnabled && ts - lastProgressBeep > 5000) {
@@ -914,7 +929,7 @@ export default function LadybugGame() {
 
       /* ── Completion: full path traced AND the bug landed on the leaf ───── */
       const dToGoal = Math.hypot(bugPos.x - goal.x, bugPos.y - goal.y);
-      if (tMaxRef.current >= FINISH_T && dToGoal < FINISH_DIST) {
+      if (ptr && tMaxRef.current >= FINISH_T && dToGoal < FINISH_DIST) {
         cancelAnimationFrame(rafRef.current);
         finishRef.current();
       }

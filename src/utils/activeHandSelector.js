@@ -39,6 +39,9 @@ const HISTORY_MS = 550;
 const IDLE_MOTION = 0.010;   // normalised units of travel over the window
 const STICKY_BONUS = 0.22;   // score bonus for the hand already in control
 const LOST_GRACE_MS = 420;   // keep the last hand briefly when it blinks out
+const TRACK_IDENTITY_MS = 1500; // allow slow inference to match the next visible wrist
+const SWITCH_HOLD_MS = 250;
+const SWITCH_MARGIN = 0.10;
 
 function span(lm) {
   if (!lm) return 0;
@@ -54,11 +57,61 @@ export function createActiveHandSelector({
   idleMotion = IDLE_MOTION,
   historyMs = HISTORY_MS,
   requireMotion = true,       // set false for games where holding still is the task
+  stableSelection = false,   // pointer games keep control through stillness and brief dropouts
 } = {}) {
   /** key → [{x, y, t}] */
   const history = new Map();
   let currentKey = null;
   let lastSeenAt = 0;
+  const tracks = new Map();
+  let nextTrackId = 0;
+  let contenderKey = null;
+  let contenderSince = 0;
+
+  function clearContender() {
+    contenderKey = null;
+    contenderSince = 0;
+  }
+
+  // Result order and handedness can both change from one detection to the next.
+  // Match wrists first, treating the label only as a soft hint. A distance gate
+  // prevents an absent playing hand from inheriting a distant resting hand.
+  function stableKeys(hands, handedness, now) {
+    for (const [key, track] of tracks) {
+      if (now - track.t >= TRACK_IDENTITY_MS) {
+        tracks.delete(key);
+        history.delete(key);
+      }
+    }
+    const candidates = [];
+    hands.forEach((lm, i) => {
+      const label = handedness[i]?.label;
+      for (const [key, track] of tracks) {
+        const distance = Math.hypot(lm[WRIST].x - track.x, lm[WRIST].y - track.y);
+        const sameLabel = label && label === track.label;
+        if (distance <= (sameLabel ? 0.40 : 0.20)) {
+          candidates.push({ i, key, cost: distance + (label && track.label && !sameLabel ? 0.06 : 0) });
+        }
+      }
+    });
+    candidates.sort((a, b) => a.cost - b.cost);
+    const keys = new Array(hands.length);
+    const matched = new Set();
+    for (const candidate of candidates) {
+      if (keys[candidate.i] !== undefined || matched.has(candidate.key)) continue;
+      keys[candidate.i] = candidate.key;
+      matched.add(candidate.key);
+    }
+    hands.forEach((lm, i) => {
+      if (keys[i] === undefined) keys[i] = `hand-${nextTrackId++}`;
+      tracks.set(keys[i], {
+        x: lm[WRIST].x, y: lm[WRIST].y,
+        label: handedness[i]?.label || tracks.get(keys[i])?.label,
+        t: now,
+      });
+    });
+    return keys;
+  }
 
   function motionFor(key, tip, now) {
     let buf = history.get(key);
@@ -87,17 +140,20 @@ export function createActiveHandSelector({
    */
   function select(hands, handedness = [], now = performance.now()) {
     if (!hands || hands.length === 0) {
+      clearContender();
       // Brief grace so a one-frame detection drop does not blank the pointer.
       if (currentKey && now - lastSeenAt < LOST_GRACE_MS) {
         return { landmarks: null, index: -1, key: currentKey, reason: 'blink', scores: [] };
       }
       history.clear();
+      tracks.clear();
       currentKey = null;
       return { landmarks: null, index: -1, key: null, reason: 'no-hand', scores: [] };
     }
 
+    const keys = stableSelection ? stableKeys(hands, handedness, now) : null;
     const scores = hands.map((lm, i) => {
-      const key = handKey(handedness[i]?.label, i);
+      const key = keys ? keys[i] : handKey(handedness[i]?.label, i);
       const tip = lm[TIP];
       const mcp = lm[MCP];
       const s = span(lm) || 0.0001;
@@ -132,6 +188,37 @@ export function createActiveHandSelector({
     scores.sort((a, b) => b.score - a.score);
     const best = scores[0];
 
+    if (stableSelection && currentKey) {
+      const current = scores.find((score) => score.key === currentKey);
+      if (!current) {
+        clearContender();
+        // Do not immediately transfer control to the other visible hand when
+        // the playing hand is briefly occluded.
+        if (now - lastSeenAt < LOST_GRACE_MS) {
+          return { landmarks: null, index: -1, key: currentKey, reason: 'blink', scores };
+        }
+        currentKey = null;
+      } else {
+        lastSeenAt = now;
+        let picked = current;
+        if (best.key !== currentKey && best.motion >= idleMotion && best.score > current.score + SWITCH_MARGIN) {
+          if (contenderKey !== best.key) {
+            contenderKey = best.key;
+            contenderSince = now;
+          } else if (now - contenderSince >= SWITCH_HOLD_MS) {
+            picked = best;
+            currentKey = best.key;
+            clearContender();
+          }
+        } else {
+          clearContender();
+        }
+        // A still index finger is a valid pointer position. Acquisition can
+        // require motion, but holding the acquired hand must not flicker idle.
+        return { landmarks: hands[picked.i], index: picked.i, key: picked.key, reason: 'ok', scores };
+      }
+    }
+
     // Every visible hand is essentially still → nobody is playing.
     const anyMoving = scores.some((s) => s.motion >= idleMotion);
     if (requireMotion && !anyMoving) {
@@ -154,8 +241,10 @@ export function createActiveHandSelector({
 
   function reset() {
     history.clear();
+    tracks.clear();
     currentKey = null;
     lastSeenAt = 0;
+    clearContender();
   }
 
   return { select, reset };

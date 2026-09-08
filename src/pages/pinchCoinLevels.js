@@ -11,7 +11,7 @@
  * the three levels are visibly different (2.4× between Easy and Hard).
  */
 export const COIN_SIZE = {
-  easy:   160,   // very large — easy to grab, forgiving
+  easy:   130,   // very large — easy to grab, forgiving
   medium: 105,
   hard:    66,   // clearly small — needs a precise pinch
 };

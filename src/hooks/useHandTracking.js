@@ -138,10 +138,13 @@ export function detectMidlineCrossing(startX, endX) {
  *   'idle' so the game can prompt the child. Games where holding a pose IS the
  *   task — Magic Finger Copy, Finger Piano — must leave this false (the
  *   default), otherwise a correctly held gesture would be treated as idle.
+ * @param {boolean} stableSelection Keep pointer control through stillness,
+ *   changing result order, and brief occlusions; require sustained movement
+ *   before a second hand takes over. Opt in for games driven by a hand pointer.
  */
 export default function useHandTracking(
   videoRef, canvasRef, enabled = true, pauseProcessing = false, maxHands = 2,
-  { requireMotion = false } = {}
+  { requireMotion = false, stableSelection = false } = {}
 ) {
   const [landmarks,      setLandmarks]      = useState(null);  // the ACTIVE hand
   const [multiHandData,  setMultiHandData]  = useState(null);  // { left, right, all }
@@ -151,13 +154,15 @@ export default function useHandTracking(
      "Raise one hand to start" instead of looking broken. */
   const [handStatus,     setHandStatus]     = useState('no-hand');
   const [activeHandIndex, setActiveHandIndex] = useState(-1);
+  const [activeHandKey, setActiveHandKey] = useState(null);
+  const [trackingTimestamp, setTrackingTimestamp] = useState(null);
 
   /* Chooses which of the visible hands drives the pointer. See
      src/utils/activeHandSelector.js — this replaces the old
      `multiHandLandmarks[0]`, which picked an arbitrary hand. */
   const selectorRef = useRef(null);
   if (!selectorRef.current) {
-    selectorRef.current = createActiveHandSelector({ requireMotion });
+    selectorRef.current = createActiveHandSelector({ requireMotion, stableSelection });
   }
 
   // Ref to hold the latest pauseProcessing value for the async callback
@@ -213,6 +218,8 @@ export default function useHandTracking(
     setLandmarks(null);
     setMultiHandData(null);
     setActiveHandIndex(-1);
+    setActiveHandKey(null);
+    setTrackingTimestamp(null);
     setHandStatus('no-hand');
     selectorRef.current?.reset();
   }, [videoRef]);
@@ -263,6 +270,8 @@ export default function useHandTracking(
 
   // ── MediaPipe result handler ──────────────────────────────────────────────
   const onResults = useCallback((results) => {
+    const timestamp = performance.now();
+    setTrackingTimestamp(timestamp);
     drawLandmarks(results);
     if (results.multiHandLandmarks?.length > 0) {
       /* ── Pick the hand the child is actually playing with ────────────────
@@ -272,10 +281,11 @@ export default function useHandTracking(
       const picked = selectorRef.current.select(
         results.multiHandLandmarks,
         results.multiHandedness || [],
-        performance.now()
+        timestamp
       );
       setLandmarks(picked.landmarks);
       setActiveHandIndex(picked.index);
+      setActiveHandKey(picked.key);
       setHandStatus(picked.reason);
       setIsTracking(true);
 
@@ -298,10 +308,11 @@ export default function useHandTracking(
         all:   results.multiHandLandmarks,
       });
     } else {
-      const picked = selectorRef.current.select([], [], performance.now());
+      const picked = selectorRef.current.select([], [], timestamp);
       setLandmarks(null);
       setMultiHandData(null);
       setActiveHandIndex(-1);
+      setActiveHandKey(picked.key);
       setHandStatus(picked.reason);
       setIsTracking(false);
     }
@@ -410,6 +421,8 @@ export default function useHandTracking(
     landmarks,          // 21 landmarks of the ACTIVE hand (see activeHandSelector)
     multiHandData,      // { left, right, all } — pour useReflexEngine
     activeHandIndex,    // index into multiHandData.all, or -1
+    activeHandKey,      // persistent identity, retained through a brief detection loss
+    trackingTimestamp, // performance.now() of the latest camera result, or null
     handStatus,         // 'ok' | 'idle' | 'blink' | 'no-hand'
     /** Ready-to-show coaching line for the current tracking state. */
     handHint:

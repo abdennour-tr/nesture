@@ -47,7 +47,7 @@ import '../styles/BubbleGame.css';
    section 11 of GameShell.css. */
 
 import { HandDefs, HandArt, followHand, makeHandState } from '../components/game/HandPointer';
-import { createHandPointerFilter, handDepthScale } from '../utils/handPointerFilter';
+import { createHandPointerFilter, handDepthScale, STABLE_POINTER_OPTIONS } from '../utils/handPointerFilter';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — fixed virtual space, scaled to the rendered field, so difficulty
    tuning behaves identically on every screen size.
@@ -78,10 +78,9 @@ const LEVELS = {
 };
 
 /* ── Constants ──────────────────────────────────────────────────────────── */
-/* Touch and mouse only. The camera pointer is smoothed by
-   `handPointerFilter`, which adapts to speed and to how far away the child is
-   sitting; a fixed alpha on top of it would only put the lag back. */
+/* Touch and mouse only. Camera samples use the shared speed-adaptive filter. */
 const EMA_ALPHA        = 0.35;
+const TRACKING_HOLD_MS = 180;   // visual grace only; missing samples never dwell
 const TRAIL_LENGTH     = 8;
 const BASE_POINTS      = 10;
 const MIN_PRECISION    = 0.30;  // an edge hit still scores 30%
@@ -216,13 +215,9 @@ export default function BubbleGame() {
   /* Camera pointer conditioning — see src/utils/handPointerFilter.js. */
   const handFilterRef = useRef(null);
   if (!handFilterRef.current) {
-    /* `fitReach` scales each axis to the child's OBSERVED range of motion, so
-       the corners of the board are reachable without stretching: the fingertip
-       position MediaPipe reports is normalised to the camera frame, and a
-       seated child's comfortable reach covers only about a third of it.
-       See src/utils/handPointerFilter.js. */
-    handFilterRef.current = createHandPointerFilter({ fitReach: true });
+    handFilterRef.current = createHandPointerFilter(STABLE_POINTER_OPTIONS);
   }
+  const cameraInputRef = useRef({ at: 0, processedAt: -1, accepted: false, key: null });
   const handTargetRef = useRef({ ...makeHandState(0.62), vx: 0, vy: 0, depth: 1 })   // no dirX/dirY: the pointer never rotates;
   const handShownRef  = useRef(makeHandState(0.62));
   const trailRef    = useRef([]);
@@ -281,16 +276,10 @@ export default function BubbleGame() {
   const isPlaying = gamePhase === 'playing' && !isPaused;
   const trackingEnabled = mode === 'camera' && (gamePhase === 'countdown' || gamePhase === 'playing');
 
-  /* maxHands is 2, not 1.
-     With maxHands=1 MediaPipe returns whichever single hand it happened to
-     latch onto — for the client that was the hand resting on her cheek, so the
-     pointer never moved while she waved the other one. Detecting both hands
-     lets activeHandSelector (inside useHandTracking) hand the pointer to the
-     hand that is actually MOVING, and `handHint` tells the child what to do
-     when neither hand is playing. */
-  const { landmarks, isTracking, isSimulationMode, handHint, releaseCamera } = useHandTracking(
+  /* Keep ownership of the selected hand while it rests on a bubble. */
+  const { landmarks, trackingTimestamp, activeHandKey, isTracking, isSimulationMode, handHint, releaseCamera } = useHandTracking(
     videoRef, trackCanvasRef, trackingEnabled, isPaused, 2,
-    { requireMotion: true }   // pointing game: a motionless hand must not own the pointer
+    { stableSelection: true }
   );
 
   /* ── Turn the camera off when the round ends ────────────────────────────
@@ -363,70 +352,100 @@ export default function BubbleGame() {
     h.on = 1;
   }, []);
 
+  const resetDwell = useCallback(() => {
+    const node = nodesRef.current[dwellIdxRef.current];
+    if (node) {
+      node.root.classList.remove('bg-bubble-targeted');
+      if (node.ring) node.ring.style.strokeDashoffset = `${node.ringLen}`;
+    }
+    dwellIdxRef.current = -1;
+    dwellStartRef.current = 0;
+    dwellLostAtRef.current = 0;
+    dwellMinDistRef.current = Infinity;
+  }, []);
+
+  /* Discrete transitions discard old motion before accepting a fresh sample. */
+  useEffect(() => {
+    pointerRef.current = null;
+    cameraInputRef.current = { at: 0, processedAt: -1, accepted: false, key: null };
+    handFilterRef.current.reset();
+    handTargetRef.current.on = 0;
+    handShownRef.current.on = 0;
+    trailRef.current = [];
+    resetDwell();
+  }, [mode, isPlaying, resetDwell]);
+
+  /* Condition each tracking sample once; the animation loop owns the visible
+     fingertip and the matching hit-test coordinates. */
   useEffect(() => {
     if (mode !== 'camera' || !isPlaying) return;
-    if (!landmarks || landmarks.length < 18) {
-      handTargetRef.current.on = 0;   // hand left the frame: fade the pointer out
+    const input = cameraInputRef.current;
+    if (input.processedAt === trackingTimestamp) return;
+    input.processedAt = trackingTimestamp;
+    if (!landmarks || performance.now() - trackingTimestamp > TRACKING_HOLD_MS) {
+      input.accepted = false;
+      pointerRef.current = null;
       handFilterRef.current.lost();
       return;
     }
-    const tip = landmarks[8];
-    if (!tip) return;
-
-    /* Distance-normalised, speed-adaptive, latency-compensated: the same
-       reach pops a bubble at the edge of the field whether the child is
-       leaning into the camera or sitting back from it. */
-    const p = handFilterRef.current.push(landmarks);
+    if (input.key !== activeHandKey) {
+      handFilterRef.current.reset();
+      handShownRef.current.on = 0;
+      pointerRef.current = null;
+      trailRef.current = [];
+      resetDwell();
+      input.key = activeHandKey;
+    }
+    const p = handFilterRef.current.push(landmarks, trackingTimestamp);
+    input.accepted = !!p && p.accepted !== false;
+    if (!input.accepted) pointerRef.current = null;
     if (!p) return;
-    pushPointer({ x: p.x * VW, y: p.y * VH }, true);
-
-    /* Orientation for the drawn hand. The knuckle→tip vector says which way the
-       finger points, the wrist→knuckle span gives a little depth, and the side
-       the little finger falls on says whether to mirror the hand. Everything is
-       kept in virtual units here and converted to pixels in the loop, where the
-       field's two scale factors are known. */
-    const mcp = landmarks[5];
-    if (!mcp) return;
+    input.at = trackingTimestamp;
     const h = handTargetRef.current;
-    /* Orientation is no longer computed: the pointer is always drawn upright.
-       The angle a fingertip implies swings several degrees on a one-pixel
-       landmark wobble, so the hand rocked constantly, and the little-finger
-       test could mirror the whole hand mid-reach. Neither moved the cursor —
-       the cursor IS the fingertip — so both were noise. This also saves an
-       atan2 and a cross product every frame. */
-    /* Depth from the same palm measurement the gain uses, rather than a wrist
-       span in virtual units — that one changed meaning with the field's
-       aspect ratio and collapsed whenever the palm tilted. */
+    h.vx = p.x * VW;
+    h.vy = p.y * VH;
     h.depth = handDepthScale(p.span);
-  }, [landmarks, mode, isPlaying, pushPointer]);
+    if (p.reacquired) {
+      handShownRef.current.on = 0;
+      trailRef.current = [];
+      lastPtrRef.current = null;
+      headingRef.current = null;
+      ptrJumpedRef.current = true;
+      resetDwell();
+    }
+  }, [landmarks, trackingTimestamp, activeHandKey, mode, isPlaying, resetDwell]);
 
-  /* Hide the pointer whenever the game is not actually running. The filter's
-     motion state goes with it; the learnt reach centre and distance survive. */
-  useEffect(() => {
-    if (!isPlaying) { handTargetRef.current.on = 0; handFilterRef.current.lost(); }
-  }, [isPlaying]);
-
-  /* Follow loop: virtual units -> field pixels, then ease and draw. */
+  /* Camera interactions use the drawn hotspot. The brief visual hold during
+     a tracking gap never supplies a position to dwell or scoring. */
   useEffect(() => {
     let raf = 0;
-    const tick = () => {
+    const tick = (ts) => {
       const el = fieldRef.current;
       const node = handGroupRef.current;
+      const h = handTargetRef.current;
+      const input = cameraInputRef.current;
+      const fresh = isPlaying && input.at > 0 && ts - input.at <= TRACKING_HOLD_MS;
+      if (mode === 'camera') {
+        h.on = fresh ? 1 : 0;
+        if (!fresh || !input.accepted) pointerRef.current = null;
+      }
       if (el && node) {
         const r = el.getBoundingClientRect();
         const kx = r.width / VW;
         const ky = r.height / VH;
-        const h = handTargetRef.current;
         h.x = h.vx * kx;
         h.y = h.vy * ky;
         h.scale = (r.height / VH) * 0.62 * h.depth;
-        followHand(h, handShownRef.current, node);
+        const shown = followHand(h, handShownRef.current, node, ts);
+        if (mode === 'camera' && fresh && input.accepted && kx > 0 && ky > 0) {
+          pointerRef.current = { x: shown.x / kx, y: shown.y / ky };
+        }
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [mode, isPlaying]);
 
   const handlePointerDown = useCallback((e) => {
     if (mode !== 'touch' || !isPlaying) return;
@@ -695,6 +714,12 @@ export default function BubbleGame() {
         }
         ptrJumpedRef.current = false;
         lastPtrRef.current = { x: ptr.x, y: ptr.y };
+      } else {
+        lastPtrRef.current = null;
+        headingRef.current = null;
+        /* Preserve a brief dwell across a tracking blink without counting
+           time when no valid fingertip is present. */
+        if (dwellIdxRef.current >= 0) dwellStartRef.current += dtMs;
       }
 
       /* ── Spawn ─────────────────────────────────────────────────────────── */
@@ -1132,10 +1157,9 @@ export default function BubbleGame() {
     pointerRef.current = null;
     trailRef.current = [];
     lastPtrRef.current = null;
-    dwellIdxRef.current = -1;
-    dwellMinDistRef.current = Infinity;
+    resetDwell();
     if (soundEnabled) soundManager.playClick();
-  }, [soundEnabled]);
+  }, [soundEnabled, resetDwell]);
 
   const restart = useCallback(() => {
     sessionSavedRef.current = false;

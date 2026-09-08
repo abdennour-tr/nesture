@@ -1,4 +1,5 @@
 import React from 'react';
+import { advanceHandMotion } from '../../utils/pointerMotion';
 
 /**
  * The hand pointer shared by the gesture games.
@@ -15,7 +16,7 @@ import React from 'react';
  * Pass `contrast` to HandArt when the pointer sits on a light background.
  *   const target = makeHandState(0.4);   // written by tracking
  *   const shown  = makeHandState(0.4);   // written by the animation loop
- *   requestAnimationFrame(() => followHand(target, shown, ref.current));
+ *   requestAnimationFrame((now) => followHand(target, shown, ref.current, now));
  *
  * `HandDefs` must appear once per document; several pointers can share it, even
  * from a different <svg> element.
@@ -151,8 +152,8 @@ export function HandArt({ contrast = false }) {
       </g>
 
       {/* the contact point — the fingertip is the cursor */}
-      <circle cx="0" cy="4" r="12" fill="url(#ttWireTip)" />
-      <circle cx="0" cy="4" r="2.6" fill="#FFFFFF" />
+      <circle cx="0" cy="0" r="12" fill="url(#ttWireTip)" />
+      <circle cx="0" cy="0" r="2.6" fill="#FFFFFF" />
     </g>
   );
 }
@@ -163,26 +164,13 @@ export function makeHandState(scale = 0.4) {
   return { x: 0, y: 0, rot: 0, scale, flip: 1, on: 0 };
 }
 
-/* Ease `shown` towards `target` and write the result onto the node. Call once
-   per animation frame, per pointer.
-   Position follows hard — tracking only arrives at ~30fps, so a slow ease reads
-   as lag rather than as smoothing. Rotation is deliberately slower: the angle a
-   fingertip implies swings several degrees on a one-pixel wobble. Scale is
-   slower still, because depth is the noisiest of the three and never needs to
-   be exact.
-   Opacity is written as inline style rather than as an attribute so that a
-   React re-render cannot reset it. */
-export function followHand(target, shown, node) {
-  if (!node) return;
-  // Re-appearing after a gap: jump to the new spot instead of sliding.
-  if (target.on === 1 && shown.on < 0.04) {
-    shown.x = target.x; shown.y = target.y;
-    shown.scale = target.scale;
-  }
-  shown.x += (target.x - shown.x) * 0.78;
-  shown.y += (target.y - shown.y) * 0.78;
-  shown.scale += (target.scale - shown.scale) * 0.2;
-  shown.on += (target.on - shown.on) * 0.3;
+/* Interpolate at display cadence and return the exact point used to draw the
+   index fingertip. Camera games hit-test this point after rendering it.
+   Position has a short time constant; depth and opacity settle more slowly.
+   Inline opacity survives React re-renders without flickering. */
+export function followHand(target, shown, node, now) {
+  advanceHandMotion(target, shown, now);
+  if (!node) return shown;
 
   /* NO ROTATION, NO MIRRORING.
      ---------------------------------------------------------------------
@@ -205,9 +193,9 @@ export function followHand(target, shown, node) {
     `scale(${shown.scale.toFixed(4)})`
   );
   node.style.opacity = shown.on.toFixed(3);
+  return shown;
 }
 
 /* `handFlip` (which way round to mirror the hand) was removed with the
    rotation: the pointer is always drawn upright, so there is nothing to
    mirror. See followHand above. */
-

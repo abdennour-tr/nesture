@@ -23,6 +23,8 @@ import { INPUT_MODES, getGameTheme, toggleGameTheme, subscribeGameTheme, DIFFICU
 import '../../styles/GameShell.css';
 
 export default function GameHUD({
+  title,
+  extraActions,
   level,                 // 'easy' | 'medium' | 'hard' | 1 | 2 | 3
   stats = [],            // [{ icon, label, value }]
   mode,                  // 'camera' | 'touch' (omit for camera-only games)
@@ -46,6 +48,7 @@ export default function GameHUD({
         <button className="gs-back" onClick={onExit || (() => navigate('/play'))}>
           <ArrowLeft size={18} /> {exitLabel}
         </button>
+        {title && <span className="gs-hud-title">{title}</span>}
         <span className="gs-hud-level">{lvl.emoji} {lvl.label}</span>
         {stats.map((s) => (
           <span key={s.label} className="gs-hud-stat" title={s.label}>
@@ -55,6 +58,7 @@ export default function GameHUD({
       </div>
 
       <div className="gs-hud-right">
+        {extraActions}
         {mode && onModeChange && (
           <button
             className="gs-action"

@@ -30,7 +30,7 @@ import '../styles/TraceTypeGame.css';
 import '../styles/GameShell.css';
 
 import { HandDefs, HandArt, followHand } from '../components/game/HandPointer';
-import { createHandPointerFilter, handDepthScale } from '../utils/handPointerFilter';
+import { createHandPointerFilter, handDepthScale, STABLE_POINTER_OPTIONS } from '../utils/handPointerFilter';
 import { buildRound, traceTuning } from './traceTypeWords';
 import { buildLetter } from './letterStrokes';
 import GameRules from '../components/game/GameRules';
@@ -150,6 +150,8 @@ const GLOBAL_HAND_SCALE = 0.62;
    circumference, in the hand's own coordinates. */
 const DWELL_R = 26;
 const DWELL_C = 2 * Math.PI * DWELL_R;
+const POINTER_TRACKING_GRACE_MS = 180;
+const POINTER_VISIBLE_GRACE_MS = 750;
 
 /* The "start here" hint: the same hand, ghosted, resting on the next waypoint.
    It is only shown while the child's real hand is not being tracked, so there
@@ -361,10 +363,15 @@ export default function TraceTypeGame() {
 
   const {
     landmarks,
+    trackingTimestamp,
+    activeHandKey,
     isTracking,
     error: trackingError,
     releaseCamera,
-  } = useHandTracking(videoRef, canvasRef, trackingEnabled, pauseProcessing, 1);
+  } = useHandTracking(videoRef, canvasRef, trackingEnabled, pauseProcessing, 2, {
+    stableSelection: true,
+    requireMotion: false,
+  });
 
   /* ── Turn the camera off when the session ends ──────────────────────────
      Client feedback: "when the game finish the camera need to turn off."
@@ -415,6 +422,8 @@ export default function TraceTypeGame() {
      to show the ghosted "start here" hand, so it flips at most twice a second
      rather than on every frame. */
   const [handVisible, setHandVisible] = useState(false);
+  const handVisibleRef = useRef(handVisible);
+  handVisibleRef.current = handVisible;
 
   /* ── Hand pointer motion ────────────────────────────────────────────────
      The pointer is driven straight from the tracked landmarks on a rAF loop
@@ -422,72 +431,11 @@ export default function TraceTypeGame() {
      this screen 30x a second would make the hand stutter. `handTargetRef` is
      where tracking writes, `handShownRef` is the smoothed value on screen. */
   const handGroupRef  = useRef(null);
-  /* Camera pointer conditioning — see src/utils/handPointerFilter.js. One
-     filter for the whole screen: trace, find and type never run at the same
-     time, so sharing it means the reach centre learned while the child traces
-     is still there when they move to the keyboard. */
+  /* All three steps use the same stable, index-tip mapping. Its sensitivity
+     stays fixed while the player moves or holds their hand over a target. */
   const handFilterRef = useRef(null);
   if (!handFilterRef.current) {
-    /* `fitReach` scales each axis to the child's OBSERVED range of motion.
-       ---------------------------------------------------------------------
-       Client feedback: "the hand pointer still can't roam the whole screen."
-
-       Making the pointer viewport-wide was only half the fix. The fingertip
-       position the filter receives is normalised to the CAMERA FRAME, and a
-       seated child's comfortable reach covers barely half of it — so at the
-       default gain they could only ever get to the middle half of the screen,
-       and the corners stayed physically unreachable however far they stretched.
-       The camera being 4:3 while the screen is 16:9 made it worse on one axis
-       than the other.
-
-       With reach fitting on, the filter measures how far the child actually
-       moves and scales each axis independently so that range covers the whole
-       window. Bounded by `minReach` / `fitMaxGain`, and eased on the same slow
-       time constant as the distance gain, so it never shifts mid-reach.
-
-       Left off for Pop the Bubble and Follow the Ladybug, which the client
-       reported as working well — this is opt-in per screen.
-
-       THE TWO OVERRIDES BELOW go with the change of what 0..1 is stretched
-       over (see `boundsRef`). The pointer no longer crosses the window, it
-       crosses the card — a square of at most 560px — so the numbers that were
-       right for a 1400px viewport are not right here.
-
-         `reachTarget` 1.05, up from the global 0.76. Inside a card, "reach the
-         whole thing" is what matters: the letter's own waypoints run from 17%
-         to 88% across and 13% to 90% down the card, so a child whose reach only
-         covered 75% x 66% — which 0.76 gives — could not physically get to the
-         top or the bottom of the letter. 1.05 gives 89% x 79%, which clears it.
-
-         `stillEps` 0.012, up from 0.008. The deadband is scaled by the gain in
-         use, and that gain is higher here; 0.012 works out at about 15px of the
-         card, comfortably inside the ~58px the game accepts as touching a
-         waypoint, and it is what takes the held pointer from 5.8 direction
-         changes a second down to 2.3.
-
-       Measured, hand held on a target for 4s (webcam noise + a 6Hz tremor):
-
-                                 wander   travel while held   reversals/s
-           over the window        37 px       71 px/s             9.8
-           in the card (now)      13 px        4 px/s             2.3
-    */
-    handFilterRef.current = createHandPointerFilter({
-      fitReach: true,
-      reachTarget: 1.05,
-      stillEps: 0.012,
-      /* …and `minCutoff` goes back UP to 1.0, against the global 0.6.
-         The global value is low because out there the deadband is small and the
-         smoothing has to do the stabilising on its own. In here the deadband is
-         doing that job already, so the heavy smoothing was buying nothing and
-         only costing response. Measured in the card:
-
-                            wander   travel while held   reversals/s   lag
-             minCutoff 0.6   13.2px      4 px/s              2.3      167 ms
-             minCutoff 1.0   13.5px      4 px/s              1.8      133 ms
-
-         Just as steady, and it stops feeling stuck when the child sets off. */
-      minCutoff: 1.0,
-    });
+    handFilterRef.current = createHandPointerFilter(STABLE_POINTER_OPTIONS);
   }
   const handTargetRef = useRef({ x: 150, y: 150, rot: 0, scale: HAND_SCALE, flip: 1, on: 0 });
   const handShownRef  = useRef({ x: 150, y: 150, rot: 0, scale: HAND_SCALE, flip: 1, on: 0 });
@@ -515,10 +463,10 @@ export default function TraceTypeGame() {
      forces the browser to re-layout each frame. It is refreshed when the step
      changes, when the card resizes, and on scroll. */
   const boundsRef = useRef(null);
-  /* The 300x300 tracing SVG. The full-screen pointer maps its viewport
-     position back into this element's user space via getScreenCTM(), so the
-     hand can roam the whole window and still trace accurately. */
+  /* Convert the overlay's fingertip to the SVG's actual 300x300 user space,
+     including any preserveAspectRatio letterboxing. */
   const traceSvgRef  = useRef(null);
+  const traceInverseRef = useRef(null);
   /* `processTracePosition` is declared further down this component, so the
      full-screen pointer effect above it cannot list it as a dependency
      (the deps array is evaluated during render, before the const exists).
@@ -528,38 +476,48 @@ export default function TraceTypeGame() {
   /* Keep `boundsRef` pointing at the card of the step being played. Measured
      here, outside the pointer loop, so the loop never triggers a layout. */
   useEffect(() => {
-    const el = step === 'trace' ? traceAreaRef.current : stepCardRef.current;
-    if (!el) { boundsRef.current = null; return undefined; }
-
+    let observed = null;
+    let ro = null;
+    let settleFrame = 0;
     const measure = () => {
-      const r = el.getBoundingClientRect();
-      /* A card with no size yet (mid-transition) would trap the pointer in a
-         single pixel, so it is ignored until it has one. */
-      boundsRef.current = r.width > 40 && r.height > 40
+      const el = step === 'trace' ? traceAreaRef.current : stepCardRef.current;
+      const currentCard = step === 'trace' || el?.dataset.pointerCard === `${currentLetterIdx}-${step}`;
+      if (el !== observed) {
+        ro?.disconnect();
+        if (el) ro?.observe(el);
+        observed = el;
+      }
+      const r = currentCard && el?.getBoundingClientRect();
+      boundsRef.current = r && r.width > 40 && r.height > 40
         ? { left: r.left, top: r.top, width: r.width, height: r.height }
         : null;
+      const ctm = traceSvgRef.current?.getScreenCTM();
+      traceInverseRef.current = ctm && ctm.a * ctm.d - ctm.b * ctm.c !== 0 ? ctm.inverse() : null;
     };
+    ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
     measure();
-
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
-    ro?.observe(el);
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
-    /* The Find / Type card arrives with a spring animation, so its rect is
-       still moving for the first few hundred milliseconds. */
-    const settle = setTimeout(measure, 420);
+    /* Follow the entrance animation and a delayed AnimatePresence mount.
+       Once settled, only resize/scroll measurements are needed. */
+    const settleUntil = performance.now() + 750;
+    const settle = (now) => {
+      measure();
+      if (now < settleUntil) settleFrame = requestAnimationFrame(settle);
+    };
+    settleFrame = requestAnimationFrame(settle);
 
     return () => {
       ro?.disconnect();
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
-      clearTimeout(settle);
+      cancelAnimationFrame(settleFrame);
     };
     /* `currentLetterIdx`, not `currentLetter`: the derived letter is declared
        further down this component, and naming it here would evaluate a const
        in its temporal dead zone during render. The index changes at exactly the
        same moment. */
-  }, [step, currentLetterIdx]);
+  }, [step, currentLetterIdx, gamePhase]);
 
   /* ── Global pointer (Find & Type) ────────────────────────────────────────
      The same hand, inside the card of the step being played, so the child
@@ -574,6 +532,8 @@ export default function TraceTypeGame() {
   const gDwellRef      = useRef(0);
   const gHandTargetRef = useRef({ x: 0, y: 0, rot: 0, scale: GLOBAL_HAND_SCALE, flip: 1, on: 0 });
   const gHandShownRef  = useRef({ x: 0, y: 0, rot: 0, scale: GLOBAL_HAND_SCALE, flip: 1, on: 0 });
+  const cameraSampleRef = useRef({ timestamp: null, lastAcceptedAt: null, valid: false, key: null, intervalMs: 1000 / 30 });
+  const cameraContextRef = useRef(null);
   const hoverTargetRef = useRef(null);
   const hoverStartTimeRef = useRef(null);
 
@@ -765,141 +725,82 @@ export default function TraceTypeGame() {
     }
   }, [step, gamePhase, isPaused, currentLetter, typedCount, typeStartTime, soundEnabled]);
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // GLOBAL POINTER Logic (Trace, Find & Type)
-  // ──────────────────────────────────────────────────────────────────────────
-  // Client feedback: "The hand pointer should be able to move freely across the
-  // entire screen, not only inside the letter box area. This improvement should
-  // apply to all three activities: Trace, Find, and Type."
-  //
-  // Find and Type already used this viewport-wide pointer. Trace did not: it
-  // mapped the hand with `p.x * 300`, which squeezed the child's ENTIRE range of
-  // motion onto the 300x300 letter box — the pointer physically could not leave
-  // it. All three steps now share this one pointer, drawn on the fixed
-  // full-viewport overlay, and Trace converts the viewport position back into
-  // letter-box coordinates only to decide what has been traced.
-  // ══════════════════════════════════════════════════════════════════════════
+  const cameraPointerActive = inputMethod === 'camera' && gamePhase === 'playing' && !isPaused;
+  cameraContextRef.current = { active: cameraPointerActive, step, handleFindKeyPress, handleTypeKeyPress };
+
+  const clearCameraInteraction = useCallback(() => {
+    gDwellRef.current = 0;
+    hoverTargetRef.current = null;
+    hoverStartTimeRef.current = null;
+    const ot = otRef.current;
+    ot.lastPos = ot.lastVel = ot.lastAcc = ot.lastT = null;
+  }, []);
+
+  /* A new step or input source starts at its own fingertip.
+     Do not animate across the old card or reuse a dwell from before a pause. */
   useEffect(() => {
-    if ((step !== 'trace' && step !== 'find' && step !== 'type') || gamePhase !== 'playing' || isPaused) {
-      gHandTargetRef.current.on = 0;
-      gDwellRef.current = 0;
-      hoverTargetRef.current = null;
-      hoverStartTimeRef.current = null;
-      handFilterRef.current.lost();
-      return;
+    handFilterRef.current.reset();
+    cameraSampleRef.current = { timestamp: null, lastAcceptedAt: null, valid: false, key: null, intervalMs: 1000 / 30 };
+    gHandTargetRef.current.on = 0;
+    gHandShownRef.current.on = 0;
+    if (gHandGroupRef.current) gHandGroupRef.current.style.opacity = '0';
+    clearCameraInteraction();
+    setHandVisible(false);
+  }, [cameraPointerActive, step, currentLetterIdx, clearCameraInteraction]);
+
+  /* Consume each camera result once. Rendering and hit-testing run together
+     below, at display cadence, without advancing the filter on React renders. */
+  useEffect(() => {
+    if (!cameraPointerActive) return;
+    const sample = cameraSampleRef.current;
+    if (sample.timestamp === trackingTimestamp) return;
+    if (sample.timestamp != null && trackingTimestamp > sample.timestamp) {
+      // Adapt immediately to slower inference; recover gradually when it speeds
+      // up. A slow camera is not the same as a camera reporting no hand.
+      const interval = Math.min(600, trackingTimestamp - sample.timestamp);
+      sample.intervalMs = Math.max(interval, sample.intervalMs * 0.8);
     }
-    if (!landmarks || landmarks.length < 18) {
-      gHandTargetRef.current.on = 0;
-      gDwellRef.current = 0;
-      handFilterRef.current.lost();
+    sample.timestamp = trackingTimestamp;
+    if (landmarks && activeHandKey !== sample.key) {
+      // Consume this very result after a hand change. Previously the reset
+      // marked it processed, leaving slow/reidentified hands invisible forever.
+      handFilterRef.current.reset();
+      sample.key = activeHandKey;
+      gHandTargetRef.current.snap = true;
+      clearCameraInteraction();
+    }
+    const p = handFilterRef.current.push(landmarks, trackingTimestamp);
+    if (!p || p.accepted === false) {
+      sample.valid = false;
+      if (!p) handFilterRef.current.lost();
+      clearCameraInteraction();
       return;
     }
 
-    /* `indexMcp` and `wrist` were only needed for the orientation maths that is
-       now gone; `indexTip` is still the sanity check that this frame has a
-       usable hand before we push it through the filter. */
-    const indexTip = landmarks[8];
-    const wrist = landmarks[0];
-    if (!indexTip) return;
-
-    /* Map to the viewport through the shared filter. This pointer had no
-       smoothing at all before, which is why a dwell on a key was hard to hold
-       from any distance: the raw fingertip wanders by several pixels a frame,
-       and the further back the child sat the less of the keyboard they could
-       reach in the first place. */
-    const p = handFilterRef.current.push(landmarks);
-    if (!p) return;
-    /* Stretch the filter's 0..1 over the current step's card (see `boundsRef`).
-       Falling back to the window keeps the pointer usable for the one frame
-       between a step change and the new rect being measured. */
     const b = boundsRef.current;
-    const sx = b ? b.left + p.x * b.width  : p.x * window.innerWidth;
-    const sy = b ? b.top  + p.y * b.height : p.y * window.innerHeight;
-
-    /* Orientation is no longer computed: the pointer is always drawn upright.
-       The angle a fingertip implies swings several degrees on a one-pixel
-       landmark wobble, so the hand rocked constantly, and the little-finger
-       cross product could mirror the whole hand mid-reach. Neither moved the
-       cursor — the cursor IS the fingertip — so both were noise. The
-       touch/mouse pointer was already upright, so the two now match. */
-    const gt = gHandTargetRef.current;
-
-    if (wrist) {
-      /* Depth from the palm measurement the filter already made, which does
-         not change meaning with the window's aspect ratio. */
-      gt.scale = Math.max(0.45, Math.min(0.9, GLOBAL_HAND_SCALE * handDepthScale(p.span)));
-    }
-    gt.x = sx;
-    gt.y = sy;
-    gt.on = 1;
-
-    /* ── TRACE ────────────────────────────────────────────────────────────
-       The pointer roams the whole window (above). To decide what has been
-       traced we convert its viewport position back into the letter's own
-       300x300 user space with getScreenCTM(), which accounts for the element's
-       position, size AND the viewBox's preserveAspectRatio letterboxing — so
-       the mapping stays exact at any window size.
-
-       Outside the letter box nothing is recorded: the hand simply moves freely,
-       which is the point. */
-    if (step === 'trace') {
-      setHandVisible((v) => (v ? v : true));
-
-      const svg = traceSvgRef.current;
-      const ctm = svg && typeof svg.getScreenCTM === 'function' ? svg.getScreenCTM() : null;
-      if (ctm) {
-        const pt = svg.createSVGPoint();
-        pt.x = sx;
-        pt.y = sy;
-        const local = pt.matrixTransform(ctm.inverse());
-        /* A small margin outside the box still counts, so a waypoint sitting on
-           the very edge of the letter is reachable without pixel-perfect aim. */
-        const M = 24;
-        if (local.x >= -M && local.x <= 300 + M && local.y >= -M && local.y <= 300 + M) {
-          processTraceRef.current?.(local.x, local.y);
-        }
-      }
-
-      gDwellRef.current = 0;
-      hoverTargetRef.current = null;
-      hoverStartTimeRef.current = null;
+    if (!b) {
+      sample.valid = false;
+      clearCameraInteraction();
       return;
     }
 
-    let hoverKey = null;
-    let clickProgress = 0;
-
-    // Find if we are hovering a key
-    const element = document.elementFromPoint(sx, sy);
-    if (element) {
-      const key = element.getAttribute('data-key');
-      if (key) {
-        hoverKey = key;
-        if (hoverTargetRef.current !== key) {
-          hoverTargetRef.current = key;
-          hoverStartTimeRef.current = Date.now();
-        } else {
-          const elapsed = Date.now() - hoverStartTimeRef.current;
-          clickProgress = Math.min(elapsed / 1500, 1);
-          if (clickProgress >= 1) {
-            // Trigger click
-            if (step === 'find') handleFindKeyPress(key);
-            if (step === 'type') handleTypeKeyPress(key);
-            // Reset to prevent rapid multi-clicks
-            hoverStartTimeRef.current = Date.now() + 500; 
-            clickProgress = 0;
-          }
-        }
-      }
+    const target = gHandTargetRef.current;
+    target.x = b.left + p.x * b.width;
+    target.y = b.top + p.y * b.height;
+    target.scale = Math.max(0.45, Math.min(0.9, GLOBAL_HAND_SCALE * handDepthScale(p.span)));
+    target.on = 1;
+    if (p.reacquired) {
+      // Keep opacity through slow frames. Only a fully faded pointer snaps
+      // back on return; a still-visible hand continues to interpolate.
+      if (gHandShownRef.current.on < 0.04) target.snap = true;
+      // The position filter also reacquires between slow valid camera frames;
+      // those gaps must not restart a dwell that still has fresh tracking.
+      if (!sample.valid) clearCameraInteraction();
     }
-    
-    if (!hoverKey) {
-      hoverTargetRef.current = null;
-      hoverStartTimeRef.current = null;
-    }
-
-    gDwellRef.current = clickProgress;
-  }, [landmarks, step, gamePhase, isPaused, handleFindKeyPress, handleTypeKeyPress]);
+    sample.lastAcceptedAt = trackingTimestamp;
+    sample.position = p;
+    sample.valid = true;
+  }, [landmarks, trackingTimestamp, activeHandKey, cameraPointerActive, step, currentLetterIdx, clearCameraInteraction]);
 
   // ══════════════════════════════════════════════════════════════════════════
   // Step Completion Handler
@@ -1248,15 +1149,78 @@ export default function TraceTypeGame() {
     if (!isDrawing) hideHand();
   }, [step, gamePhase, isPaused, isDrawing, hideHand]);
 
-  /* Smoothing loop. Tracking arrives at ~30fps and jitters by a pixel or two;
-     easing towards the target on every animation frame turns that into the
-     continuous, natural movement a child can actually follow. */
+  /* Draw and interact with the same interpolated fingertip. Missing camera
+     frames may hold the visual briefly, but never continue a trace or dwell. */
   useEffect(() => {
     let raf = 0;
 
-    const tick = () => {
-      followHand(handTargetRef.current, handShownRef.current, handGroupRef.current);
-      followHand(gHandTargetRef.current, gHandShownRef.current, gHandGroupRef.current);
+    const tick = (now) => {
+      const context = cameraContextRef.current;
+      const sample = cameraSampleRef.current;
+      const age = sample.lastAcceptedAt == null ? Infinity : now - sample.lastAcceptedAt;
+      const fresh = age <= Math.max(POINTER_TRACKING_GRACE_MS, Math.min(600, sample.intervalMs * 1.5));
+      const visible = age <= Math.max(POINTER_VISIBLE_GRACE_MS, sample.intervalMs * 2.5);
+      const bounds = boundsRef.current;
+      // Visibility has a longer grace than interaction: keep the hand calmly
+      // displayed between camera results, but stop dwell/trace on invalid data.
+      gHandTargetRef.current.on = context?.active && visible && bounds ? 1 : 0;
+      if (sample.valid && bounds) {
+        gHandTargetRef.current.x = bounds.left + sample.position.x * bounds.width;
+        gHandTargetRef.current.y = bounds.top + sample.position.y * bounds.height;
+      }
+      if (sample.valid && (!fresh || !bounds)) {
+        sample.valid = false;
+        if (!fresh) handFilterRef.current.lost();
+        clearCameraInteraction();
+      }
+
+      followHand(handTargetRef.current, handShownRef.current, handGroupRef.current, now);
+      const shown = followHand(gHandTargetRef.current, gHandShownRef.current, gHandGroupRef.current, now);
+      if (context?.active && context.step === 'trace') {
+        const visible = shown.on > 0.04;
+        if (handVisibleRef.current !== visible) {
+          handVisibleRef.current = visible;
+          setHandVisible(visible);
+        }
+      }
+
+      if (context?.active && sample.valid && fresh && bounds && shown.on > 0.5 && gHandGroupRef.current) {
+        if (context.step === 'trace') {
+          const inverse = traceInverseRef.current;
+          if (inverse) {
+            const local = {
+              x: inverse.a * shown.x + inverse.c * shown.y + inverse.e,
+              y: inverse.b * shown.x + inverse.d * shown.y + inverse.f,
+            };
+            const margin = 24;
+            if (local.x >= -margin && local.x <= 300 + margin && local.y >= -margin && local.y <= 300 + margin) {
+              processTraceRef.current?.(local.x, local.y);
+            }
+          }
+        } else {
+          const element = document.elementFromPoint(shown.x, shown.y)?.closest('button[data-key]');
+          const key = element && stepCardRef.current?.contains(element) && !element.disabled
+            ? element.getAttribute('data-key') : null;
+          if (!key) {
+            hoverTargetRef.current = null;
+            hoverStartTimeRef.current = null;
+            gDwellRef.current = 0;
+          } else if (hoverTargetRef.current !== key) {
+            hoverTargetRef.current = key;
+            hoverStartTimeRef.current = now;
+            gDwellRef.current = 0;
+          } else {
+            const progress = clamp01((now - hoverStartTimeRef.current) / 1500);
+            gDwellRef.current = progress;
+            if (progress >= 1) {
+              if (context.step === 'find') context.handleFindKeyPress(key);
+              if (context.step === 'type') context.handleTypeKeyPress(key);
+              hoverStartTimeRef.current = now + 500;
+              gDwellRef.current = 0;
+            }
+          }
+        }
+      }
 
       // Dwell-to-click ring around the fingertip, on the keyboard steps.
       const ring = gDwellRingRef.current;
@@ -1268,7 +1232,7 @@ export default function TraceTypeGame() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [clearCameraInteraction]);
 
   // ══════════════════════════════════════════════════════════════════════════
   // Keyboard event handler
@@ -2212,6 +2176,7 @@ export default function TraceTypeGame() {
               <motion.div
                 key={`${currentLetter}-${step}`}
                 ref={stepCardRef}
+                data-pointer-card={`${currentLetterIdx}-${step}`}
                 className={`tt-step-container step-${step}`}
                 initial={{ opacity: 0, x: 50 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -2441,13 +2406,13 @@ export default function TraceTypeGame() {
           <HandArt />
           {/* dwell-to-click progress, sweeping around the fingertip */}
           <circle
-            cx="0" cy="4" r={DWELL_R}
+            cx="0" cy="0" r={DWELL_R}
             fill="none"
             stroke="#A5FFF4"
             strokeWidth="4"
             strokeLinecap="round"
             strokeDasharray={DWELL_C}
-            transform="rotate(-90 0 4)"
+            transform="rotate(-90 0 0)"
             className="tt-dwell-ring"
             ref={gDwellRingRef}
           />
@@ -2484,4 +2449,3 @@ export default function TraceTypeGame() {
     </div>
   );
 }
-
