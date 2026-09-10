@@ -43,6 +43,26 @@ const TRACK_IDENTITY_MS = 1500; // allow slow inference to match the next visibl
 const SWITCH_HOLD_MS = 250;
 const SWITCH_MARGIN = 0.10;
 
+/* ── Single-hand lock ──────────────────────────────────────────────────────
+   Client feedback: "when two hands are visible the system gets confused and
+   the pointer becomes unstable."
+
+   Scoring alone cannot fix this. Two hands that are both moving produce two
+   similar scores, and any rule that compares them every frame can change its
+   mind — which is what the child feels as the pointer jumping between hands.
+
+   So for pointer games the rule is not "pick the best hand each frame", it is
+   "pick a hand ONCE, then stop looking". While a hand holds the lock the other
+   hand is not scored, not compared and cannot win: the second hand may as well
+   not be in frame. The lock is only released after the locked hand has been
+   genuinely gone — not blinking, gone — for RELEASE_MS, at which point the
+   next frame acquires fresh.
+
+   Acquisition still sees every visible hand, because choosing correctly at the
+   start is exactly what stops the pointer latching onto a hand resting on a
+   cheek. It is the switching, not the choosing, that had to go. */
+const LOCK_RELEASE_MS = 900;
+
 function span(lm) {
   if (!lm) return 0;
   return Math.hypot(lm[WRIST].x - lm[PINKY_MCP].x, lm[WRIST].y - lm[PINKY_MCP].y);
@@ -58,6 +78,8 @@ export function createActiveHandSelector({
   historyMs = HISTORY_MS,
   requireMotion = true,       // set false for games where holding still is the task
   stableSelection = false,   // pointer games keep control through stillness and brief dropouts
+  singleHandLock = false,    // once acquired, one hand keeps the pointer outright
+  lockReleaseMs = LOCK_RELEASE_MS,
 } = {}) {
   /** key → [{x, y, t}] */
   const history = new Map();
@@ -67,10 +89,20 @@ export function createActiveHandSelector({
   let nextTrackId = 0;
   let contenderKey = null;
   let contenderSince = 0;
+  /* When the lock is held, this is the only hand that exists as far as the
+     rest of the app is concerned. `lockedMissingSince` is the moment it stopped
+     being visible, or null while it is on screen. */
+  let lockedKey = null;
+  let lockedMissingSince = null;
 
   function clearContender() {
     contenderKey = null;
     contenderSince = 0;
+  }
+
+  function releaseLock() {
+    lockedKey = null;
+    lockedMissingSince = null;
   }
 
   // Result order and handedness can both change from one detection to the next.
@@ -141,6 +173,16 @@ export function createActiveHandSelector({
   function select(hands, handedness = [], now = performance.now()) {
     if (!hands || hands.length === 0) {
       clearContender();
+      /* A locked hand is allowed to disappear for longer than an unlocked one
+         before the pointer is handed to anybody else: the child lowering their
+         hand for a moment is not a request to change hands. */
+      if (singleHandLock && lockedKey) {
+        if (lockedMissingSince === null) lockedMissingSince = now;
+        if (now - lockedMissingSince < lockReleaseMs) {
+          return { landmarks: null, index: -1, key: lockedKey, reason: 'blink', scores: [] };
+        }
+        releaseLock();
+      }
       // Brief grace so a one-frame detection drop does not blank the pointer.
       if (currentKey && now - lastSeenAt < LOST_GRACE_MS) {
         return { landmarks: null, index: -1, key: currentKey, reason: 'blink', scores: [] };
@@ -151,7 +193,11 @@ export function createActiveHandSelector({
       return { landmarks: null, index: -1, key: null, reason: 'no-hand', scores: [] };
     }
 
-    const keys = stableSelection ? stableKeys(hands, handedness, now) : null;
+    /* The lock needs a stable identity for "the same hand as last frame",
+       so it always uses wrist matching regardless of `stableSelection`. */
+    const keys = (stableSelection || singleHandLock)
+      ? stableKeys(hands, handedness, now)
+      : null;
     const scores = hands.map((lm, i) => {
       const key = keys ? keys[i] : handKey(handedness[i]?.label, i);
       const tip = lm[TIP];
@@ -187,6 +233,42 @@ export function createActiveHandSelector({
 
     scores.sort((a, b) => b.score - a.score);
     const best = scores[0];
+
+    /* ── The lock, before any comparison ──────────────────────────────────
+       Note this runs BEFORE the score-based paths below. A locked hand is
+       returned on its identity alone; the other hand's score is never
+       consulted, so there is nothing for the pointer to flicker between. */
+    if (singleHandLock) {
+      if (lockedKey) {
+        const held = scores.find((s) => s.key === lockedKey);
+        if (held) {
+          lockedMissingSince = null;
+          currentKey = lockedKey;
+          lastSeenAt = now;
+          clearContender();
+          return { landmarks: hands[held.i], index: held.i, key: held.key, reason: 'ok', scores };
+        }
+        // Locked hand not in this frame — hold the pointer for it, do not
+        // hand control to whatever else happens to be visible.
+        if (lockedMissingSince === null) lockedMissingSince = now;
+        if (now - lockedMissingSince < lockReleaseMs) {
+          return { landmarks: null, index: -1, key: lockedKey, reason: 'blink', scores };
+        }
+        releaseLock();
+      }
+
+      // Acquisition: free to compare, because nothing holds the pointer yet.
+      if (requireMotion && best.motion < idleMotion) {
+        currentKey = null;
+        return { landmarks: null, index: -1, key: null, reason: 'idle', scores };
+      }
+      lockedKey = best.key;
+      lockedMissingSince = null;
+      currentKey = best.key;
+      lastSeenAt = now;
+      clearContender();
+      return { landmarks: hands[best.i], index: best.i, key: best.key, reason: 'ok', scores };
+    }
 
     if (stableSelection && currentKey) {
       const current = scores.find((score) => score.key === currentKey);
@@ -245,9 +327,18 @@ export function createActiveHandSelector({
     currentKey = null;
     lastSeenAt = 0;
     clearContender();
+    releaseLock();
   }
 
-  return { select, reset };
+  /** Drop the current hand and re-acquire on the next frame (e.g. the child
+   *  wants to swap hands mid-round without waiting for the release timer). */
+  function releaseActiveHand() {
+    releaseLock();
+    currentKey = null;
+    clearContender();
+  }
+
+  return { select, reset, releaseActiveHand, get lockedKey() { return lockedKey; } };
 }
 
 export default createActiveHandSelector;

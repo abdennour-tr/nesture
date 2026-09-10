@@ -95,3 +95,98 @@ test('default selection preserves the existing motion requirement and handedness
   expect(selector.select([hand(0.3)], labels, 0).reason).toBe('idle');
   expect(selector.select([hand(0.3, 0.06)], labels, 30)).toMatchObject({ key: 'Right', reason: 'ok' });
 });
+
+/* ── Single-hand lock ───────────────────────────────────────────────────────
+   Client feedback: with two hands in frame the pointer became unstable. The
+   lock answers it by removing the per-frame comparison entirely: one hand is
+   chosen once, and nothing else can take the pointer while it is on screen. */
+const lockedSelector = (options = {}) => createActiveHandSelector({
+  singleHandLock: true, requireMotion: true, ...options,
+});
+
+/** Sweep a hand across the frame so it reads as "playing". */
+function acquire(selector, x = 0.3, start = 0) {
+  let result = null;
+  for (let i = 0; i < 20; i += 1) {
+    result = selector.select([hand(x + i * 0.012, 0.06)], labels, start + i * 33);
+  }
+  return result;
+}
+
+test('the lock acquires the moving hand, not a resting one', () => {
+  const selector = lockedSelector();
+  let result = null;
+  for (let i = 0; i < 20; i += 1) {
+    // index 0 is parked, index 1 sweeps across the frame
+    result = selector.select([hand(0.2), hand(0.5 + i * 0.012, 0.06)], labels, i * 33);
+  }
+  expect(result.index).toBe(1);
+  expect(result.reason).toBe('ok');
+});
+
+test('a livelier second hand can never take the pointer from the locked hand', () => {
+  const selector = lockedSelector();
+  const locked = acquire(selector);
+  expect(locked.landmarks).not.toBeNull();
+
+  for (let i = 0; i < 90; i += 1) {
+    // The locked hand holds still while a second hand sweeps twice as fast.
+    const result = selector.select(
+      [hand(0.3 + 20 * 0.012, 0.06), hand(0.95 - i * 0.02, 0.06)],
+      labels,
+      700 + i * 33,
+    );
+    expect(result.key).toBe(locked.key);
+  }
+});
+
+test('a brief dropout holds the pointer instead of handing it to the other hand', () => {
+  const selector = lockedSelector();
+  const locked = acquire(selector);
+
+  for (let i = 0; i < 9; i += 1) {   // ~300ms, under the release window
+    const result = selector.select([hand(0.95 - i * 0.02, 0.06)], labels, 700 + i * 33);
+    expect(result.landmarks).toBeNull();
+    expect(result.reason).toBe('blink');
+    expect(result.key).toBe(locked.key);
+  }
+});
+
+test('the lock releases after a sustained absence and re-acquires cleanly', () => {
+  const selector = lockedSelector();
+  acquire(selector);
+  for (let t = 700; t < 2400; t += 33) selector.select([], [], t);   // hand put down
+
+  const reacquired = acquire(selector, 0.8, 2400);
+  expect(reacquired.reason).toBe('ok');
+  expect(reacquired.landmarks).not.toBeNull();
+});
+
+test('releaseActiveHand lets the child swap hands without waiting for the timer', () => {
+  const selector = lockedSelector();
+  const first = acquire(selector);
+
+  // While locked, the other hand cannot take over however much it moves.
+  let result = selector.select(
+    [hand(0.3 + 20 * 0.012, 0.06), hand(0.9, 0.06)], labels, 700,
+  );
+  expect(result.key).toBe(first.key);
+
+  // The child lowers the first hand and holds still for a moment.
+  for (let i = 0; i < 20; i += 1) {
+    result = selector.select(
+      [hand(0.3 + 20 * 0.012), hand(0.9)], labels, 740 + i * 33,
+    );
+  }
+
+  // Releasing re-opens acquisition immediately — without it the first hand
+  // would keep the pointer — and the hand that is now moving wins.
+  selector.releaseActiveHand();
+  for (let i = 0; i < 20; i += 1) {
+    result = selector.select(
+      [hand(0.3 + 20 * 0.012), hand(0.9 - i * 0.02, 0.06)], labels, 1400 + i * 33,
+    );
+  }
+  expect(result.index).toBe(1);
+  expect(result.reason).toBe('ok');
+});

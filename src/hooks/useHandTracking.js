@@ -142,9 +142,29 @@ export function detectMidlineCrossing(startX, endX) {
  *   changing result order, and brief occlusions; require sustained movement
  *   before a second hand takes over. Opt in for games driven by a hand pointer.
  */
+/**
+ * @param {boolean} singleHandLock  Exactly one hand drives the pointer. Once a
+ *   hand is acquired it keeps control outright — a second hand in frame is not
+ *   scored and cannot take over — until the locked hand has been gone long
+ *   enough to count as put down. See src/utils/activeHandSelector.js.
+ * @param {0|1} modelComplexity  MediaPipe model. 0 is the lite graph: roughly
+ *   twice the frame rate for a little more landmark noise, which is the right
+ *   trade for a pointer (the noise is filtered downstream; the frame rate is
+ *   what the child actually feels). 1 is the full graph, for games that score
+ *   finger POSE rather than move a cursor.
+ * @param {number} publishIntervalMs  How often the per-frame signal is mirrored
+ *   into React state. See the ref/state note below.
+ */
 export default function useHandTracking(
   videoRef, canvasRef, enabled = true, pauseProcessing = false, maxHands = 2,
-  { requireMotion = false, stableSelection = false } = {}
+  {
+    requireMotion = false,
+    stableSelection = false,
+    singleHandLock = false,
+    modelComplexity = 1,
+    publishIntervalMs = 120,
+    drawOnlyActiveHand = false,
+  } = {}
 ) {
   const [landmarks,      setLandmarks]      = useState(null);  // the ACTIVE hand
   const [multiHandData,  setMultiHandData]  = useState(null);  // { left, right, all }
@@ -162,8 +182,35 @@ export default function useHandTracking(
      `multiHandLandmarks[0]`, which picked an arbitrary hand. */
   const selectorRef = useRef(null);
   if (!selectorRef.current) {
-    selectorRef.current = createActiveHandSelector({ requireMotion, stableSelection });
+    selectorRef.current = createActiveHandSelector({
+      requireMotion, stableSelection, singleHandLock,
+    });
   }
+
+  /* ── Per-frame values live in refs; state is a throttled mirror ──────────
+     Every one of the setters above used to fire on EVERY camera result, so a
+     30fps camera re-rendered the consuming game thirty times a second. In a
+     game whose component is a couple of thousand lines, that render is far
+     more expensive than the pointer maths — the pointer was not moving badly,
+     it was being redrawn under a screen that was rebuilding itself.
+
+     The refs below carry the full-rate signal for consumers that read them
+     from their own animation frame (the correct way to drive a pointer). The
+     state is still published, but only every `publishIntervalMs`, for UI that
+     legitimately renders from state — "Raise your hand", the camera badge.
+
+     This mirrors what useMediaPipeTracking already does for LetterQuest, which
+     is why LetterQuest's cursor feels lighter than this one did. */
+  const landmarksRef = useRef(null);
+  const trackingTimestampRef = useRef(null);
+  const activeHandKeyRef = useRef(null);
+  const handStatusRef = useRef('no-hand');
+  const multiHandDataRef = useRef(null);
+  /* Bumped on every accepted camera result, so a consumer can tell "new
+     sample" from "same sample" without comparing timestamps. */
+  const frameSeqRef = useRef(0);
+  const lastPublishAtRef = useRef(0);
+  const lastPublishedStatusRef = useRef('no-hand');
 
   // Ref to hold the latest pauseProcessing value for the async callback
   const pauseProcessingRef = useRef(pauseProcessing);
@@ -224,8 +271,27 @@ export default function useHandTracking(
     selectorRef.current?.reset();
   }, [videoRef]);
 
+  /* Mirror the refs into React state at a human rate rather than a camera
+     rate. A status change (hand lost / found / idle) publishes immediately,
+     because that drives a visible prompt and must not wait for the interval. */
+  const publish = useCallback(({ index, tracking }) => {
+    const status = handStatusRef.current;
+    const now = trackingTimestampRef.current ?? performance.now();
+    const statusChanged = status !== lastPublishedStatusRef.current;
+    if (!statusChanged && now - lastPublishAtRef.current < publishIntervalMs) return;
+    lastPublishAtRef.current = now;
+    lastPublishedStatusRef.current = status;
+    setLandmarks(landmarksRef.current);
+    setMultiHandData(multiHandDataRef.current);
+    setActiveHandIndex(index);
+    setActiveHandKey(activeHandKeyRef.current);
+    setHandStatus(status);
+    setTrackingTimestamp(now);
+    setIsTracking(tracking);
+  }, [publishIntervalMs]);
+
   // ── Draw landmarks on canvas ─────────────────────────────────────────────
-  const drawLandmarks = useCallback((results) => {
+  const drawLandmarks = useCallback((results, activeIndex = -1) => {
     const canvas = canvasRef?.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -233,7 +299,16 @@ export default function useHandTracking(
 
     if (!results.multiHandLandmarks?.length) return;
 
-    for (const handLandmarks of results.multiHandLandmarks) {
+    /* Show one hand, the one in control. Drawing every detected hand meant a
+       resting hand got its own skeleton, which reads as "the game is following
+       that one" even though the pointer is driven by the other. */
+    const hands = drawOnlyActiveHand
+      ? (activeIndex >= 0 && results.multiHandLandmarks[activeIndex]
+          ? [results.multiHandLandmarks[activeIndex]]
+          : [])
+      : results.multiHandLandmarks;
+
+    for (const handLandmarks of hands) {
       // Draw connections
       ctx.strokeStyle = 'rgba(13,94,107,0.6)';
       ctx.lineWidth = 2;
@@ -266,13 +341,12 @@ export default function useHandTracking(
         if (posBuffer.current.length > 20) posBuffer.current.shift();
       }
     }
-  }, [canvasRef]);
+  }, [canvasRef, drawOnlyActiveHand]);
 
   // ── MediaPipe result handler ──────────────────────────────────────────────
   const onResults = useCallback((results) => {
     const timestamp = performance.now();
-    setTrackingTimestamp(timestamp);
-    drawLandmarks(results);
+    trackingTimestampRef.current = timestamp;
     if (results.multiHandLandmarks?.length > 0) {
       /* ── Pick the hand the child is actually playing with ────────────────
          Previously this was `multiHandLandmarks[0]`, i.e. whichever hand
@@ -283,11 +357,14 @@ export default function useHandTracking(
         results.multiHandedness || [],
         timestamp
       );
-      setLandmarks(picked.landmarks);
-      setActiveHandIndex(picked.index);
-      setActiveHandKey(picked.key);
-      setHandStatus(picked.reason);
-      setIsTracking(true);
+      landmarksRef.current = picked.landmarks;
+      activeHandKeyRef.current = picked.key;
+      handStatusRef.current = picked.reason;
+      frameSeqRef.current += 1;
+      /* Draw after selection so the overlay can show only the hand that is
+         actually in control — two skeletons on screen is the visual half of
+         "it gets confused when both hands are up". */
+      drawLandmarks(results, picked.index);
 
       // ── Séparer main gauche / droite via multiHandedness ─────────────────
       let leftHand  = null;
@@ -302,21 +379,27 @@ export default function useHandTracking(
         else leftHand = leftHand || lm; // fallback
       });
 
-      setMultiHandData({
+      multiHandDataRef.current = {
         left:  leftHand,
         right: rightHand,
         all:   results.multiHandLandmarks,
-      });
+      };
+
+      /* Publish LAST: it copies the refs into state, so every ref this frame
+         writes has to be set before it runs, or the state mirror lags a frame
+         behind the signal it is mirroring. */
+      publish({ index: picked.index, tracking: true });
     } else {
       const picked = selectorRef.current.select([], [], timestamp);
-      setLandmarks(null);
-      setMultiHandData(null);
-      setActiveHandIndex(-1);
-      setActiveHandKey(picked.key);
-      setHandStatus(picked.reason);
-      setIsTracking(false);
+      landmarksRef.current = null;
+      multiHandDataRef.current = null;
+      activeHandKeyRef.current = picked.key;
+      handStatusRef.current = picked.reason;
+      frameSeqRef.current += 1;
+      drawLandmarks(results, -1);
+      publish({ index: -1, tracking: false });
     }
-  }, [drawLandmarks]);
+  }, [drawLandmarks, publish]);
 
   // ── Initialize MediaPipe ──────────────────────────────────────────────────
   useEffect(() => {
@@ -347,7 +430,7 @@ export default function useHandTracking(
            what handPointerFilter is for. */
         hands.setOptions({
           maxNumHands: maxHands,
-          modelComplexity: 1,
+          modelComplexity,
           minDetectionConfidence: 0.55,
           minTrackingConfidence: 0.40,
         });
@@ -423,6 +506,20 @@ export default function useHandTracking(
     activeHandIndex,    // index into multiHandData.all, or -1
     activeHandKey,      // persistent identity, retained through a brief detection loss
     trackingTimestamp, // performance.now() of the latest camera result, or null
+
+    /* ── Full-rate signal, for consumers that drive a pointer ──────────────
+       These update on EVERY camera result without re-rendering anything. A
+       game that moves a cursor should read them from its own animation frame
+       and ignore the state above, which is a throttled mirror meant for UI.
+       `frameSeqRef` increments once per result: compare it with the last value
+       you consumed to know whether there is a new sample to process. */
+    landmarksRef,
+    trackingTimestampRef,
+    activeHandKeyRef,
+    handStatusRef,
+    frameSeqRef,
+    /** Drop the current hand so the next frame re-acquires (swap hands). */
+    releaseActiveHand: () => selectorRef.current?.releaseActiveHand(),
     handStatus,         // 'ok' | 'idle' | 'blink' | 'no-hand'
     /** Ready-to-show coaching line for the current tracking state. */
     handHint:

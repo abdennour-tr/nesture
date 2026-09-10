@@ -361,16 +361,32 @@ export default function TraceTypeGame() {
   // Keep camera processing active during all phases for hand-tracking virtual keyboard
   const pauseProcessing = false;
 
+  /* ── Pointer tracking configuration ───────────────────────────────────────
+     `singleHandLock` — one hand takes the pointer and keeps it; a second hand
+        in frame is not scored and cannot steal it. Two hands competing was
+        what made the pointer jump.
+     `modelComplexity: 0` — the lite graph, the same one LetterQuest uses. It
+        roughly doubles the camera frame rate; the extra landmark noise is
+        removed by handPointerFilter, but the frame rate is what the child
+        feels as smoothness.
+     `drawOnlyActiveHand` — the debug overlay shows the hand in control only.
+     The *Ref values are the full-rate signal, consumed in the animation frame
+     below. The plain state values are a throttled mirror, used only by UI. */
   const {
     landmarks,
-    trackingTimestamp,
-    activeHandKey,
     isTracking,
     error: trackingError,
     releaseCamera,
+    landmarksRef,
+    trackingTimestampRef,
+    activeHandKeyRef,
+    frameSeqRef,
   } = useHandTracking(videoRef, canvasRef, trackingEnabled, pauseProcessing, 2, {
     stableSelection: true,
     requireMotion: false,
+    singleHandLock: true,
+    modelComplexity: 0,
+    drawOnlyActiveHand: true,
   });
 
   /* ── Turn the camera off when the session ends ──────────────────────────
@@ -532,7 +548,7 @@ export default function TraceTypeGame() {
   const gDwellRef      = useRef(0);
   const gHandTargetRef = useRef({ x: 0, y: 0, rot: 0, scale: GLOBAL_HAND_SCALE, flip: 1, on: 0 });
   const gHandShownRef  = useRef({ x: 0, y: 0, rot: 0, scale: GLOBAL_HAND_SCALE, flip: 1, on: 0 });
-  const cameraSampleRef = useRef({ timestamp: null, lastAcceptedAt: null, valid: false, key: null, intervalMs: 1000 / 30 });
+  const cameraSampleRef = useRef({ timestamp: null, lastAcceptedAt: null, valid: false, key: null, intervalMs: 1000 / 30, seq: -1 });
   const cameraContextRef = useRef(null);
   const hoverTargetRef = useRef(null);
   const hoverStartTimeRef = useRef(null);
@@ -740,7 +756,7 @@ export default function TraceTypeGame() {
      Do not animate across the old card or reuse a dwell from before a pause. */
   useEffect(() => {
     handFilterRef.current.reset();
-    cameraSampleRef.current = { timestamp: null, lastAcceptedAt: null, valid: false, key: null, intervalMs: 1000 / 30 };
+    cameraSampleRef.current = { timestamp: null, lastAcceptedAt: null, valid: false, key: null, intervalMs: 1000 / 30, seq: -1 };
     gHandTargetRef.current.on = 0;
     gHandShownRef.current.on = 0;
     if (gHandGroupRef.current) gHandGroupRef.current.style.opacity = '0';
@@ -748,11 +764,28 @@ export default function TraceTypeGame() {
     setHandVisible(false);
   }, [cameraPointerActive, step, currentLetterIdx, clearCameraInteraction]);
 
-  /* Consume each camera result once. Rendering and hit-testing run together
-     below, at display cadence, without advancing the filter on React renders. */
-  useEffect(() => {
-    if (!cameraPointerActive) return;
+  /* ── Consume each camera result once, from the animation frame ────────────
+     This used to be a useEffect keyed on the `landmarks` / `trackingTimestamp`
+     STATE, which meant every camera result had to travel through a React
+     render of this (very large) component before the pointer could move. The
+     pointer was therefore never smoother than the render, and the render was
+     the slowest thing on the screen.
+
+     Now the camera writes refs at full rate and this function reads them from
+     the same requestAnimationFrame that draws the hand: sample → filter → draw
+     in one pass, no render in the path. React state is still published by the
+     hook a few times a second for the prompts and badges that need it. */
+  const consumeCameraSample = useCallback(() => {
+    if (!cameraContextRef.current?.active) return;
+    const seq = frameSeqRef.current;
     const sample = cameraSampleRef.current;
+    if (sample.seq === seq) return;          // no new camera result since last frame
+    sample.seq = seq;
+
+    const trackingTimestamp = trackingTimestampRef.current;
+    const landmarks = landmarksRef.current;
+    const activeHandKey = activeHandKeyRef.current;
+    if (trackingTimestamp == null) return;
     if (sample.timestamp === trackingTimestamp) return;
     if (sample.timestamp != null && trackingTimestamp > sample.timestamp) {
       // Adapt immediately to slower inference; recover gradually when it speeds
@@ -800,7 +833,7 @@ export default function TraceTypeGame() {
     sample.lastAcceptedAt = trackingTimestamp;
     sample.position = p;
     sample.valid = true;
-  }, [landmarks, trackingTimestamp, activeHandKey, cameraPointerActive, step, currentLetterIdx, clearCameraInteraction]);
+  }, [clearCameraInteraction, activeHandKeyRef, frameSeqRef, landmarksRef, trackingTimestampRef]);
 
   // ══════════════════════════════════════════════════════════════════════════
   // Step Completion Handler
@@ -1155,6 +1188,9 @@ export default function TraceTypeGame() {
     let raf = 0;
 
     const tick = (now) => {
+      // Pull any new camera result BEFORE drawing, so the hand shown this
+      // frame is based on the newest sample rather than the previous one.
+      consumeCameraSample();
       const context = cameraContextRef.current;
       const sample = cameraSampleRef.current;
       const age = sample.lastAcceptedAt == null ? Infinity : now - sample.lastAcceptedAt;
@@ -1232,7 +1268,7 @@ export default function TraceTypeGame() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [clearCameraInteraction]);
+  }, [clearCameraInteraction, consumeCameraSample]);
 
   // ══════════════════════════════════════════════════════════════════════════
   // Keyboard event handler
@@ -1995,7 +2031,7 @@ export default function TraceTypeGame() {
           {/* ── Step Content ────────────────────────────────────────── */}
           
           {/* ── TRACE Content (Persistently mounted OUTSIDE AnimatePresence) ── */}
-          <div className="tt-step-container" style={{
+          <div className="tt-step-container tt-step-trace" style={{
             position: step === 'trace' ? 'relative' : 'absolute',
             visibility: step === 'trace' ? 'visible' : 'hidden',
             opacity: step === 'trace' ? 1 : 0,
@@ -2018,10 +2054,16 @@ export default function TraceTypeGame() {
             </div>
             
             <div className="tt-trace-area" ref={traceAreaRef}>
-              <svg 
-                className="tt-trace-svg" 
+              {/* The glyph occupies x 50-250, y 40-260 of the old "0 0 300 300"
+                  box, so roughly a seventh of every edge was blank. Tightening
+                  the viewBox around the glyph draws the same letter about 15%
+                  larger at the same canvas size. Hit-testing is unaffected: the
+                  pointer maps through getScreenCTM().inverse(), which already
+                  accounts for the viewBox. */}
+              <svg
+                className="tt-trace-svg"
                 ref={traceSvgRef}
-                viewBox="0 0 300 300"
+                viewBox="20 20 260 260"
                 onPointerDown={(e) => {
                   e.currentTarget.setPointerCapture(e.pointerId);
                   setIsDrawing(true);
@@ -2177,7 +2219,7 @@ export default function TraceTypeGame() {
                 key={`${currentLetter}-${step}`}
                 ref={stepCardRef}
                 data-pointer-card={`${currentLetterIdx}-${step}`}
-                className={`tt-step-container step-${step}`}
+                className={`tt-step-container tt-step-keys step-${step}`}
                 initial={{ opacity: 0, x: 50 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -50 }}
