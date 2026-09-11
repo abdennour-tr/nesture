@@ -492,7 +492,10 @@ export default function PathTracingGame() {
       const analysis = await endSession(reflexOutput);
       if (analysis) {
         navigate(`/play/results/${analysis.session_id || 'pathtracer'}`, {
-          state: { analysis, reflexEngineOutput: reflexOutput },
+          /* `gameId` tells the shared report which activity it is describing,
+             so the reflex section lists Path Tracing's targets rather than
+             LetterQuest's. Without it the route defaults to LetterQuest. */
+          state: { analysis, reflexEngineOutput: reflexOutput, gameId: 'path-tracing' },
         });
       } else {
         toast.error('No analysis returned');

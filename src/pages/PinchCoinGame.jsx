@@ -25,14 +25,10 @@
  */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { COIN_SIZE, COIN_TARGET_COUNT, PINCH_TOLERANCE } from './pinchCoinLevels';
-import { otComposite, otRound, otPct, FINISH } from '../utils/otScore';
+import {otComposite, otRound, FINISH} from '../utils/otScore';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Home, Pause, Play, RotateCcw, Clock, Hand, MousePointer2,
-  Volume2, VolumeX, Target, Activity, Zap, TrendingUp, CheckCircle,
-  Gauge, Move, Crosshair, Info, HelpCircle,
-} from 'lucide-react';
+import {Home, Pause, Play, RotateCcw, Clock, Hand, MousePointer2, Volume2, VolumeX, Info, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
 import GameRules from '../components/game/GameRules';
@@ -43,6 +39,8 @@ import '../styles/PinchCoinGame.css';
 import roomBg from '../assets/pinch-coin/room.jpg';
 import piggyImg from '../assets/pinch-coin/piggy.png';
 import tutorialHandImg from '../assets/pinch-coin/tutorial-pinch-hand-v2.png';
+import GameResults from '../components/game/GameResults';
+import TouchModePose from '../components/game/TouchModePose';
 /* NOTE: GameShell.css is NOT imported here on purpose. It is already pulled in
    by GameRules / EndGameControl above, and an ES module is evaluated once at
    its FIRST import — so a later import would be a no-op and could not change
@@ -1233,6 +1231,18 @@ export default function PinchCoinGame() {
         </div>
       </main>
 
+      {/* Touch-mode upper-body observation: asks first, records only with a
+          yes, releases the webcam the moment the round ends. Renders its own
+          hidden <video> and its own consent overlay — see TouchModePose. */}
+      <TouchModePose
+        gameId="pinch-coin"
+        active={mode === 'touch' && (gamePhase === 'countdown' || gamePhase === 'playing')}
+        finished={gamePhase === 'results'}
+        sessionId={sessionId}
+        childId={profile?.learner_id || user?.id || null}
+        learnerName={profile?.first_name}
+      />
+
       {/* ═══ OVERLAYS ═══════════════════════════════════════════════════ */}
       <AnimatePresence>
         {gamePhase === 'rules' && (
@@ -1283,83 +1293,48 @@ export default function PinchCoinGame() {
         )}
 
         {gamePhase === 'results' && results && (
-          <motion.div key="res" className="pcg-overlay"
+          <motion.div key="res" className="pcg-overlay pcg-overlay-report"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <motion.div className="pcg-card pcg-results-card"
-              initial={{ scale: 0.86, y: 40, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 24 }}>
-              <div className="pcg-confetti" aria-hidden="true">
-                {Array.from({ length: 14 }).map((_, i) => (
-                  <span key={i} style={{ '--i': i }} />
-                ))}
-              </div>
-
-              {/* Honest heading: "All coins banked!" over a round that banked
-                  none is a claim the report cannot support. */}
-              <h2 className="pcg-results-title">
-                <CheckCircle size={26} />{' '}
-                {results.endedEarly
-                  ? 'Session ended'
-                  : results.collected >= results.target
-                    ? 'All coins banked!'
-                    : 'Round finished'}
-              </h2>
-              <p className="pcg-results-sub">
-                {cfg.emoji} {cfg.label} · {mode === 'camera' ? 'Camera' : 'Touch'}
-              </p>
-
-              <div className="pcg-results-stars">
-                {[0, 1, 2].map((i) => (
-                  <span key={i} className={i < results.stars ? 'earned' : ''}>★</span>
-                ))}
-              </div>
-
-              {results.composite != null ? (
-                <div className="pcg-perf-ring" style={{ '--pct': results.composite }}>
-                  <div className="pcg-perf-inner">
-                    <span className="pcg-perf-val">{results.composite}</span>
-                    <span className="pcg-perf-lbl">OT Score</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="tt-ot-none">
-                  No OT score for this session — the round ended before a coin
-                  was picked up, so there is nothing to measure.
-                </div>
-              )}
-
-              <div className="pcg-metrics">
-                <Metric icon={<Zap size={16} />} label="Pinch Onset"
-                  value={results.onsetMs == null ? '—' : `${(results.onsetMs / 1000).toFixed(2)}s`} />
-                <Metric icon={<Move size={16} />} label="Pinch Aperture"
-                  value={results.aperture == null ? '—' : results.aperture.toFixed(3)} />
-                <Metric icon={<Activity size={16} />} label="Pinch Stability"
-                  value={otPct(results.stability)}
-                  tip="Consistency of the grip measured from thumb–index distance — not a force reading. A camera cannot measure force." />
-                <Metric icon={<TrendingUp size={16} />} label="Drag Trajectory" value={otPct(results.trajectory)} />
-                <Metric icon={<Gauge size={16} />} label="Drag Speed" value={results.dragSpeed == null ? '—' : `${results.dragSpeed} px/s`} />
-                <Metric icon={<Pause size={16} />} label="Pauses"
-                  value={`${results.pauses} · ${(results.pauseMs / 1000).toFixed(1)}s`} />
-                <Metric icon={<Target size={16} />} label="Release Accuracy" value={otPct(results.releaseAccuracy)} />
-                <Metric icon={<Crosshair size={16} />} label="Success"
-                  value={`${results.collected}/${results.attempts}`} />
-                <Metric icon={<Clock size={16} />} label="Total Time" value={fmtTime(results.totalSec)} />
-              </div>
-
-              <div className="pcg-actions">
-                <button className="pcg-btn pcg-btn-primary" onClick={restart}>
-                  <RotateCcw size={18} /> Play again
-                </button>
-                <button className="pcg-btn pcg-btn-ghost"
+            {/* The platform report. The numbers below are this game's own — a
+                pinch is not scored like a trace — but the shape, the wording
+                and the reflex section are shared with every other game.
+                See components/game/GameResults.jsx. */}
+            <GameResults
+              gameId="pinch-coin"
+              emoji={results.endedEarly ? '💪' : results.collected >= results.target ? '🏆' : '👏'}
+              title={results.endedEarly
+                ? 'Session ended'
+                : results.collected >= results.target
+                  ? 'All coins banked!'
+                  : 'Round finished'}
+              subtitle={`${cfg.emoji} ${cfg.label} · ${mode === 'camera' ? 'Camera' : 'Touch'}`}
+              endedEarly={results.endedEarly}
+              stars={{ earned: results.stars, total: 3 }}
+              headline={{ value: results.composite, caption: 'OT Score' }}
+              breakdown={[
+                { label: 'Release accuracy', value: results.releaseAccuracy, weight: '25%' },
+                { label: 'Pinch stability',  value: results.stability,       weight: '25%' },
+                { label: 'Drag trajectory',  value: results.trajectory,      weight: '20%' },
+                { label: 'Success rate',     value: results.successRate,     weight: '20%' },
+              ]}
+              metrics={[
+                { icon: '⚡', label: 'Pinch onset', value: results.onsetMs == null ? '—' : `${(results.onsetMs / 1000).toFixed(2)}s` },
+                { icon: '↔️', label: 'Pinch aperture', value: results.aperture == null ? '—' : results.aperture.toFixed(3) },
+                { icon: '🎯', label: 'Coins banked', value: `${results.collected}/${results.attempts}` },
+                { icon: '🚀', label: 'Drag speed', value: results.dragSpeed == null ? '—' : `${results.dragSpeed} px/s` },
+                { icon: '⏸️', label: 'Pauses', value: `${results.pauses} · ${(results.pauseMs / 1000).toFixed(1)}s` },
+                { icon: '⏱️', label: 'Total time', value: fmtTime(results.totalSec) },
+              ]}
+              onPlayAgain={restart}
+              onExit={goHome}
+              exitLabel="Home"
+              actionsExtra={(
+                <button type="button" className="gr-btn gr-btn-secondary"
                   onClick={() => navigate('/play/pinch-coin-difficulty')}>
                   Levels
                 </button>
-                <button className="pcg-btn pcg-btn-ghost" onClick={goHome}>
-                  <Home size={18} /> Home
-                </button>
-              </div>
-            </motion.div>
+              )}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -1367,23 +1342,3 @@ export default function PinchCoinGame() {
   );
 }
 
-/* ── Metric cell, with an optional tooltip for definitions that need one ─── */
-function Metric({ icon, label, value, tip }) {
-  return (
-    <div className="pcg-metric">
-      <div className="pcg-metric-ico">{icon}</div>
-      <div className="pcg-metric-body">
-        <span className="pcg-metric-label">
-          {label}
-          {tip && (
-            <span className="pcg-tip" tabIndex={0} role="note" aria-label={tip}>
-              <Info size={11} />
-              <span className="pcg-tip-bubble">{tip}</span>
-            </span>
-          )}
-        </span>
-        <span className="pcg-metric-value">{value}</span>
-      </div>
-    </div>
-  );
-}

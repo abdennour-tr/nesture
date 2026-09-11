@@ -6,15 +6,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Home, Pause, Play, RotateCcw, Clock, Star,
-  Volume2, VolumeX, Target, Activity, Zap, TrendingUp, CheckCircle,
-  Gauge, Fingerprint, Timer, Info, AlertTriangle,
-} from 'lucide-react';
+import {Home, Pause, Play, RotateCcw, Clock, Star, Volume2, VolumeX, CheckCircle, Info} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
 import GameRules from '../components/game/GameRules';
-import { otComposite, otRound, otPct, FINISH } from '../utils/otScore';
+import {otComposite, otRound, FINISH} from '../utils/otScore';
 import { PIANO_LEVELS, PIANO_KEYS, buildPianoQueue } from './fingerPianoLevels';
 import { makePianoTapDetector } from '../utils/pianoTapDetector';
 import GameHUD from '../components/game/GameHUD';
@@ -22,6 +18,8 @@ import EndGameControl from '../components/game/EndGameControl';
 import PianoHand from '../components/game/PianoHand';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
+import GameResults from '../components/game/GameResults';
+import TouchModePose from '../components/game/TouchModePose';
 import '../styles/FingerPianoGame.css';
 /* NOTE: GameShell.css is NOT imported here on purpose. It is already pulled in
    by GameRules / EndGameControl above, and an ES module is evaluated once at
@@ -1018,6 +1016,18 @@ export default function FingerPianoGame() {
         </div>
       </main>
 
+      {/* Touch-mode upper-body observation. Nothing starts until the child is
+          asked; the webcam is released the moment the round ends. Renders its
+          own hidden <video> and consent overlay — see TouchModePose. */}
+      <TouchModePose
+        gameId="finger-piano"
+        active={mode === 'touch' && ['countdown', 'playing', 'stage'].includes(gamePhase)}
+        finished={gamePhase === 'results'}
+        sessionId={sessionId}
+        childId={profile?.learner_id || user?.id || null}
+        learnerName={profile?.first_name}
+      />
+
       {/* ═══ OVERLAYS ═══════════════════════════════════════════════════ */}
       <AnimatePresence>
         {gamePhase === 'rules' && (
@@ -1090,119 +1100,50 @@ export default function FingerPianoGame() {
         )}
 
         {gamePhase === 'results' && results && (
-          <motion.div key="res" className="fpp-overlay"
+          <motion.div key="res" className="fpp-overlay fpp-overlay-report"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <motion.div className="fpp-card fpp-results-card"
-              initial={{ scale: 0.86, y: 40, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 24 }}>
-              <div className="fpp-confetti" aria-hidden="true">
-                {Array.from({ length: 14 }).map((_, i) => (
-                  <span key={i} style={{ '--i': i }} />
-                ))}
-              </div>
-
-              <h2 className="fpp-results-title">
-                <CheckCircle size={26} />{' '}
-                {results.endedEarly ? 'Session ended' : 'Piece finished!'}
-              </h2>
-              <p className="fpp-results-sub">
-                {cfg.emoji} {cfg.label} · {results.inputCounts.camera && results.inputCounts.touch ? 'Camera + Touch' : results.inputCounts.camera ? 'Camera' : 'Touch'}
-              </p>
-
-              {results.composite != null ? (
-                <div className="fpp-perf-ring" style={{ '--pct': results.composite }}>
-                  <div className="fpp-perf-inner">
-                    <span className="fpp-perf-val">{results.composite}</span>
-                    <span className="fpp-perf-lbl">OT Score</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="tt-ot-none">
-                  No OT score for this session — the round ended before a key
-                  was played, so there is nothing to measure.
-                </div>
-              )}
-
-              <div className="fpp-metrics">
-                <Metric icon={<Star size={16} />} label="Score" value={results.score} />
-                <Metric icon={<Target size={16} />} label="Accuracy" value={otPct(results.accuracy)} />
-                <Metric icon={<Fingerprint size={16} />} label="Finger Isolation"
-                  value={results.isolation == null ? 'n/a' : `${results.isolation}%`}
-                  muted={results.isolation == null}
-                  tip={results.isolation == null
-                    ? 'A touchscreen reports a contact point, not which finger made it. This is left unmeasured rather than estimated. Play in camera mode to get it.'
-                    : 'Share of the other fingers kept lifted at the moment of the press.'} />
-                <Metric icon={<Zap size={16} />} label="Reaction Time"
-                  value={results.reactionMs == null ? '—' : `${(results.reactionMs / 1000).toFixed(2)}s`} />
-                <Metric icon={<Timer size={16} />} label="Inter-Key Interval"
-                  value={results.intervalMs == null ? '—'
-                    : `${(results.intervalMs / 1000).toFixed(2)}s ±${(results.intervalSd / 1000).toFixed(2)}`} />
-                <Metric icon={<Activity size={16} />} label="Rhythm" value={otPct(results.rhythm)}
-                  tip="One minus the coefficient of variation of the gaps between presses — how even the tempo was." />
-                <Metric icon={<TrendingUp size={16} />} label="Tap Quality" value={otPct(results.tapQuality)}
-                  tip="How decisive each tap was: how far the finger flexed and how fast. A crisp bend scores high, a vague wiggle low." />
-                <Metric icon={<Gauge size={16} />} label="Speed" value={`${results.npm} /min`} />
-                <Metric icon={<Pause size={16} />} label="Hesitations" value={results.pauses} />
-                <Metric icon={<AlertTriangle size={16} />} label="Multi-finger" value={results.ambiguous}
-                  tip="Bends with no clearly distinguishable finger. These are left unscored; the same note stays available to try again." />
-                <Metric icon={<CheckCircle size={16} />} label="Notes"
-                  value={`${results.hit}/${results.total}`} />
-              </div>
-
-              {/* The per-finger table is the part a therapist actually reads:
-                  a global score hides which finger is the problem. */}
-              <div className="fpp-perfinger">
-                <div className="fpp-perfinger-title">Per finger</div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Finger</th><th>Hits / attempts</th><th>Accuracy</th>
-                      <th>Reaction</th><th>Isolation</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.perFinger.map((p) => (
-                      <tr key={p.key}>
-                        <td>
-                          <span className="fpp-finger-dot" style={{ '--fc': p.color }}>{p.n}</span>
-                          {p.label}
-                        </td>
-                        <td>{p.hit}/{p.asked}</td>
-                        <td>{p.accuracy == null ? '—' : `${p.accuracy}%`}</td>
-                        <td>{p.rtMs == null ? '—' : `${(p.rtMs / 1000).toFixed(2)}s`}</td>
-                        <td className={p.isolation == null ? 'muted' : ''}>
-                          {p.isolation == null ? 'n/a' : `${p.isolation}%`}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {!results.cameraMetrics && results.inputCounts.touch > 0 && (
-                <div className="fpp-note-box">
-                  <AlertTriangle size={18} />
-                  <span>
-                    Played in touch mode: which finger was used cannot be observed,
-                    so isolation is not reported and the score was computed without it.
-                  </span>
-                </div>
-              )}
-
-              <div className="fpp-actions">
-                <button className="fpp-btn fpp-btn-primary" onClick={restart}>
-                  <RotateCcw size={18} /> Play again
-                </button>
-                <button className="fpp-btn fpp-btn-ghost"
+            {/* Shared platform report — see components/game/GameResults.jsx.
+                The camera-only sub-scores (finger isolation, tap quality) drop
+                out of the breakdown on a touch round, exactly as they drop out
+                of the composite. */}
+            <GameResults
+              gameId="finger-piano"
+              emoji={results.endedEarly ? '💪' : '🎹'}
+              title={results.endedEarly ? 'Session ended' : 'Piece finished!'}
+              subtitle={`${cfg.emoji} ${cfg.label} · ${
+                results.inputCounts.camera && results.inputCounts.touch ? 'Camera + Touch'
+                  : results.inputCounts.camera ? 'Camera' : 'Touch'}`}
+              endedEarly={results.endedEarly}
+              headline={{ value: results.composite, caption: 'OT Score' }}
+              breakdown={(results.cameraMetrics
+                ? [
+                    { label: 'Note accuracy',   value: results.accuracy,   weight: '28%' },
+                    { label: 'Finger isolation',value: results.isolation,  weight: '25%' },
+                    { label: 'Tap quality',     value: results.tapQuality, weight: '15%' },
+                    { label: 'Rhythm',          value: results.rhythm,     weight: '14%' },
+                  ]
+                : [
+                    { label: 'Note accuracy', value: results.accuracy, weight: '46%' },
+                    { label: 'Rhythm',        value: results.rhythm,   weight: '23%' },
+                  ])}
+              metrics={[
+                { icon: '🏆', label: 'Score', value: results.score },
+                { icon: '🎯', label: 'Notes hit', value: `${results.hit}/${results.total}` },
+                { icon: '⚡', label: 'Reaction', value: results.reactionMs == null ? '—' : `${(results.reactionMs / 1000).toFixed(2)}s` },
+                { icon: '🎵', label: 'Notes / min', value: results.npm ?? '—' },
+                { icon: '〰️', label: 'Timing spread', value: results.intervalSd == null ? '—' : `${results.intervalSd} ms` },
+                { icon: '⏸️', label: 'Pauses', value: results.pauses },
+              ]}
+              onPlayAgain={restart}
+              onExit={goHome}
+              exitLabel="Home"
+              actionsExtra={(
+                <button type="button" className="gr-btn gr-btn-secondary"
                   onClick={() => navigate('/play/finger-piano-difficulty')}>
                   Levels
                 </button>
-                <button className="fpp-btn fpp-btn-ghost" onClick={goHome}>
-                  <Home size={18} /> Home
-                </button>
-              </div>
-            </motion.div>
+              )}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -1210,23 +1151,3 @@ export default function FingerPianoGame() {
   );
 }
 
-/* ── Metric cell ────────────────────────────────────────────────────────── */
-function Metric({ icon, label, value, tip, muted }) {
-  return (
-    <div className={`fpp-metric ${muted ? 'muted' : ''}`}>
-      <div className="fpp-metric-ico">{icon}</div>
-      <div className="fpp-metric-body">
-        <span className="fpp-metric-label">
-          {label}
-          {tip && (
-            <span className="fpp-tip" tabIndex={0} role="note" aria-label={tip}>
-              <Info size={11} />
-              <span className="fpp-tip-bubble">{tip}</span>
-            </span>
-          )}
-        </span>
-        <span className="fpp-metric-value">{value}</span>
-      </div>
-    </div>
-  );
-}

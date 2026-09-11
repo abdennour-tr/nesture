@@ -15,11 +15,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  LogOut, Volume2, VolumeX, Clock, ArrowLeft, Pause, Play,
-  RotateCcw, Home, ChevronRight, CheckCircle, Info, Sun, Moon,
-  Hand, MousePointer2, HelpCircle
-} from 'lucide-react';
+import {LogOut, Volume2, VolumeX, Clock, Pause, Play, Home, ChevronRight, CheckCircle, Info, Sun, Moon, Hand, MousePointer2, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
 import { soundManager } from '../utils/soundManager';
@@ -31,10 +27,13 @@ import '../styles/GameShell.css';
 
 import { HandDefs, HandArt, followHand } from '../components/game/HandPointer';
 import { createHandPointerFilter, handDepthScale, STABLE_POINTER_OPTIONS } from '../utils/handPointerFilter';
-import { buildRound, traceTuning } from './traceTypeWords';
+import { buildRound, traceTuning, emojiForWord } from './traceTypeWords';
 import { buildLetter } from './letterStrokes';
 import GameRules from '../components/game/GameRules';
 import { getGameTheme, toggleGameTheme, subscribeGameTheme } from '../components/game/gameShell';
+import GameResults from '../components/game/GameResults';
+import TouchModePose from '../components/game/TouchModePose';
+import useGraspMeasure from '../hooks/useGraspMeasure';
 // ── Constants ──────────────────────────────────────────────────────────────
 const COUNTDOWN_SECONDS = 3;
 /* Client feedback: "Type shows the letter 3 times - why is that?"
@@ -118,14 +117,12 @@ const LEVEL_LETTERS = {
    "trace" it by touching four corners. buildLetter() derives all three from the
    letter's path at the level's spacing instead. */
 
-
 // ── Encouraging messages pool ──────────────────────────────────────────────
 const ENCOURAGEMENTS = [
   '⭐ Great Job!',  '🎉 Excellent!',   '✨ Amazing!',
   '🏆 Champion!',   '💪 Perfect!',     '🌟 Wonderful!',
   '🚀 Incredible!', '💎 Superstar!',
 ];
-
 
 // ── QWERTY Layout ──────────────────────────────────────────────────────────
 const QWERTY_ROWS = [
@@ -136,7 +133,6 @@ const QWERTY_ROWS = [
 
 // ── SVG Letter Path Data ───────────────────────────────────────────────────
 // Each letter has waypoints [{x, y}] for tracing in a 300×300 canvas,
-
 
 // ── Trace guidance: hand pointer + direction arrows ────────────────────────
 /* Base size of the hand pointer in SVG units (the canvas is 300x300). The art
@@ -387,7 +383,18 @@ export default function TraceTypeGame() {
     singleHandLock: true,
     modelComplexity: 0,
     drawOnlyActiveHand: true,
+    /* Safe to throttle ONLY because this game reads the *Ref values in its own
+       animation frame (see consumeCameraSample). A game that drives itself from
+       the `landmarks` state must leave this at 0. */
+    publishIntervalMs: 120,
   });
+
+  /* The trace step needs one finger extended for a long, continuous line, so a
+     hand pulling closed here is unwanted rather than instructed — which is what
+     makes the reading meaningful. See hooks/useGraspMeasure.js. */
+  const graspRef = useRef(null);
+  const grasp = useGraspMeasure();
+  graspRef.current = grasp;
 
   /* ── Turn the camera off when the session ends ──────────────────────────
      Client feedback: "when the game finish the camera need to turn off."
@@ -572,7 +579,8 @@ export default function TraceTypeGame() {
     typingAccuracies: [],
   });
 
-  // ── Star ratings per letter ─────────────────────────────────────────────
+  /* Per-letter star ratings. Still computed (see below) even though the bottom
+     bar that displayed them was removed — the values feed the session record. */
   const [starRatings, setStarRatings] = useState({});
 
   // ── OT scoring ─────────────────────────────────────────────────
@@ -580,6 +588,9 @@ export default function TraceTypeGame() {
      triggers a re-render. It is turned into scores once, at the end. */
   const otRef = useRef(makeOTAccumulator());
   const [otResults, setOtResults] = useState(null);
+  /* Read once when the round ends, alongside the OT score, so the report is
+     not calling into the measurement buffer on every render. */
+  const [graspResult, setGraspResult] = useState(null);
 
   // ── Current letter ──────────────────────────────────────────────────────
   const currentLetter = letters[currentLetterIdx];
@@ -687,8 +698,6 @@ export default function TraceTypeGame() {
   // ══════════════════════════════════════════════════════════════════════════
   // TRACE Phase Logic
   // ══════════════════════════════════════════════════════════════════════════
-
-
 
   // ══════════════════════════════════════════════════════════════════════════
   // FIND Phase Logic
@@ -802,6 +811,7 @@ export default function TraceTypeGame() {
       gHandTargetRef.current.snap = true;
       clearCameraInteraction();
     }
+    graspRef.current.push(landmarks, trackingTimestamp, null);
     const p = handFilterRef.current.push(landmarks, trackingTimestamp);
     if (!p || p.accepted === false) {
       sample.valid = false;
@@ -1016,6 +1026,7 @@ export default function TraceTypeGame() {
           // All words done
           if (soundEnabled) soundManager.playCelebration();
           setOtResults(computeOTResults());
+              setGraspResult(graspRef.current.result());
           setGamePhase('results');
         }
       }, 2200);
@@ -1574,7 +1585,13 @@ export default function TraceTypeGame() {
   );
 
   // ── Letter Success Overlay ──
-  const renderLetterSuccess = () => (
+  const renderLetterSuccess = () => {
+    /* At this point currentLetterIdx has NOT yet advanced (that happens after
+       the 2.2s overlay), so the word is finished exactly when the letter just
+       completed was its last one. On that beat we celebrate the whole WORD the
+       child spelled, not the single last letter. */
+    const wordComplete = currentLetterIdx >= letters.length - 1;
+    return (
     <AnimatePresence>
       {gamePhase === 'letterSuccess' && (
         <motion.div
@@ -1585,12 +1602,12 @@ export default function TraceTypeGame() {
           transition={{ duration: 0.3 }}
         >
           <motion.div
-            className="tt-letter-success-letter"
+            className={`tt-letter-success-letter${wordComplete ? ' tt-letter-success-word' : ''}`}
             initial={{ scale: 0, rotate: -30 }}
             animate={{ scale: 1, rotate: 0 }}
             transition={{ type: 'spring', stiffness: 300, damping: 15, delay: 0.1 }}
           >
-            {currentLetter}
+            {wordComplete ? `${word} ${emojiForWord(word)}` : currentLetter}
           </motion.div>
           <motion.div
             className="tt-letter-success-msg"
@@ -1598,7 +1615,7 @@ export default function TraceTypeGame() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
           >
-            {encourageMsg}
+            {wordComplete ? `You spelled ${word}!` : encourageMsg}
           </motion.div>
           <motion.div
             className="tt-letter-success-stars"
@@ -1619,7 +1636,8 @@ export default function TraceTypeGame() {
         </motion.div>
       )}
     </AnimatePresence>
-  );
+    );
+  };
 
   // ── Results Overlay ──
   const renderResults = () => {
@@ -1630,209 +1648,77 @@ export default function TraceTypeGame() {
     return (
       <AnimatePresence>
         {gamePhase === 'results' && (
-          <div
-            className="tt-results-overlay"
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 110,
-              background: 'var(--tt-bg)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              overflowY: 'auto',
-              padding: '40px 24px',
-            }}
-          >
+          <div className="tt-results-overlay tt-overlay-report">
             <Confetti show={true} />
-            <motion.div
-              className="tt-results-card"
-              initial={{ opacity: 0, scale: 0.8, y: 30 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ type: 'spring', stiffness: 200, damping: 20 }}
-            >
-              <div className="tt-results-emoji">
-                {starRatio >= 0.8 ? '🏆' : starRatio >= 0.5 ? '🌟' : '👏'}
-              </div>
-              <h2 className="tt-results-title">
-                {starRatio >= 0.8 ? 'Outstanding!' : starRatio >= 0.5 ? 'Great Job!' : 'Good Effort!'}
-              </h2>
-              <p className="tt-results-subtitle">
-                You completed {sessionStats.lettersCompleted} letter{sessionStats.lettersCompleted !== 1 ? 's' : ''} in Level {level}!
-              </p>
-
-              <div className="tt-results-stars">
-                {[1, 2, 3].map((i) => (
-                  <motion.span
-                    key={i}
-                    initial={{ opacity: 0, scale: 0, rotate: -180 }}
-                    animate={{ opacity: 1, scale: 1, rotate: 0 }}
-                    transition={{ delay: 0.3 + i * 0.2, type: 'spring', stiffness: 300 }}
-                  >
-                    {i <= Math.round(starRatio * 3) ? '⭐' : '☆'}
-                  </motion.span>
-                ))}
-              </div>
-
-              {/* A sub-score of `null` means NOT MEASURED — the child did not do
-                  enough for it to mean anything. It is shown as "—" with an
-                  empty bar, never as 0% (which reads as a failure) and never as
-                  100% (which is what it used to do). If nothing at all was
-                  measured, the whole OT block is replaced by a plain note: a
-                  report a therapist reads must not imply a result it does not
-                  have. */}
-              {otResults && otResults.composite != null && (
-                <div className="tt-ot-block">
-                  <div className="tt-perf-ring" style={{ '--pct': otResults.composite }}>
-                    <div className="tt-perf-inner">
-                      <span className="tt-perf-val">{otResults.composite}</span>
-                      <span className="tt-perf-lbl">OT Score</span>
-                    </div>
-                  </div>
-                  <div className="tt-ot-bars">
-                    {[
-                      ['Trace accuracy', otResults.traceAccuracy, '30%'],
-                      ['Smoothness',     otResults.smoothness,     '20%'],
-                      ['Letter search',  otResults.findEfficiency, '20%'],
-                      ['Typing accuracy',otResults.typingAccuracy, '20%'],
-                      ['Speed',          otResults.speedScore,     '10%'],
-                    ].map(([label, value, weight]) => (
-                      <div className="tt-ot-bar" key={label}>
-                        <div className="tt-ot-bar-head">
-                          <span>{label} <em>{weight}</em></span>
-                          <strong>{value == null ? '—' : `${value}%`}</strong>
-                        </div>
-                        <div className="tt-ot-bar-track">
-                          <motion.div
-                            className="tt-ot-bar-fill"
-                            initial={{ width: 0 }}
-                            animate={{ width: `${value == null ? 0 : value}%` }}
-                            transition={{ duration: 0.7, delay: 0.3 }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {otResults && otResults.composite == null && (
-                <div className="tt-ot-none">
-                  No OT score for this session — the round ended before any
-                  letter was traced, so there is nothing to measure.
-                </div>
-              )}
-
-              <div className="tt-results-stats">
-                <div className="tt-results-stat">
-                  <div className="tt-results-stat-icon">🏆</div>
-                  <div className="tt-results-stat-value">{score}</div>
-                  <div className="tt-results-stat-label">Score</div>
-                </div>
-                <div className="tt-results-stat">
-                  <div className="tt-results-stat-icon">⭐</div>
-                  <div className="tt-results-stat-value">{totalStars}/{maxStars}</div>
-                  <div className="tt-results-stat-label">Stars</div>
-                </div>
-                <div className="tt-results-stat">
-                  <div className="tt-results-stat-icon">⏱️</div>
-                  <div className="tt-results-stat-value">{formatTime(elapsedTime)}</div>
-                  <div className="tt-results-stat-label">Time</div>
-                </div>
-                <div className="tt-results-stat">
-                  <div className="tt-results-stat-icon">✅</div>
-                  <div className="tt-results-stat-value">{sessionStats.lettersCompleted}/{letters.length}</div>
-                  <div className="tt-results-stat-label">Letters</div>
-                </div>
-                <div className="tt-results-stat">
-                  <div className="tt-results-stat-icon">🎯</div>
-                  <div className="tt-results-stat-value">
-                    {sessionStats.tracingAccuracies.length > 0
-                      ? Math.round(sessionStats.tracingAccuracies.reduce((a, b) => a + b, 0) / sessionStats.tracingAccuracies.length)
-                      : 0}%
-                  </div>
-                  <div className="tt-results-stat-label">Accuracy</div>
-                </div>
-                <div className="tt-results-stat">
-                  <div className="tt-results-stat-icon">📝</div>
-                  <div className="tt-results-stat-value">Level {level}</div>
-                  <div className="tt-results-stat-label">Difficulty</div>
-                </div>
-                {otResults && (
-                  <>
-                    <div className="tt-results-stat">
-                      <div className="tt-results-stat-icon">〰️</div>
-                      <div className="tt-results-stat-value">{otResults.meanDeviation}px</div>
-                      <div className="tt-results-stat-label">Avg. deviation</div>
-                    </div>
-                    <div className="tt-results-stat">
-                      <div className="tt-results-stat-icon">❌</div>
-                      <div className="tt-results-stat-value">{otResults.wrongKeys}</div>
-                      <div className="tt-results-stat-label">Wrong keys</div>
-                    </div>
-                    <div className="tt-results-stat">
-                      <div className="tt-results-stat-icon">⚡</div>
-                      <div className="tt-results-stat-value">
-                        {otResults.reactionMs == null
-                          ? '—'
-                          : `${(otResults.reactionMs / 1000).toFixed(2)}s`}
-                      </div>
-                      <div className="tt-results-stat-label">Reaction time</div>
-                    </div>
-                    <div className="tt-results-stat">
-                      <div className="tt-results-stat-icon">⏸️</div>
-                      <div className="tt-results-stat-value">
-                        {otResults.pauses} · {(otResults.pauseMs / 1000).toFixed(0)}s
-                      </div>
-                      <div className="tt-results-stat-label">Pauses</div>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div className="tt-results-actions">
-                <motion.button
-                  className="tt-results-btn primary"
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => {
-                    setGamePhase(inputMethod === 'touch' ? 'playing' : 'waiting');
-                    setCountdown(0);
-                    setCurrentLetterIdx(0);
-                    setStep('trace');
-                    setScore(0);
-                    setElapsedTime(0);
-                    setReachedWaypoints([]);
-                    setTraceProgress(0);
-                    setTypedCount(0);
-                    setKeyStates({});
-                    handTargetRef.current.on = 0;
-                    setStarRatings({});
-                    setSessionStats({
-                      totalScore: 0, lettersCompleted: 0, totalStars: 0,
-                      tracingAccuracies: [], findTimes: [], typingAccuracies: [],
-                    });
-                    setCurrentSessionId(null);
-                    setSessionSaved(false);
-                    otRef.current = makeOTAccumulator();
-                    setOtResults(null);
-                  }}
-                >
-                  <RotateCcw size={18} />
-                  Play Again
-                </motion.button>
-                <motion.button
-                  className="tt-results-btn secondary"
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => navigate('/play')}
-                >
-                  <Home size={18} />
-                  Back to Games
-                </motion.button>
-              </div>
-            </motion.div>
+            {/* Shared platform report — see components/game/GameResults.jsx.
+                Trace → Find → Type keeps its own five-part OT score; what it
+                shares with the other games is the shape and the reflex framing. */}
+            <GameResults
+              gameId="trace-type"
+              reflexMeasurements={graspResult && graspResult.measured
+                ? { 'Palmar Grasp': { reflex_key: 'Palmar Grasp', reflex_name: 'Palmar Grasp Reflex', ...graspResult } }
+                : null}
+              emoji={starRatio >= 0.8 ? '🏆' : starRatio >= 0.5 ? '🌟' : '👏'}
+              title={starRatio >= 0.8 ? 'Outstanding!' : starRatio >= 0.5 ? 'Great job!' : 'Good effort!'}
+              subtitle={`You completed ${sessionStats.lettersCompleted} letter${
+                sessionStats.lettersCompleted !== 1 ? 's' : ''} in Level ${level}`}
+              stars={{ earned: Math.round(starRatio * 3), total: 3 }}
+              headline={{ value: otResults?.composite ?? null, caption: 'OT Score' }}
+              breakdown={[
+                { label: 'Trace accuracy',  value: otResults?.traceAccuracy ?? null,  weight: '30%' },
+                { label: 'Smoothness',      value: otResults?.smoothness ?? null,     weight: '20%' },
+                { label: 'Letter search',   value: otResults?.findEfficiency ?? null, weight: '20%' },
+                { label: 'Typing accuracy', value: otResults?.typingAccuracy ?? null, weight: '20%' },
+                { label: 'Speed',           value: otResults?.speedScore ?? null,     weight: '10%' },
+              ]}
+              metrics={[
+                { icon: '🏆', label: 'Score', value: score },
+                { icon: '⭐', label: 'Stars', value: `${totalStars}/${maxStars}` },
+                { icon: '⏱️', label: 'Time', value: formatTime(elapsedTime) },
+                { icon: '✅', label: 'Letters', value: `${sessionStats.lettersCompleted}/${letters.length}` },
+                { icon: '🎯', label: 'Accuracy', value: `${sessionStats.tracingAccuracies.length > 0
+                    ? Math.round(sessionStats.tracingAccuracies.reduce((a, b) => a + b, 0) / sessionStats.tracingAccuracies.length)
+                    : 0}%` },
+                /* `otResults` existing is not the same as the measurement
+                   existing: with no letter traced, meanDeviation is null and
+                   this printed the string "nullpx". Guard the VALUE, like the
+                   reaction tile below already does. */
+                { icon: '〰️', label: 'Avg. deviation',
+                  value: otResults?.meanDeviation == null ? '—' : `${otResults.meanDeviation}px` },
+                { icon: '❌', label: 'Wrong keys', value: otResults?.wrongKeys ?? '—' },
+                { icon: '⚡', label: 'Reaction', value: otResults?.reactionMs == null ? '—' : `${(otResults.reactionMs / 1000).toFixed(2)}s` },
+                { icon: '⏸️', label: 'Pauses', value: otResults ? `${otResults.pauses} · ${(otResults.pauseMs / 1000).toFixed(0)}s` : '—' },
+              ]}
+              notMeasuredReason={inputMethod === 'camera'
+                ? undefined
+                : 'This round was played by touch, so the camera never ran.'}
+              onPlayAgain={() => {
+                setGamePhase(inputMethod === 'touch' ? 'playing' : 'waiting');
+                setCountdown(0);
+                setCurrentLetterIdx(0);
+                setStep('trace');
+                setScore(0);
+                setElapsedTime(0);
+                setReachedWaypoints([]);
+                setTraceProgress(0);
+                setTypedCount(0);
+                setKeyStates({});
+                handTargetRef.current.on = 0;
+                setStarRatings({});
+                setSessionStats({
+                  totalScore: 0, lettersCompleted: 0, totalStars: 0,
+                  tracingAccuracies: [], findTimes: [], typingAccuracies: [],
+                });
+                setCurrentSessionId(null);
+                setSessionSaved(false);
+                otRef.current = makeOTAccumulator();
+                setOtResults(null);
+                setGraspResult(null);
+                graspRef.current.reset();
+              }}
+              onExit={() => navigate('/play')}
+              exitLabel="Back to games"
+            />
           </div>
         )}
       </AnimatePresence>
@@ -1844,6 +1730,20 @@ export default function TraceTypeGame() {
   // ══════════════════════════════════════════════════════════════════════════
   return (
     <div className={`tt-page ${isLightMode ? 'tt-light-mode' : ''}`}>
+      {/* Touch-mode upper-body observation. `inputMethod` is null until the
+          child picks a mode, so nothing here can run before that choice — and
+          then only after the consent prompt is answered with a yes. The webcam
+          is released the moment the round ends. See TouchModePose. */}
+      <TouchModePose
+        gameId="trace-type"
+        active={inputMethod === 'touch'
+          && ['countdown', 'waiting', 'playing', 'letterSuccess'].includes(gamePhase)}
+        finished={gamePhase === 'results'}
+        sessionId={currentSessionId}
+        childId={profile?.learner_id || user?.id || null}
+        learnerName={profile?.first_name}
+      />
+
       {/* ── Screens & Overlays ── */}
       <AnimatePresence>
         {gamePhase === 'rules' && (
@@ -1941,6 +1841,7 @@ export default function TraceTypeGame() {
             onConfirm={() => {
               setIsPaused(false);
               setOtResults(computeOTResults());
+              setGraspResult(graspRef.current.result());
               setGamePhase('results');
             }}
           />
@@ -2053,6 +1954,10 @@ export default function TraceTypeGame() {
               </button>
             </div>
             
+            {/* Sized by the space that is actually left, not by a guess at it
+                — see the .tt-trace-fit note in TraceTypeGame.css. The ref stays
+                on the square, so pointer mapping is unchanged. */}
+            <div className="tt-trace-fit">
             <div className="tt-trace-area" ref={traceAreaRef}>
               {/* The glyph occupies x 50-250, y 40-260 of the old "0 0 300 300"
                   box, so roughly a seventh of every edge was blank. Tightening
@@ -2207,6 +2112,7 @@ export default function TraceTypeGame() {
                 <video ref={videoRef} playsInline autoPlay muted />
                 <canvas ref={canvasRef} />
               </div>
+            </div>
             </div>
             <div className={`tt-trace-feedback ${traceProgress > 0 ? 'on-path' : ''}`} style={{ textCombineUpright: 'none' }}>
               {traceProgress > 0 ? `${Math.round(traceProgress * 100)}% complete — follow the arrow!` : isTracking ? 'Point your index finger at the glowing spot' : 'Initializing camera...'}
@@ -2461,33 +2367,12 @@ export default function TraceTypeGame() {
         </g>
       </svg>
 
-      {/* ── Alphabet Progress Bar ─────────────────────────────────── */}
-      <div className="tt-alphabet-bar">
-        <button
-          className="tt-alphabet-back-btn"
-          onClick={() => navigate('/play/trace-type-difficulty')}
-          title="Back to levels"
-        >
-          <ArrowLeft size={16} />
-        </button>
-        {letters.map((letter, i) => {
-          const status = i < currentLetterIdx ? 'completed' :
-                         i === currentLetterIdx ? 'current' : 'pending';
-          const stars = starRatings[letter] || 0;
-          return (
-            <div key={letter} className={`tt-letter-pill ${status}`}>
-              <div className="tt-letter-pill-char">{letter}</div>
-              <div className="tt-letter-pill-stars">
-                {[1, 2, 3].map((s) => (
-                  <span key={s} className={s <= stars ? 'star-earned' : 'star-empty'}>
-                    ★
-                  </span>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {/* The bottom "alphabet progress" bar was removed on request. It carried
+          nothing unique: leaving the game is in the header (the exit icon),
+          per-letter progress is in the sidebar ("Letters Completed") and the
+          word banner up top, and its per-letter stars were always empty because
+          `setStarRatings` is never called. Removing it also returns ~80px of
+          height to the page, which is where the keyboard needed it. */}
     </div>
   );
 }

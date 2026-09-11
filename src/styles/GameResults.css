@@ -1,0 +1,628 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   GameResults — the platform's score page
+   ---------------------------------------------------------------------------
+   One stylesheet for every game's report. Three rules run through it:
+
+   1. THE PAGE SCROLLS, THE CARD DOES NOT.
+      A report is a document. Games previously capped the card at the viewport
+      and gave it its own overflow, which put "Play again" behind a scroll
+      INSIDE a card on a phone — a scroll container a child has to discover in
+      a page that itself does not move. Here the overlay scrolls and the card is
+      whatever height its content needs.
+
+   2. SIZES COME FROM THE VIEWPORT, NOT FROM BREAKPOINT TABLES.
+      Type and spacing are clamped, and the two grids (metric tiles, reflex
+      cards) are `auto-fit` — they choose their own column count from the width
+      available, so there is no breakpoint at which the layout is wrong.
+
+   3. COLOUR CARRIES MEANING ONCE.
+      `attention` / `watch` / `good` are defined here and used for every status
+      dot, bar and border. Nothing else in the report is coloured for decoration,
+      so a colour always means the same thing.
+
+   The palette follows the platform tokens in global.css — teal primary, orange
+   accent, deep teal-navy ground — and inverts cleanly for the games that offer
+   a light mode via `.tt-light-mode` or `.gr-light`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.gr-root {
+  --gr-bg:          #0F1E22;
+  --gr-surface:     #14262B;
+  --gr-surface-2:   rgba(255, 255, 255, 0.035);
+  --gr-hairline:    rgba(255, 255, 255, 0.09);
+  --gr-text:        #C8E8ED;
+  --gr-text-dim:    #7BA3AB;
+  --gr-text-bright: #FFFFFF;
+  --gr-primary:     #1A8FA0;
+  --gr-accent:      #E8841A;
+  --gr-good:        #10B981;
+  --gr-watch:       #F59E0B;
+  --gr-attention:   #EF4444;
+  --gr-shadow:      0 24px 48px -24px rgba(0, 0, 0, 0.7);
+
+  --gr-gap:    clamp(14px, 2.4vh, 26px);
+  --gr-pad:    clamp(16px, 2.6vw, 34px);
+  --gr-radius: clamp(16px, 2vw, 24px);
+
+  box-sizing: border-box;
+  min-height: 100%;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: clamp(12px, 2.5vh, 40px) clamp(12px, 3vw, 28px);
+  background: var(--gr-bg);
+  color: var(--gr-text);
+  font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.gr-root *, .gr-root *::before, .gr-root *::after { box-sizing: border-box; }
+
+/* Light mode: driven by the host game's own toggle, so the report matches the
+   screen the child just came from rather than flipping theme at the results. */
+.tt-light-mode .gr-root,
+.gr-root.gr-light {
+  --gr-bg:          #EEF6F8;
+  --gr-surface:     #FFFFFF;
+  --gr-surface-2:   rgba(15, 30, 34, 0.035);
+  --gr-hairline:    rgba(15, 30, 34, 0.10);
+  --gr-text:        #334155;
+  --gr-text-dim:    #64748B;
+  --gr-text-bright: #0F1E22;
+  --gr-primary:     #0D5E6B;
+  --gr-shadow:      0 18px 40px -24px rgba(15, 30, 34, 0.35);
+}
+
+.gr-card {
+  width: min(100%, 980px);
+  background: var(--gr-surface);
+  border: 1px solid var(--gr-hairline);
+  border-radius: var(--gr-radius);
+  box-shadow: var(--gr-shadow);
+  padding: var(--gr-pad);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gr-gap);
+  /* Centres a short report without pinning a tall one to the top. */
+  margin: auto;
+}
+
+/* ── 1. Header ───────────────────────────────────────────────────────────── */
+.gr-head {
+  display: flex;
+  align-items: center;
+  gap: clamp(12px, 2vw, 20px);
+  flex-wrap: wrap;
+}
+
+.gr-head-emoji { font-size: clamp(2rem, 5vh, 3rem); line-height: 1; flex: none; }
+.gr-head-text  { flex: 1 1 220px; min-width: 0; }
+
+.gr-title {
+  margin: 0;
+  font-size: clamp(1.25rem, 3.4vh, 1.9rem);
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: var(--gr-text-bright);
+  line-height: 1.15;
+}
+
+.gr-subtitle {
+  margin: 4px 0 0;
+  font-size: clamp(0.85rem, 1.9vh, 1rem);
+  color: var(--gr-text-dim);
+  line-height: 1.4;
+}
+
+.gr-game-name {
+  margin: 6px 0 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gr-primary);
+}
+
+.gr-stars { display: flex; gap: 6px; flex: none; font-size: clamp(1.4rem, 3.6vh, 2.1rem); line-height: 1; }
+.gr-star.on  { color: var(--gr-accent); text-shadow: 0 0 18px rgba(232, 132, 26, 0.45); }
+.gr-star.off { color: var(--gr-text-dim); opacity: 0.4; }
+
+/* ── Flags ───────────────────────────────────────────────────────────────── */
+.gr-flag {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.10);
+  color: var(--gr-text);
+  font-size: clamp(0.78rem, 1.7vh, 0.88rem);
+  line-height: 1.45;
+}
+.gr-flag svg { flex: none; margin-top: 2px; color: var(--gr-watch); }
+
+.gr-flag-quiet {
+  border-color: var(--gr-hairline);
+  background: var(--gr-surface-2);
+}
+.gr-flag-quiet svg { color: var(--gr-text-dim); }
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+.gr-section {
+  padding-top: var(--gr-gap);
+  border-top: 1px solid var(--gr-hairline);
+}
+.gr-section:first-of-type { padding-top: 0; border-top: 0; }
+
+.gr-section-title {
+  margin: 0 0 4px;
+  font-size: clamp(0.72rem, 1.6vh, 0.82rem);
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--gr-text-dim);
+}
+
+.gr-section-blurb {
+  margin: 0 0 14px;
+  font-size: clamp(0.8rem, 1.8vh, 0.92rem);
+  line-height: 1.5;
+  color: var(--gr-text-dim);
+  max-width: 62ch;
+}
+
+/* ── 2. Performance: ring + weighted bars ────────────────────────────────── */
+.gr-performance {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 3vw, 34px);
+  flex-wrap: wrap;
+}
+
+.gr-performance-bars { flex: 1 1 clamp(240px, 50%, 520px); min-width: 0; }
+
+.gr-ring {
+  --pct: 0;
+  flex: none;
+  width: clamp(104px, 17vh, 148px);
+  height: clamp(104px, 17vh, 148px);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: conic-gradient(
+    var(--gr-accent) calc(var(--pct) * 1%),
+    var(--gr-surface-2) 0
+  );
+}
+.gr-ring.is-empty { background: var(--gr-surface-2); }
+
+.gr-ring-inner {
+  width: 78%; height: 78%;
+  border-radius: 50%;
+  background: var(--gr-surface);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.gr-ring-value {
+  font-size: clamp(1.5rem, 4vh, 2.2rem);
+  font-weight: 900;
+  color: var(--gr-text-bright);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.gr-ring-caption {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gr-text-dim);
+  text-align: center;
+  padding: 0 6px;
+}
+
+.gr-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: clamp(7px, 1.3vh, 12px); }
+
+.gr-bar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 5px;
+  font-size: clamp(0.75rem, 1.65vh, 0.87rem);
+}
+
+.gr-bar-label { color: var(--gr-text); min-width: 0; overflow-wrap: anywhere; }
+.gr-bar-weight { color: var(--gr-text-dim); font-style: normal; font-size: 0.85em; margin-left: 5px; }
+.gr-bar-value { color: var(--gr-text-bright); font-weight: 800; font-variant-numeric: tabular-nums; flex: none; }
+/* An unmeasured component reads as absent, not as a failure. */
+.gr-bar-value.is-empty { color: var(--gr-text-dim); font-weight: 600; }
+
+.gr-bar-track { height: 7px; border-radius: 99px; background: var(--gr-surface-2); overflow: hidden; }
+.gr-bar-fill  { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--gr-primary), var(--gr-accent)); }
+
+/* ── 3. Session detail tiles ─────────────────────────────────────────────── */
+.gr-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(clamp(92px, 26vw, 138px), 1fr));
+  gap: clamp(7px, 1.2vh, 12px);
+}
+
+.gr-tile {
+  background: var(--gr-surface-2);
+  border: 1px solid var(--gr-hairline);
+  border-radius: clamp(11px, 1.5vw, 15px);
+  padding: clamp(9px, 1.5vh, 14px) clamp(6px, 1vw, 12px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  text-align: center;
+}
+
+.gr-tile-icon  { font-size: clamp(0.95rem, 2.1vh, 1.3rem); line-height: 1; }
+.gr-tile-value {
+  font-size: clamp(0.92rem, 2.1vh, 1.25rem);
+  font-weight: 900;
+  color: var(--gr-text-bright);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.gr-tile-label {
+  font-size: clamp(0.57rem, 1.25vh, 0.7rem);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--gr-text-dim);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+/* ── 4. Reflex cards ─────────────────────────────────────────────────────── */
+.gr-reflex-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* Two columns where there is room, one where there is not. The cards carry a
+     paragraph each, so they need a readable measure rather than a column count. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+  gap: clamp(9px, 1.5vh, 14px);
+}
+
+.gr-reflex {
+  background: var(--gr-surface-2);
+  border: 1px solid var(--gr-hairline);
+  border-left-width: 3px;
+  border-radius: 14px;
+  padding: clamp(11px, 1.8vh, 16px) clamp(12px, 1.6vw, 18px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The left edge carries the finding, so a therapist can scan a column of cards
+   and see where attention is needed without reading a word. */
+.gr-reflex.is-attention { border-left-color: var(--gr-attention); }
+.gr-reflex.is-watch     { border-left-color: var(--gr-watch); }
+.gr-reflex.is-good      { border-left-color: var(--gr-good); }
+.gr-reflex.is-target    { border-left-color: var(--gr-primary); }
+
+/* The chip stays on the first line and the NAME wraps inside its own column.
+   With `flex-wrap` on this row instead, a long reflex name pushed the chip onto
+   a second line for some cards and not others, so a column of cards had its
+   labels at three different heights. */
+.gr-reflex-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.gr-reflex-id  { flex: 1 1 auto; min-width: 0; }
+
+.gr-reflex-key {
+  display: block;
+  font-size: clamp(0.92rem, 2vh, 1.05rem);
+  font-weight: 800;
+  color: var(--gr-text-bright);
+  line-height: 1.2;
+}
+
+.gr-reflex-name {
+  display: block;
+  font-size: clamp(0.68rem, 1.45vh, 0.78rem);
+  color: var(--gr-text-dim);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.gr-tier {
+  flex: none;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.gr-tier-primary   { background: rgba(26, 143, 160, 0.20); color: #6FD3E2; }
+.gr-tier-secondary { background: var(--gr-surface-2); color: var(--gr-text-dim); border: 1px solid var(--gr-hairline); }
+
+.tt-light-mode .gr-tier-primary,
+.gr-light .gr-tier-primary { background: rgba(13, 94, 107, 0.12); color: var(--gr-primary); }
+
+.gr-reflex-why {
+  margin: 0;
+  font-size: clamp(0.76rem, 1.65vh, 0.86rem);
+  line-height: 1.5;
+  color: var(--gr-text);
+  opacity: 0.9;
+}
+
+.gr-reflex-measure { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+
+.gr-reflex-status { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+
+.gr-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.gr-dot-attention { background: var(--gr-attention); }
+.gr-dot-watch     { background: var(--gr-watch); }
+.gr-dot-good      { background: var(--gr-good); }
+.gr-dot-none      { background: var(--gr-text-dim); }
+
+.gr-reflex-status-text { font-size: clamp(0.78rem, 1.7vh, 0.88rem); font-weight: 800; color: var(--gr-text-bright); }
+.gr-reflex-status-hint { font-size: clamp(0.68rem, 1.4vh, 0.76rem); color: var(--gr-text-dim); }
+
+.gr-reflex-track { height: 5px; border-radius: 99px; background: var(--gr-surface-2); overflow: hidden; }
+.gr-reflex-fill  { height: 100%; border-radius: 99px; }
+.gr-reflex-fill.tone-attention { background: var(--gr-attention); }
+.gr-reflex-fill.tone-watch     { background: var(--gr-watch); }
+.gr-reflex-fill.tone-good      { background: var(--gr-good); }
+.gr-reflex-fill.tone-none      { background: var(--gr-text-dim); }
+
+/* A target with no measurement. Deliberately plain — no bar, no number, nothing
+   that could be read as a score of zero. */
+.gr-reflex-note {
+  font-size: clamp(0.7rem, 1.5vh, 0.79rem);
+  color: var(--gr-text-dim);
+  font-style: italic;
+  line-height: 1.45;
+}
+
+/* ── Disclaimer & actions ────────────────────────────────────────────────── */
+.gr-disclaimer {
+  margin: 0;
+  padding-top: var(--gr-gap);
+  border-top: 1px solid var(--gr-hairline);
+  font-size: clamp(0.68rem, 1.4vh, 0.76rem);
+  line-height: 1.5;
+  color: var(--gr-text-dim);
+  text-align: center;
+}
+
+.gr-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+.gr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: clamp(10px, 1.7vh, 14px) clamp(16px, 2vw, 26px);
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: clamp(0.82rem, 1.8vh, 0.95rem);
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.15s ease, background 0.15s ease;
+}
+.gr-btn:hover  { transform: translateY(-1px); filter: brightness(1.08); }
+.gr-btn:active { transform: translateY(0); }
+.gr-btn:focus-visible { outline: 2px solid var(--gr-accent); outline-offset: 2px; }
+
+.gr-btn-primary {
+  background: linear-gradient(135deg, var(--gr-primary), #2AA9BC);
+  color: #FFFFFF;
+  box-shadow: 0 8px 22px -10px rgba(26, 143, 160, 0.9);
+}
+
+.gr-btn-secondary {
+  background: var(--gr-surface-2);
+  border-color: var(--gr-hairline);
+  color: var(--gr-text);
+}
+
+/* ── Narrow phones ───────────────────────────────────────────────────────── */
+@media (max-width: 430px) {
+  .gr-actions { flex-direction: column; align-items: stretch; }
+  .gr-btn { width: 100%; }
+  .gr-head { gap: 10px; }
+  .gr-stars { font-size: 1.35rem; }
+  .gr-tiles { grid-template-columns: repeat(auto-fit, minmax(86px, 1fr)); }
+  .gr-performance { gap: 14px; }
+}
+
+/* Landscape phones: the ring is decoration next to the numbers it summarises. */
+@media (max-height: 460px) and (orientation: landscape) {
+  .gr-head-emoji { display: none; }
+  .gr-ring { width: 92px; height: 92px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gr-btn { transition: none; }
+  .gr-btn:hover { transform: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LetterQuest additions
+   Blocks that only the LetterQuest report carries — the AI narrative and the
+   session feedback picker — styled here so they inherit the same tokens as the
+   rest of the report rather than carrying their own colours.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.sr-narrative {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: clamp(12px, 1.9vh, 17px) clamp(13px, 1.7vw, 19px);
+  border: 1px solid var(--gr-hairline);
+  border-radius: 14px;
+  background: var(--gr-surface-2);
+}
+
+.sr-narrative-icon { font-size: 1.25rem; line-height: 1.3; flex: none; }
+
+.sr-narrative-text {
+  margin: 0;
+  font-size: clamp(0.8rem, 1.75vh, 0.92rem);
+  line-height: 1.55;
+  color: var(--gr-text);
+}
+
+.sr-feedback {
+  display: grid;
+  /* Five options that become three, then two, without ever being squeezed
+     narrower than the emoji plus its word. */
+  grid-template-columns: repeat(auto-fit, minmax(clamp(76px, 18vw, 104px), 1fr));
+  gap: clamp(7px, 1.2vh, 11px);
+}
+
+.sr-feedback-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: clamp(9px, 1.5vh, 14px) 8px;
+  border-radius: 14px;
+  border: 1px solid var(--gr-hairline);
+  background: var(--gr-surface-2);
+  color: var(--gr-text);
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+}
+
+.sr-feedback-btn:hover {
+  transform: translateY(-2px);
+  border-color: var(--gr-primary);
+  background: rgba(26, 143, 160, 0.12);
+}
+
+.sr-feedback-btn:focus-visible { outline: 2px solid var(--gr-accent); outline-offset: 2px; }
+
+.sr-feedback-emoji { font-size: clamp(1.5rem, 3.4vh, 2.1rem); line-height: 1; }
+
+.sr-feedback-label {
+  font-size: clamp(0.62rem, 1.35vh, 0.74rem);
+  font-weight: 700;
+  color: var(--gr-text-dim);
+  text-align: center;
+  line-height: 1.2;
+}
+
+.sr-extra-actions { display: flex; justify-content: center; }
+
+@media (max-width: 430px) {
+  .sr-extra-actions .gr-btn { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sr-feedback-btn { transition: none; }
+  .sr-feedback-btn:hover { transform: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WIDE SCREENS: TWO COLUMNS, SO THE REPORT FITS ONE SCREEN
+   ───────────────────────────────────────────────────────────────────────────
+   The report is a single 980px column. On the 1900px-wide laptop it is
+   normally read on, that leaves roughly 450px of dead space down each side
+   while the content runs several hundred pixels past the bottom of the window
+   — the reader scrolls past the fold to reach the buttons, through a screen
+   that is two-thirds empty horizontally.
+
+   So the fix is not to shrink the type until it fits. It is to stop laying a
+   wide screen out as a narrow one. Above 1100px the card becomes a two-column
+   grid: the score and the session tiles on the left, the reflex cards on the
+   right, with the header, disclaimer and actions spanning both.
+
+   `grid-column: 1 / -1` is the DEFAULT for every direct child, and only the
+   three sections that belong in a column override it. Anything a game passes
+   through `children` therefore spans the full width instead of landing in a
+   column it was never designed for.
+
+   `dense` matters: without it the reflex section would be placed in the row
+   after the session tiles, leaving the top-right quadrant empty and saving no
+   height at all.
+   ═══════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 1200px) {
+  .gr-card {
+    width: min(100%, 1380px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: clamp(20px, 2.2vw, 38px);
+    row-gap: var(--gr-gap);
+    align-content: start;
+    grid-auto-flow: row dense;
+  }
+
+  .gr-card > * { grid-column: 1 / -1; }
+  .gr-performance,
+  .gr-detail { grid-column: 1; }
+  .gr-reflexes { grid-column: 2; }
+
+  /* The tiles now have half the width, so let them use three across rather
+     than stretching to fill a column that is no longer full-page wide. */
+  .gr-detail .gr-tiles {
+    grid-template-columns: repeat(auto-fit, minmax(clamp(84px, 8vw, 112px), 1fr));
+  }
+}
+
+/* Below 1200px two columns make each one narrow enough that the performance
+   bars wrap their labels onto a second line - the section grows taller than
+   the height the second column saved. Measured: at 1366px the performance
+   block went from 361px to 450px. So the breakpoint sits where the split is
+   actually a gain, and narrower windows keep the single column and scroll.
+
+   ── The remaining height ─────────────────────────────────────────────────
+   Two columns removes the bulk of the overflow but not all of it, because the
+   total is set by the LEFT column (score + session tiles) while the right one
+   finishes higher up. These rules take the rest out of the places with the
+   most air in them - the ring, the tile padding, the gaps - and stop short of
+   shrinking the body text, which is the one thing that would make the report
+   harder to read rather than merely tighter. */
+@media (min-width: 1200px) {
+  .gr-root {
+    --gr-gap: clamp(9px, 1.3vh, 15px);
+    padding-block: clamp(8px, 1.2vh, 16px);
+  }
+  .gr-card { --gr-pad: clamp(13px, 1.5vw, 22px); }
+
+  /* The ring is the single largest block of empty pixels on the page. */
+  .gr-ring {
+    width: clamp(82px, 11.5vh, 112px);
+    height: clamp(82px, 11.5vh, 112px);
+  }
+
+  /* The header carries a lot of air for three short lines. */
+  .gr-head-emoji { font-size: clamp(1.5rem, 3.4vh, 2.2rem); }
+  .gr-btn { padding-block: clamp(7px, 1.1vh, 11px); }
+
+  /* In one wide column the ring sits beside the bars. In a half-width column
+     `flex-wrap: wrap` was dropping it ONTO ITS OWN LINE above them, which cost
+     about 100px of height - the ring's full diameter - at exactly the sizes
+     with none to spare. It stays on the line; the bars shrink instead. */
+  .gr-performance { gap: clamp(12px, 2vw, 24px); flex-wrap: nowrap; }
+  .gr-performance-bars { min-width: 0; flex: 1 1 auto; }
+  .gr-bars { gap: clamp(5px, 0.8vh, 9px); }
+  .gr-tile { padding: clamp(6px, 1vh, 10px) clamp(5px, 0.8vw, 9px); }
+  .gr-tiles { gap: clamp(6px, 0.9vh, 10px); }
+  .gr-section-title { margin-bottom: 2px; }
+  .gr-disclaimer { padding-top: calc(var(--gr-gap) * 0.7); }
+  .gr-reflex-list { gap: clamp(7px, 1vh, 11px); }
+  .gr-section-blurb { margin-bottom: 2px; }
+}

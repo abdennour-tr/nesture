@@ -29,6 +29,23 @@ export const WORD_SETS = {
 };
 
 /**
+ * A picture for every word — shown when the word is completed, so the child
+ * sees the OBJECT they just spelled rather than an abstract badge. One entry
+ * per word in WORD_SETS above; a word without an entry falls back to a
+ * celebration so a newly added word is never left without a picture.
+ */
+export const WORD_EMOJI = {
+  BUS: '🚌', CAT: '🐱', HAT: '🎩', TEN: '🔟', FIX: '🔧', LIT: '💡', VET: '🩺', EEL: '🐟',
+  MOON: '🌙', BOAT: '⛵', FISH: '🐟', DUCK: '🦆', STAR: '⭐', CAKE: '🎂', BIRD: '🐦', TREE: '🌳',
+  QUEEN: '👑', JUICE: '🧃', GRASS: '🌿', WHALE: '🐳', BRUSH: '🖌️', ZEBRA: '🦓', SNAKE: '🐍',
+};
+
+/** The object emoji for a word, or a celebration when none is mapped. */
+export function emojiForWord(word) {
+  return WORD_EMOJI[(word || '').toUpperCase()] || '🎉';
+}
+
+/**
  * Build the ordered step list for one round.
  * @returns {{word:string, steps:Array<{index:number,letter:string,phase:string}>}}
  */

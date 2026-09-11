@@ -11,7 +11,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { LogOut, Volume2, VolumeX, Clock, ArrowLeft, HelpCircle } from 'lucide-react';
+import {LogOut, Volume2, VolumeX, Clock, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import useGestureDetection, {
   LEVELS,
@@ -23,6 +23,7 @@ import GameRules from '../components/game/GameRules';
 import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
+import GameResults from '../components/game/GameResults';
 import '../styles/FingerCopyGame.css';
 /* NOTE: GameShell.css is NOT imported here on purpose. It is already pulled in
    by GameRules / EndGameControl above, and an ES module is evaluated once at
@@ -729,104 +730,37 @@ export default function FingerCopyGame() {
       <AnimatePresence>
         {gamePhase === 'results' && (
           <motion.div
-            className="fc-results-overlay"
+            className="fc-results-overlay fc-overlay-report"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
           >
-            <motion.div
-              className="fc-results-card"
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 200, damping: 18, delay: 0.2 }}
-            >
-              <div style={{ fontSize: '3rem', marginBottom: 8 }}>🏆</div>
-              <div className="fc-results-title">Session Complete!</div>
-              <div className="fc-results-subtitle">
-                Level {level} — {LEVELS[level]?.label}
-              </div>
-
-              {/* `null` = not measured: shown as "—" with an empty bar, never
-                  as 0% (reads as failure) and never as 100% (what it used to
-                  do). With nothing measured at all the block is replaced by a
-                  plain note — a report a therapist reads must not imply a
-                  result it does not have. */}
-              {otResults && otResults.composite != null && (
-                <div className="fc-ot-block">
-                  <div className="fc-perf-ring" style={{ '--pct': otResults.composite }}>
-                    <div className="fc-perf-inner">
-                      <span className="fc-perf-val">{otResults.composite}</span>
-                      <span className="fc-perf-lbl">OT Score</span>
-                    </div>
-                  </div>
-                  <div className="fc-ot-bars">
-                    {[
-                      ['Match accuracy', otResults.matchAccuracy, '30%'],
-                      ['Hold stability', otResults.stability,     '25%'],
-                      ['Speed',          otResults.speedScore,    '25%'],
-                      ['Consistency',    otResults.consistency,   '20%'],
-                    ].map(([label, value, weight]) => (
-                      <div className="fc-ot-bar" key={label}>
-                        <div className="fc-ot-bar-head">
-                          <span>{label} <em>{weight}</em></span>
-                          <strong>{value == null ? '—' : `${value}%`}</strong>
-                        </div>
-                        <div className="fc-ot-bar-track">
-                          <motion.div
-                            className="fc-ot-bar-fill"
-                            initial={{ width: 0 }}
-                            animate={{ width: `${value == null ? 0 : value}%` }}
-                            transition={{ duration: 0.7, delay: 0.3 }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {otResults && otResults.composite == null && (
-                <div className="tt-ot-none">
-                  No OT score for this session — the round ended before any
-                  gesture was completed, so there is nothing to measure.
-                </div>
-              )}
-
-              <div className="fc-results-grid">
-                <div className="fc-result-item">
-                  <div className="fc-result-value" style={{ color: '#22D3EE' }}>
-                    {sessionStats.totalScore}
-                  </div>
-                  <div className="fc-result-label">Total Score</div>
-                </div>
-                <div className="fc-result-item">
-                  <div className="fc-result-value" style={{ color: '#10B981' }}>
-                    {avgAccuracy}%
-                  </div>
-                  <div className="fc-result-label">Avg Accuracy</div>
-                </div>
-                <div className="fc-result-item">
-                  <div className="fc-result-value" style={{ color: '#E8841A' }}>
-                    {avgResponseTime}s
-                  </div>
-                  <div className="fc-result-label">Avg Response</div>
-                </div>
-                <div className="fc-result-item">
-                  <div className="fc-result-value" style={{ color: '#A78BFA' }}>
-                    {preferredHand}
-                  </div>
-                  <div className="fc-result-label">Preferred Hand</div>
-                </div>
-              </div>
-
-              <div className="fc-results-actions">
-                <button className="fc-btn-primary" onClick={handlePlayAgain}>
-                  🔄 Play Again
-                </button>
-                <button className="fc-btn-secondary" onClick={() => navigate('/play')}>
-                  🏠 Home
-                </button>
-              </div>
-            </motion.div>
+            {/* Shared platform report — see components/game/GameResults.jsx. */}
+            <GameResults
+              gameId="finger-copy"
+              emoji="🏆"
+              title="Session complete!"
+              subtitle={`Level ${level} — ${LEVELS[level]?.label}`}
+              headline={{ value: otResults?.composite ?? null, caption: 'OT Score' }}
+              breakdown={[
+                { label: 'Shape accuracy',   value: otResults?.matchAccuracy ?? null, weight: '30%' },
+                { label: 'Hold stability',   value: otResults?.stability ?? null,     weight: '25%' },
+                { label: 'Speed',            value: otResults?.speedScore ?? null,    weight: '25%' },
+                { label: 'Consistency',      value: otResults?.consistency ?? null,   weight: '20%' },
+              ]}
+              metrics={[
+                { icon: '🏆', label: 'Total score', value: sessionStats.totalScore },
+                { icon: '🎯', label: 'Avg accuracy', value: `${avgAccuracy}%` },
+                { icon: '⚡', label: 'Avg response', value: `${avgResponseTime}s` },
+                { icon: '✋', label: 'Preferred hand', value: preferredHand },
+                { icon: '✂️', label: 'Hold breaks', value: otResults?.holdBreaks ?? '—' },
+                { icon: '🔢', label: 'Shapes scored', value: otResults?.gesturesScored ?? '—' },
+              ]}
+              notMeasuredReason={
+                'The round ended before any shape was held long enough to score.'}
+              onPlayAgain={handlePlayAgain}
+              onExit={() => navigate('/play')}
+              exitLabel="Back to games"
+            />
           </motion.div>
         )}
       </AnimatePresence>

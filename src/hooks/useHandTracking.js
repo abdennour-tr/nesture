@@ -153,7 +153,15 @@ export function detectMidlineCrossing(startX, endX) {
  *   what the child actually feels). 1 is the full graph, for games that score
  *   finger POSE rather than move a cursor.
  * @param {number} publishIntervalMs  How often the per-frame signal is mirrored
- *   into React state. See the ref/state note below.
+ *   into React state, in ms. See the ref/state note below.
+ *
+ *   DEFAULT 0 = publish every camera result, which is the behaviour every
+ *   existing caller was written against. Throttling is OPT-IN and only safe for
+ *   a game that reads the *Ref values instead — Pinch the Coin, Follow the
+ *   Ladybug, Pop the Bubble, Finger Piano and Magic Finger Copy all drive their
+ *   gameplay from the `landmarks` / `multiHandData` STATE, so throttling this
+ *   without them opting in drops them from ~30Hz to ~8Hz and the pointer in
+ *   every one of them goes to treacle.
  */
 export default function useHandTracking(
   videoRef, canvasRef, enabled = true, pauseProcessing = false, maxHands = 2,
@@ -162,7 +170,7 @@ export default function useHandTracking(
     stableSelection = false,
     singleHandLock = false,
     modelComplexity = 1,
-    publishIntervalMs = 120,
+    publishIntervalMs = 0,      // 0 = every frame; see the note above
     drawOnlyActiveHand = false,
   } = {}
 ) {

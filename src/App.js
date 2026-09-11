@@ -11,7 +11,6 @@ import LoginPage          from './pages/LoginPage';
 import SignUpPage         from './pages/SignUpPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import LearnerHome        from './pages/LearnerHome';
-import LearnerDashboard   from './pages/LearnerDashboard';
 import GamePage           from './pages/GamePage';
 import SessionResults     from './pages/SessionResults';
 import ParentDashboard    from './pages/ParentDashboard';
@@ -337,9 +336,6 @@ export default function App() {
           } />
           <Route path="/learner" element={
             <ProtectedRoute allowedRoles={['learner']}><LearnerHome /></ProtectedRoute>
-          } />
-          <Route path="/learner/dashboard" element={
-            <ProtectedRoute allowedRoles={['learner']}><LearnerDashboard /></ProtectedRoute>
           } />
           <Route path="/difficulty" element={
             <ProtectedRoute allowedRoles={['learner']}><DifficultySelection /></ProtectedRoute>

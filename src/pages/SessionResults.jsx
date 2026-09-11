@@ -1,346 +1,190 @@
+/**
+ * SessionResults.jsx — LetterQuest's score page.
+ *
+ * This is the REFERENCE implementation of the platform report. It is built on
+ * the shared <GameResults> component (components/game/GameResults.jsx), and
+ * every other game's results screen follows the same shape.
+ *
+ * LetterQuest is the only game that can feed the head- and face-based reflex
+ * detectors — it runs Face Mesh with iris, head pose and two hands — so it is
+ * the only one that passes real measurements into the reflex section. The
+ * others declare what their activity trains and measure what their sensors
+ * allow. See services/reflexProfiles.js.
+ *
+ * Two things about the data that are easy to get wrong:
+ *
+ *   `reflexEngineOutput.reflexes[key].score`  is a RETENTION score.
+ *                                             High = the pattern is still active.
+ *   `analysis.reflex_scores[i].score`         is an INTEGRATION score, already
+ *                                             inverted by toAiEngineFormat.
+ *                                             High = integrated = good.
+ *
+ * They point in opposite directions. GameResults expects retention, so the
+ * engine output is preferred and the fallback below re-inverts.
+ */
 import React from 'react';
 import { useLocation, useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Download, Home, RefreshCw } from 'lucide-react';
-import ReflexScoreCard from '../components/shared/ReflexScoreCard';
-import api from '../services/api';
 import toast from 'react-hot-toast';
+import GameResults from '../components/game/GameResults';
+import { useAuthStore } from '../store';
+import { reflexMapFromStoredRows } from '../services/reflexProfiles';
+import api from '../services/api';
+
+/* Where "Play again" sends each game that finishes on this route. */
+const REPLAY_ROUTE = {
+  letterquest: '/play/difficulty',
+  'path-tracing': '/play/path-difficulty',
+};
+
+const FEEDBACK_OPTIONS = [
+  { rating: 1, emoji: '😫', label: 'Too hard' },
+  { rating: 2, emoji: '😕', label: 'Difficult' },
+  { rating: 3, emoji: '😐', label: 'Medium' },
+  { rating: 4, emoji: '🙂', label: 'Good' },
+  { rating: 5, emoji: '🤩', label: 'Great!' },
+];
+
+/** Seconds → m:ss, so the report reads like a clock rather than a number. */
+function formatDuration(seconds) {
+  const s = Math.max(0, Math.round(seconds || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Whatever this session carried, expressed in retention scores.
+ * The engine output is preferred; stored rows are inverted back by the shared
+ * helper so the screen and the PDF cannot disagree about direction.
+ */
+function buildReflexMap(reflexEngineOutput, analysis) {
+  if (reflexEngineOutput?.reflexes) return reflexEngineOutput.reflexes;
+  return reflexMapFromStoredRows(analysis?.reflex_scores);
+}
 
 export default function SessionResults() {
   const { sessionId } = useParams();
   const { state } = useLocation();
   const navigate = useNavigate();
-  const analysis = state?.analysis;
   const [feedbackSubmitted, setFeedbackSubmitted] = React.useState(false);
+  const profile = useAuthStore((st) => st.profile);
 
-  const downloadPDF = async () => {
-    try {
-      const res = await api.get(`/reports/${sessionId}/pdf`, { responseType: 'blob' });
-      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
-      const a = document.createElement('a');
-      a.href = url; a.download = `NestureAI_Report_${sessionId?.slice(0,8)}.pdf`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      toast.success('Report downloaded!');
-    } catch { toast.error('Could not download report'); }
-  };
+  const analysis = state?.analysis;
+  const reflexEngineOutput = state?.reflexEngineOutput;
+  /* This route is shared: LetterQuest and Path Tracing both land here, and both
+     run the full tracking stack. The sender says which game it was; anything
+     that does not say is LetterQuest, which is the only game that used this
+     route before Path Tracing joined it. */
+  const gameId = state?.gameId || 'letterquest';
 
   const submitFeedback = async (rating) => {
     try {
       await api.post(`/sessions/${sessionId}/feedback`, { rating });
       setFeedbackSubmitted(true);
       toast.success('Feedback saved successfully!');
-    } catch {
-      toast.error('Could not save feedback');
-    }
+    } catch { toast.error('Could not save feedback'); }
   };
 
   const metrics = analysis?.metrics || {};
-  const accuracyPct = Math.round((metrics.accuracy || 0) * 100);
-  const rtSec = ((metrics.avg_response_time_ms || 0) / 1000).toFixed(1);
   const isHappyPath = analysis?.scenario === 'happy_path';
-  /* How many reflexes rest on a real observation. Older sessions carry no
-     `measured` flag; there, a numeric score means it was measured. */
-  const reflexesMeasured = analysis?.reflexes_measured ?? (
-    analysis?.reflex_scores?.filter(r => r.measured !== false && typeof r.score === 'number').length ?? 0
-  );
+  const accuracyPct = Math.round((metrics.accuracy || 0) * 100);
+  const reflexMap = buildReflexMap(reflexEngineOutput, analysis);
+
+  /* Why the reflex section may be empty. A touch-mode round never opened the
+     camera and a webcam failure looks identical without this sentence. */
+  const notMeasuredReason = analysis?.camera_used === false
+    ? 'This round was played in touch mode, so the camera never ran. Play in '
+      + '“hand in air” mode to measure reflex patterns.'
+    : (analysis?.reflex_not_measured_reason
+      || 'The camera did not get a clear enough view to measure reflex patterns this round.');
+
+  /* The components behind the LPI. No weights are shown because the LPI is not
+     a weighted mean of these — claiming one would be inventing a formula. */
+  const breakdown = [
+    { label: 'Letter accuracy', value: metrics.accuracy != null ? metrics.accuracy * 100 : null },
+    {
+      label: 'Movement smoothness',
+      value: metrics.trajectory_smoothness != null ? metrics.trajectory_smoothness * 100 : null,
+    },
+    {
+      label: 'Stamina through the round',
+      value: metrics.fatigue_index != null ? (1 - metrics.fatigue_index) * 100 : null,
+    },
+  ];
+
+  const tiles = [
+    { icon: '🎯', value: `${accuracyPct}%`, label: 'Accuracy' },
+    { icon: '⚡', value: `${((metrics.avg_response_time_ms || 0) / 1000).toFixed(1)}s`, label: 'Avg response' },
+    { icon: '✅', value: metrics.perfect_grabs ?? 0, label: 'Perfect selections' },
+    { icon: '🔤', value: metrics.total_attempts ?? 0, label: 'Total attempts' },
+    { icon: '↔️', value: metrics.midline_crossings ?? 0, label: 'Midline crossings' },
+    { icon: '⏱️', value: formatDuration(metrics.duration_seconds), label: 'Time played' },
+  ];
 
   return (
-    <div style={styles.root} className="sr-root">
-      <motion.div style={styles.container} className="sr-container"
-        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-        
-        {/* Header */}
-        <div style={styles.header} className="sr-header">
-          <div style={{ ...styles.resultBadge, background: isHappyPath ? '#D1FAE5' : '#FEF3E2' }}>
-            <span style={{ fontSize: '1.5rem' }}>{isHappyPath ? '🎉' : '💪'}</span>
-            <div>
-              <div style={{ fontFamily: 'Inter, sans-serif', fontWeight: 800, fontSize: '1.1rem',
-                color: isHappyPath ? '#065F46' : '#92400E' }}>
-                {isHappyPath ? 'Great Session!' : 'Session Complete'}
-              </div>
-              <div style={{ fontSize: '0.82rem', color: '#6B7280' }}>
-                {isHappyPath ? 'You\'re improving — keep it up!' : 'Every session builds strength. Well done!'}
-              </div>
-            </div>
+    <GameResults
+      gameId={gameId}
+      emoji={isHappyPath ? '🏆' : '💪'}
+      title={isHappyPath ? 'Great session!' : 'Session complete'}
+      subtitle={isHappyPath
+        ? 'You’re improving — keep it up!'
+        : 'Every session builds strength. Well done!'}
+      headline={{ value: analysis?.lpi_score ?? null, caption: 'LPI Score' }}
+      breakdown={breakdown}
+      metrics={tiles}
+      reflexMeasurements={reflexMap}
+      notMeasuredReason={notMeasuredReason}
+      /* The download draws the model rendered above, plus the things only this
+         route carries — the AI narrative and the recommended activities — so
+         the print-out is the screen with nothing added and nothing lost. */
+      pdfExtras={{
+        learnerName: [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || undefined,
+        sessionId,
+        date: new Date().toISOString().slice(0, 10),
+        narrative: analysis?.narrative,
+        recommendations: analysis?.recommendations,
+        exercises: analysis?.exercises,
+      }}
+      /* "Play again" goes back to this game's own difficulty picker rather than
+         the games list, because this route is shared: LetterQuest and Path
+         Tracing both end here and each has its own. */
+      onPlayAgain={() => navigate(REPLAY_ROUTE[gameId] || '/play')}
+      onExit={() => navigate('/play')}
+      playAgainLabel="Play again"
+      exitLabel="Back to games"
+    >
+      {analysis?.narrative && (
+        <section className="gr-section">
+          <h2 className="gr-section-title">What we noticed</h2>
+          <div className="sr-narrative">
+            <span className="sr-narrative-icon" aria-hidden="true">🧠</span>
+            <p className="sr-narrative-text">{analysis.narrative}</p>
           </div>
+        </section>
+      )}
 
-          <div style={styles.lpiBlock}>
-            <div style={styles.lpiNum}>{analysis?.lpi_score || 0}</div>
-            <div style={styles.lpiLabel}>LPI Score</div>
-          </div>
-        </div>
-
-        {/* Key metrics */}
-        <div style={styles.metricsGrid} className="sr-metrics-grid">
-          {[
-            { label: 'Accuracy',        value: `${accuracyPct}%`,             color: '#0D5E6B' },
-            { label: 'Avg Response',    value: `${rtSec}s`,                   color: '#E8841A' },
-            { label: 'Perfect Grabs',   value: metrics.perfect_grabs || 0,    color: '#10B981' },
-            { label: 'Total Attempts',  value: metrics.total_attempts || 0,   color: '#8B5CF6' },
-          ].map((m) => (
-            <div key={m.label} style={styles.metricCard}>
-              <div style={{ ...styles.metricVal, color: m.color }}>{m.value}</div>
-              <div style={styles.metricLbl}>{m.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Narrative */}
-        {analysis?.narrative && (
-          <div style={styles.narrative}>
-            <div style={styles.narrativeIcon}>🧠</div>
-            <p style={styles.narrativeText}>{analysis.narrative}</p>
-          </div>
-        )}
-
-        {/* Reflex scores */}
-        {analysis?.reflex_scores?.length > 0 && (
-          <div>
-            <div style={styles.sectionTitle}>
-              {reflexesMeasured === 0 ? 'Reflex Patterns — Not Measured' : 'Reflex Patterns Detected'}
-            </div>
-
-            {/* Why there is nothing to show. Without this, an empty or greyed
-                grid reads as a malfunction — and a touch-mode session, where no
-                camera ever ran, looks identical to a webcam failure. */}
-            {reflexesMeasured === 0 && (
-              <div style={styles.reflexNotice}>
-                <span style={{ fontSize: '1.3rem' }}>{analysis?.camera_used === false ? '👆' : '📷'}</span>
-                <div>
-                  <div style={styles.reflexNoticeTitle}>
-                    {analysis?.camera_used === false
-                      ? 'Played in touch mode — reflexes not applicable'
-                      : 'No reflex could be observed this session'}
-                  </div>
-                  <div style={styles.reflexNoticeText}>
-                    {analysis?.reflex_not_measured_reason
-                      || 'Reflex patterns need the camera. Play in “Hand in air” mode to measure them.'}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div style={styles.reflexGrid} className="sr-reflex-grid">
-              {analysis.reflex_scores.map((r) => (
-                <ReflexScoreCard
-                  key={r.reflex}
-                  reflex={r.reflex}
-                  score={r.score}
-                  /* `label` and `measured` were never passed, so the card fell
-                     back to its own threshold — which read the integration
-                     score backwards and printed "STRONG" in red on every good
-                     result. The engine's own verdict travels with the score
-                     now. */
-                  label={r.label}
-                  measured={r.measured}
-                  confidence={r.confidence}
-                  trend="stable"
-                  compact
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-
-
-        {/* Feedback Form */}
-        {!feedbackSubmitted ? (
-          <div style={{ background: 'linear-gradient(135deg, #ffffff, #F8FAFC)', borderRadius: 20, padding: '24px', border: '1px solid #E2E8F0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, boxShadow: '0 4px 14px rgba(0,0,0,0.03)' }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '1.1rem', fontFamily: 'Inter, sans-serif', fontWeight: 800, color: '#0D5E6B' }}>How was this session?</div>
-              <div style={{ fontSize: '0.85rem', color: '#64748B', marginTop: 4 }}>Your feedback helps us adapt the next exercises.</div>
-            </div>
-            
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
-              {[
-                { rating: 1, emoji: '😫', label: 'Too hard' },
-                { rating: 2, emoji: '😕', label: 'Difficult' },
-                { rating: 3, emoji: '😐', label: 'Medium' },
-                { rating: 4, emoji: '🙂', label: 'Good' },
-                { rating: 5, emoji: '🤩', label: 'Great!' }
-              ].map(opt => (
+      <section className="gr-section">
+        <h2 className="gr-section-title">How was this session?</h2>
+        {feedbackSubmitted ? (
+          <p className="gr-section-blurb">Thanks — that helps us adapt the next exercises.</p>
+        ) : (
+          <>
+            <p className="gr-section-blurb">Your feedback helps us adapt the next exercises.</p>
+            <div className="sr-feedback">
+              {FEEDBACK_OPTIONS.map((opt) => (
                 <button
                   key={opt.rating}
+                  type="button"
+                  className="sr-feedback-btn"
                   onClick={() => submitFeedback(opt.rating)}
-                  className="feedback-btn"
-                  style={{
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
-                    background: '#fff', border: '2px solid #E2E8F0', borderRadius: 16, padding: '12px 10px',
-                    cursor: 'pointer', transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                    width: 85
-                  }}
                 >
-                  <span style={{ fontSize: '2.2rem', transition: 'transform 0.2s', display: 'block' }} className="emoji">{opt.emoji}</span>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>{opt.label}</span>
+                  <span className="sr-feedback-emoji">{opt.emoji}</span>
+                  <span className="sr-feedback-label">{opt.label}</span>
                 </button>
               ))}
             </div>
-            <style>{`
-              .feedback-btn:hover {
-                border-color: #1A8FA0 !important;
-                box-shadow: 0 8px 16px rgba(26,143,160,0.15) !important;
-                transform: translateY(-4px);
-              }
-              .feedback-btn:hover .emoji {
-                transform: scale(1.2) rotate(5deg);
-              }
-              
-              /* Responsive Rules */
-              @media (max-width: 768px) {
-                .sr-reflex-grid {
-                  grid-template-columns: repeat(2, 1fr) !important;
-                }
-              }
-              @media (max-width: 640px) {
-                .sr-root {
-                  padding: 16px 12px !important;
-                }
-                .sr-header {
-                  flex-direction: column-reverse !important;
-                  gap: 20px !important;
-                  align-items: center !important;
-                  text-align: center !important;
-                }
-                .sr-metrics-grid {
-                  grid-template-columns: repeat(2, 1fr) !important;
-                }
-                .sr-actions {
-                  flex-direction: column !important;
-                  gap: 10px !important;
-                }
-                .sr-actions button {
-                  width: 100% !important;
-                  justify-content: center !important;
-                }
-              }
-              @media (max-width: 480px) {
-                .sr-metrics-grid {
-                  grid-template-columns: 1fr !important;
-                }
-                .sr-reflex-grid {
-                  grid-template-columns: 1fr !important;
-                }
-              }
-            `}</style>
-          </div>
-        ) : (
-          <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} style={{ background: 'linear-gradient(135deg, #D1FAE5, #A7F3D0)', borderRadius: 20, padding: '20px', border: '1px solid #34D399', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, boxShadow: '0 4px 12px rgba(16,185,129,0.1)' }}>
-            <div style={{ fontSize: '2rem' }}>💖</div>
-            <div style={{ color: '#065F46', fontWeight: 800, fontSize: '1.1rem', fontFamily: 'Inter, sans-serif' }}>Thanks for your feedback!</div>
-            <div style={{ color: '#047857', fontSize: '0.85rem' }}>Your results have been saved successfully.</div>
-          </motion.div>
+          </>
         )}
+      </section>
 
-        {/* Actions */}
-        <div style={styles.actions} className="sr-actions">
-          <button onClick={downloadPDF} style={styles.downloadBtn}>
-            <Download size={16} /> Download Report
-          </button>
-          <button onClick={() => navigate('/play/game?difficulty=medium')} style={styles.playAgainBtn}>
-            <RefreshCw size={16} /> Play Again
-          </button>
-          <button onClick={() => navigate('/play')} style={styles.homeBtn}>
-            <Home size={16} /> Home
-          </button>
-        </div>
-
-      </motion.div>
-    </div>
+    </GameResults>
   );
 }
-
-const styles = {
-  root: {
-    minHeight: '100vh', background: '#EEF6F8',
-    display: 'flex', justifyContent: 'center',
-    padding: '32px 24px',
-  },
-  container: {
-    width: '100%', maxWidth: '100%',
-    display: 'flex', flexDirection: 'column', gap: 24,
-  },
-  header: {
-    background: '#fff', borderRadius: 20, padding: '24px',
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    boxShadow: '0 4px 16px rgba(13,94,107,0.1)',
-  },
-  resultBadge: {
-    display: 'flex', alignItems: 'center', gap: 14,
-    padding: '12px 20px', borderRadius: 14,
-  },
-  lpiBlock: { textAlign: 'center' },
-  lpiNum: {
-    fontFamily: 'Inter, sans-serif',
-    fontWeight: 800, fontSize: '3rem', color: '#E8841A',
-    lineHeight: 1,
-  },
-  lpiLabel: { fontSize: '0.75rem', color: '#9CA3AF', fontWeight: 600, letterSpacing: '0.05em' },
-  metricsGrid: {
-    display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12,
-  },
-  metricCard: {
-    background: '#fff', borderRadius: 14, padding: '16px 12px',
-    textAlign: 'center',
-    boxShadow: '0 2px 8px rgba(13,94,107,0.07)',
-  },
-  metricVal: {
-    fontFamily: 'Inter, sans-serif',
-    fontWeight: 800, fontSize: '1.6rem',
-  },
-  metricLbl: { fontSize: '0.72rem', color: '#9CA3AF', marginTop: 2, fontWeight: 500 },
-  narrative: {
-    background: '#fff', borderRadius: 16, padding: '20px',
-    display: 'flex', gap: 14, alignItems: 'flex-start',
-    border: '1px solid #C8E8ED',
-  },
-  narrativeIcon: { fontSize: '1.5rem', flexShrink: 0 },
-  narrativeText: { fontSize: '0.95rem', color: '#374151', lineHeight: 1.7 },
-  sectionTitle: {
-    fontFamily: 'Inter, sans-serif',
-    fontWeight: 700, fontSize: '0.9rem',
-    color: '#0D5E6B', textTransform: 'uppercase',
-    letterSpacing: '0.05em', marginBottom: 12,
-  },
-  reflexNotice: {
-    display: 'flex', gap: 12, alignItems: 'flex-start',
-    background: '#F1F5F9', border: '1px solid #E2E8F0',
-    borderRadius: 12, padding: '14px 16px', marginBottom: 14,
-  },
-  reflexNoticeTitle: {
-    fontFamily: 'Inter, sans-serif', fontWeight: 700,
-    fontSize: '0.88rem', color: '#334155',
-  },
-  reflexNoticeText: {
-    fontSize: '0.8rem', color: '#64748B', marginTop: 3, lineHeight: 1.5,
-  },
-  reflexGrid: {
-    display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10,
-  },
-
-  actions: { display: 'flex', gap: 12, justifyContent: 'center', paddingTop: 8 },
-  downloadBtn: {
-    display: 'flex', alignItems: 'center', gap: 8,
-    padding: '11px 20px',
-    background: '#0D5E6B', color: '#fff',
-    border: 'none', borderRadius: 10,
-    fontFamily: 'Inter, sans-serif', fontWeight: 600, fontSize: '0.875rem',
-    cursor: 'pointer',
-  },
-  playAgainBtn: {
-    display: 'flex', alignItems: 'center', gap: 8,
-    padding: '11px 20px',
-    background: '#E8841A', color: '#fff',
-    border: 'none', borderRadius: 10,
-    fontFamily: 'Inter, sans-serif', fontWeight: 600, fontSize: '0.875rem',
-    cursor: 'pointer',
-  },
-  homeBtn: {
-    display: 'flex', alignItems: 'center', gap: 8,
-    padding: '11px 20px',
-    background: '#EEF6F8', color: '#0D5E6B',
-    border: '1.5px solid #C8E8ED', borderRadius: 10,
-    fontFamily: 'Inter, sans-serif', fontWeight: 600, fontSize: '0.875rem',
-    cursor: 'pointer',
-  },
-};

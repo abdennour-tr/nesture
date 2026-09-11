@@ -51,7 +51,10 @@ const cardVariants = {
  */
 export default function GameLevelSelect({ game, levels, onStart, footNote }) {
   const navigate = useNavigate();
-  const help = useInstructions(game.id);
+  /* Auto-open only for games that do NOT show their own rules card when the
+     round starts, or the learner meets the same card twice in a row. The
+     "How to play" button below stays available either way. */
+  const help = useInstructions(game.id, !game.rulesInGame);
   const supportsMode = (game.modes || []).length > 1;
   const [mode, setMode] = useState((game.modes || ['camera'])[0]);
   /* One shared theme, not a private copy: switching it here or in any game's

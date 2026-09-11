@@ -35,12 +35,21 @@ const REFLEX_RULES = [
     indicators: ['slow_response', 'spatial_drift', 'poor_trajectory'],
     exercises: ['ex-009', 'ex-010'],
   },
-  {
-    name: 'Spinal Galant',
-    impact: 'Core coordination',
-    indicators: ['erratic_control', 'high_variability', 'high_invalid_rate'],
-    exercises: ['ex-011', 'ex-012'],
-  },
+  /* ── Spinal Galant is NOT inferred from gameplay ──────────────────────────
+     It used to sit here, scored from `erratic_control`, `high_variability` and
+     `high_invalid_rate` — that is, from cursor wobble, session fatigue and
+     mis-hits.
+
+     Spinal Galant is elicited by stroking the skin alongside the spine. A
+     camera pointed at a seated child's hands and face cannot observe it under
+     any circumstances, and the three indicators above have a hundred other
+     causes: an unfamiliar game, a tired child, a slow laptop. Scoring a reflex
+     from them puts a finding in a therapist's report that no observation
+     supports.
+
+     It remains in REFLEX_EDUCATION so the questionnaire and a practitioner's
+     own observation can still record it — see OBSERVATION_UNAVAILABLE in
+     services/reflexProfiles.js. It is simply no longer guessed at from play. */
   {
     name: 'Palmar Grasp',
     impact: 'Fine motor skills / grip precision',
@@ -154,7 +163,9 @@ function _detectIndicators(m) {
     slow_response:            m.avg_response_time_ms > 8000,
     spatial_drift:            m.trajectory_smoothness < 0.45,
     poor_trajectory:          m.trajectory_smoothness < 0.40,
-    // Spinal Galant
+    /* Kept because other rules reference them (Babkin reads `erratic_control`,
+       Visual Tracking reads `high_variability`). They no longer feed a Spinal
+       Galant score — see the note in REFLEX_RULES. */
     erratic_control:          m.trajectory_smoothness < 0.42,
     high_variability:         m.fatigue_index > 0.60,
     high_invalid_rate:        (m.total_attempts > 0 &&

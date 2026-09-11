@@ -12,6 +12,8 @@ import ExcelJS from 'exceljs';
 import { supabase } from '../services/supabaseClient';
 import { useAuthStore } from '../store';
 import VideoModal from '../components/shared/VideoModal';
+import { addPoseSheets, fetchPoseSessions } from '../services/pose/poseExport';
+import { accuracyPercent } from '../utils/otScore';
 import '../styles/AdminDashboard.css';
 
 // ── Admin credentials (prototype-level) ──────────────────────────────────────
@@ -380,7 +382,12 @@ export default function AdminDashboard() {
       const row = sheet.getRow(rowCursor);
       row.getCell(1).value = s.start_time?.slice(0, 19).replace('T', ' ') || '';
       row.getCell(2).value = s.duration_seconds || 0;
-      row.getCell(3).value = s.accuracy_score !== undefined ? `${s.accuracy_score}%` : '0%';
+      /* The mirror of the on-screen fault: appending "%" to the raw column
+         printed a good session as "0.56%" for every row stored as a fraction.
+         Written as a NUMBER with a percent format so the column can be sorted
+         and averaged in Excel instead of being text. */
+      row.getCell(3).value = accuracyPercent(s.accuracy_score) / 100;
+      row.getCell(3).numFmt = '0%';
       row.getCell(4).value = s.difficulty || '';
       row.getCell(5).value = s.lpi_score || 0;
       row.getCell(6).value = s.perfect_grabs || 0;
@@ -463,6 +470,35 @@ export default function AdminDashboard() {
       toast.error('Hand tracking fetch failed.');
       const errRow = trackSheet.addRow({ session: `Error: ${e.message || 'Unexpected error'}` });
       errRow.getCell(1).font = { italic: true, color: { argb: 'FFEF4444' } };
+    }
+
+    /* ── Upper-body pose data (touch-mode sessions) ────────────────────────
+       Added to the same workbook rather than a second button: an analyst wants
+       one file per learner, and the pose sheets join to the others on the
+       session id. See services/pose/poseExport.js for the sheet layout and for
+       why the frame sheet is capped. */
+    try {
+      toast.loading('Fetching upper-body pose data...', { id: 'pose-toast' });
+      const poseRows = await fetchPoseSessions(supabase, {
+        childId: selectedChild.id,
+        sessionId: singleSession ? singleSession.id : null,
+        includeFrames: true,
+      });
+      const summary = addPoseSheets(workbook, poseRows, {
+        learnerName: `${selectedChild?.first_name || ''} ${selectedChild?.last_name || ''}`.trim(),
+      });
+      toast.dismiss('pose-toast');
+      if (summary.truncated) {
+        toast('Pose frames were truncated to fit Excel — export one session at a time for the full set.',
+          { icon: '⚠️', duration: 6000 });
+      }
+    } catch (e) {
+      toast.dismiss('pose-toast');
+      console.error('Failed to fetch pose data for Excel', e);
+      /* A missing pose table must not cost the admin the rest of the export. */
+      const poseErr = workbook.addWorksheet('Pose Sessions');
+      poseErr.addRow([`Could not load pose data: ${e.message || 'unknown error'}`])
+        .getCell(1).font = { italic: true, color: { argb: 'FFEF4444' } };
     }
 
     // Export to Blob
@@ -1150,8 +1186,14 @@ export default function AdminDashboard() {
                               <td data-label="Date">{s.start_time?.slice(0, 10) || '—'}</td>
                               <td data-label="Duration">{Math.round((parseFloat(s.duration_seconds) || 0) / 60)} min</td>
                               <td data-label="Accuracy">
-                                <span style={{ fontWeight: 700, color: parseFloat(s.accuracy_score) > 0.7 ? '#86EFAC' : '#FDBA74' }}>
-                                  {Math.round(parseFloat(s.accuracy_score || 0) * 100)}%
+                                {/* Normalised, never raw: accuracy_score holds a
+                                    0-1 fraction on new rows and a 0-100 value on
+                                    older ones, so multiplying blindly printed
+                                    "5600%" next to an LPI of 56. The colour
+                                    threshold compares on the same scale for the
+                                    same reason — 56 > 0.7 was always "green". */}
+                                <span style={{ fontWeight: 700, color: accuracyPercent(s.accuracy_score) >= 70 ? '#86EFAC' : '#FDBA74' }}>
+                                  {accuracyPercent(s.accuracy_score)}%
                                 </span>
                               </td>
                               <td data-label="Difficulty">

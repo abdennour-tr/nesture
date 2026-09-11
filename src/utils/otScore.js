@@ -61,6 +61,34 @@ export function otPct(v) {
 }
 
 /**
+ * `sessions.accuracy_score` -> a 0-100 percentage, whichever unit the row holds.
+ *
+ * THE COLUMN IS NOT IN ONE UNIT, and it cannot be made so retroactively.
+ * Every game writes a 0-1 fraction today (each one divides by 100 before
+ * posting), but rows written before those divisions were added hold a 0-100
+ * percentage. Both are sitting in the same column in production.
+ *
+ * Reading that column raw is how the admin table came to print "5600%" beside
+ * an LPI of 56: it multiplied an already-percentage row by 100. The Excel
+ * export had the mirror-image fault, printing a good session as "0.56%".
+ *
+ * The rule: anything above 1 is already a percentage. A value of exactly 1 is
+ * read as 100%, not 1% — every game writing fractions today can produce 1.0 for
+ * a perfect round, while a genuine 1% score is vanishingly rare.
+ *
+ * This is the ONE place the rule lives. reportBuilder and the admin dashboard
+ * both import it; a second copy is how the two drifted apart in the first place.
+ *
+ * @param {number|string} raw
+ * @returns {number} 0-100, clamped
+ */
+export function accuracyPercent(raw) {
+  const v = parseFloat(raw);
+  if (!Number.isFinite(v) || v <= 0) return 0;
+  return Math.min(100, Math.round(v > 1 ? v : v * 100));
+}
+
+/**
  * Was this round actually completed, or stopped early?
  * Games pass 'ended' to their finish routine when the learner used the
  * "End game" button, so the results screen can title itself honestly instead

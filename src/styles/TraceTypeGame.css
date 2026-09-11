@@ -1394,6 +1394,17 @@
   text-shadow: 0 0 50px var(--tt-indigo-glow);
 }
 
+/* End of a word: the whole word plus a celebration emoji stands in for the
+   single 7rem letter. A word can be several characters, so it is set with a
+   viewport-aware clamp and allowed to fit the screen rather than overflow it. */
+.tt-letter-success-word {
+  font-size: clamp(2.4rem, 11vw, 6rem);
+  letter-spacing: 0.08em;
+  max-width: 92vw;
+  text-align: center;
+  line-height: 1.1;
+}
+
 .tt-letter-success-msg {
   font-size: 1.5rem;
   font-weight: 700;
@@ -2237,12 +2248,24 @@
   .tt-key.highlighted { animation: none; }
 }
 
-/* ── Results overlay: same centring trap as the rules modal ─────────────────
-   The overlay is a centred flex column written inline in the JSX, so a card
-   taller than the window overflowed at both ends and the buttons at the bottom
-   could not be reached. !important is required to beat the inline rule. */
+/* ── Results overlay: a full-screen, SCROLLABLE layer ───────────────────────
+   The bug: this element had no `position` and no scroll container of its own,
+   so it was a plain block inside `.tt-page`, which is `overflow: hidden` at
+   100vh. Any report taller than the window — the reflex cards and the Play
+   Again / Home buttons live below the fold — was clipped by the page and could
+   not be scrolled to. (The old comment here blamed an "inline rule" that no
+   longer exists; the real fault was the missing overlay definition.)
+
+   The fix makes the overlay what it always claimed to be: a fixed layer over
+   the whole viewport that scrolls its own content. `.gr-root` inside keeps its
+   `min-height: 100%`, so a short report still fills the screen and a tall one
+   simply scrolls here. */
 .tt-results-overlay {
-  justify-content: flex-start !important;
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
 
@@ -2476,9 +2499,13 @@
   width: min(100%, calc(100dvh - var(--tt-trace-chrome) + 60px));
   max-width: min(100%, calc(100dvh - var(--tt-trace-chrome) + 60px));
   min-width: min(100%, 300px);
-  /* Hug the square instead of stretching past it, and centre what is left. */
-  flex: 0 1 auto;
-  margin-block: auto;
+  /* Fill the column. The square is centred by .tt-trace-fit below, so the card
+     no longer needs auto margins to sit in the middle — and, more importantly,
+     a card that stretches is a card whose leftover height is a real number the
+     square can be measured against. */
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-block: 0;
 }
 
 /* The in-card step number and name repeated the pill directly above them, for
@@ -2500,18 +2527,45 @@
 }
 
 /* ── TRACE ───────────────────────────────────────────────────────────────── */
-/* A real square at every window shape. The width is the smaller of the two
-   budgets it has — the card's content width, and the height left under the
-   chrome — and `aspect-ratio` then derives an equal height. Sizing it from the
-   flex height instead (the previous approach) left the BOX taller than the
-   letter on narrow windows, which is the letterboxed dead space inside the
-   border that reads as "empty" on a phone. */
+/* A real square at every window shape — MEASURED, not estimated.
+
+   THE BUG THIS REPLACES. The square used to be sized from
+   `calc(100dvh - var(--tt-trace-chrome))`, where the chrome was a hand-fitted
+   linear guess at the height of everything else on the page. Everything else
+   on the page is a stack of vh clamps plus a header, a word banner, step
+   pills, an instruction row, a feedback line and the alphabet bar along the
+   bottom — so the guess was too small on a 872px-tall laptop, the square grew
+   past the space it had, and `.tt-game-area { overflow: hidden }` cut the foot
+   off the letter. It had already been wrong twice before, at 1920x1080 and on
+   an iPad. A formula that has to be re-fitted every time a padding changes is
+   not a fix, it is a standing appointment.
+
+   WHAT IT DOES NOW. `.tt-trace-fit` is an ordinary flex child, so the browser
+   has already worked out exactly how much height is left — no guess involved.
+   Declaring it a size container lets that measurement be READ back as a
+   length, and `min(100cqw, 100cqh)` is then the largest square that fits, at
+   every window shape, for good.
+
+   The old expression is kept above as the fallback for a browser without
+   container query units, now with `max-height: 100%` so that even the fallback
+   can only letterbox the letter, never crop it. */
+.tt-trace-fit {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  /* `size` and not `inline-size`: the HEIGHT is the half that was being
+     guessed. It also contains the box's own size, which is what makes the
+     flex basis above resolve from the leftover rather than from the letter. */
+  container-type: size;
+}
+
 .tt-trace-area {
-  flex: 0 0 auto;
   width: min(100%, calc(100dvh - var(--tt-trace-chrome)));
+  width: min(100cqw, 100cqh);
   height: auto;
   max-width: 100%;
-  max-height: none;
+  max-height: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 20px;
 }
@@ -2524,38 +2578,65 @@
 /* The card's leftover height went into the keyboard, which then centred three
    short rows inside it and left a dead band above and below them. The letter
    is the focal point of the step, so it takes the slack and the keyboard hugs
-   its rows at the bottom of the card. */
+   its rows at the bottom of the card.
+
+   THE OVERLAP THIS FIXES. Taking the slack is not the same as fitting inside
+   it. The letter was sized in `vh` and the word slots under it in `vh`, so on
+   a short window their combined height was simply larger than the block the
+   flex layout had handed them — and because the card is `overflow: hidden`
+   and `justify-content: center` spills evenly in both directions, the slots
+   came to rest on top of the keyboard's first row.
+
+   Same cure as the traced letter above: `.tt-target-fit` is the flex child, so
+   the browser has already measured how much room is left; declaring it a size
+   container lets that measurement be read back, and the glyph and the slots
+   are then sized as fractions of it. The vh and rem terms are kept inside the
+   `min()` so nothing grows beyond its intended maximum on a tall screen — the
+   cqh term only ever takes over when the room is genuinely short. */
+.tt-target-fit {
+  flex: 1 1 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  container-type: size;
+  width: 100%;
+  margin-bottom: clamp(10px, 1.8vh, 22px);
+}
+
 .tt-find-target,
 .tt-type-target {
-  flex: 1 1 auto;
-  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  margin-top: 0;
-  margin-bottom: clamp(10px, 1.8vh, 22px);
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0;
 }
 
 /* Display size, not heading size. The block these sit in is now 270-560px
    tall depending on the window, so the previous 9rem cap left the letter
    floating in the middle of it. TYPE is set smaller than FIND because it also
    has to fit the word slots underneath. */
+/* `line-height: 1` on both letters (see the base rules), so the font size IS
+   the box height and these fractions are the real thing being capped. */
 .tt-find-target {
-  font-size: clamp(3.4rem, 22vh, 12rem);
+  font-size: min(12rem, 22vh, 88cqh);
   letter-spacing: 0.01em;
   text-shadow: 0 0 46px var(--tt-indigo-glow);
 }
 
+/* 50 + 6 + 28 = 84cqh for glyph, gap and slots, which leaves the block a
+   margin of error rather than fitting it exactly to the pixel. */
 .tt-type-letter-display {
-  font-size: clamp(2.8rem, 15vh, 8.5rem);
-  margin-bottom: clamp(8px, 1.4vh, 16px);
+  font-size: min(8.5rem, 15vh, 50cqh);
+  margin-bottom: min(16px, 1.4vh, 6cqh);
 }
 
 .tt-type-slot {
-  width: clamp(42px, 6.4vh, 68px);
-  height: clamp(50px, 7.6vh, 78px);
-  font-size: clamp(1.35rem, 4vh, 2.4rem);
+  width: min(68px, 6.4vh, 25cqh);
+  height: min(78px, 7.6vh, 28cqh);
+  font-size: min(2.4rem, 4vh, 14cqh);
 }
 
 /* The keyboard card stops short of the full shell: a ten-key row stretched to
@@ -2625,8 +2706,12 @@
 /* ── Short and wide windows ──────────────────────────────────────────────── */
 @media (max-height: 720px) {
   .tt-word-banner { padding-block: clamp(5px, 1vh, 9px); }
-  .tt-find-target { font-size: clamp(2.6rem, 19vh, 7.5rem); }
-  .tt-type-letter-display { font-size: clamp(2.3rem, 13vh, 5.4rem); }
+  /* The cqh cap has to be repeated here. These two rules come after the ones
+     that introduce it, so a plain vh clamp would win on exactly the short
+     windows where the letters have least room — which is where the slots
+     landed on the keyboard in the first place. */
+  .tt-find-target { font-size: min(7.5rem, 19vh, 88cqh); }
+  .tt-type-letter-display { font-size: min(5.4rem, 13vh, 50cqh); }
   .tt-keyboard { font-size: clamp(0.92rem, 3vh, 1.5rem); }
 }
 

@@ -27,11 +27,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Home, Pause, Play, RotateCcw, Clock, Star, Hand, MousePointer2,
-  Volume2, VolumeX, Target, Activity, Zap, TrendingUp, CheckCircle,
-  Crosshair, GitBranch, AlertTriangle, XCircle, HelpCircle,
-} from 'lucide-react';
+import {Home, Pause, Play, RotateCcw, Clock, Star, Hand, MousePointer2, Volume2, VolumeX, Crosshair, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
 import GameRules from '../components/game/GameRules';
@@ -48,6 +44,9 @@ import '../styles/BubbleGame.css';
 
 import { HandDefs, HandArt, followHand, makeHandState } from '../components/game/HandPointer';
 import { createHandPointerFilter, handDepthScale, STABLE_POINTER_OPTIONS } from '../utils/handPointerFilter';
+import GameResults from '../components/game/GameResults';
+import TouchModePose from '../components/game/TouchModePose';
+import useGraspMeasure from '../hooks/useGraspMeasure';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — fixed virtual space, scaled to the rendered field, so difficulty
    tuning behaves identically on every screen size.
@@ -282,6 +281,13 @@ export default function BubbleGame() {
     { stableSelection: true }
   );
 
+  /* Palmar grasp is the one reflex this game's sensors can honestly measure:
+     the task needs a sustained pointing finger, so a hand pulling closed is
+     unwanted rather than instructed. See hooks/useGraspMeasure.js. */
+  const graspRef = useRef(null);
+  const grasp = useGraspMeasure();
+  graspRef.current = grasp;
+
   /* ── Turn the camera off when the round ends ────────────────────────────
      Client feedback: "when the game finish the camera need to turn off."
 
@@ -396,6 +402,7 @@ export default function BubbleGame() {
       resetDwell();
       input.key = activeHandKey;
     }
+    graspRef.current.push(landmarks, trackingTimestamp, null);
     const p = handFilterRef.current.push(landmarks, trackingTimestamp);
     input.accepted = !!p && p.accepted !== false;
     if (!input.accepted) pointerRef.current = null;
@@ -645,6 +652,7 @@ export default function BubbleGame() {
 
     setResults({
       endedEarly: reason === FINISH.ENDED,
+      grasp: graspRef.current.result(),
       score: Math.round(scoreRef.current),
       popped: poppedRef.current,
       spawned: spawnedRef.current,
@@ -1333,6 +1341,18 @@ export default function BubbleGame() {
         </div>
       </main>
 
+      {/* Touch-mode upper-body observation. Nothing starts until the child is
+          asked; the webcam is released the moment the round ends. Renders its
+          own hidden <video> and consent overlay — see TouchModePose. */}
+      <TouchModePose
+        gameId="bubble"
+        active={mode === 'touch' && (gamePhase === 'countdown' || gamePhase === 'playing')}
+        finished={gamePhase === 'results'}
+        sessionId={sessionId}
+        childId={profile?.learner_id || user?.id || null}
+        learnerName={profile?.first_name}
+      />
+
       {/* ═══ OVERLAYS ═══════════════════════════════════════════════════ */}
       <AnimatePresence>
         {gamePhase === 'rules' && (
@@ -1383,75 +1403,43 @@ export default function BubbleGame() {
         )}
 
         {gamePhase === 'results' && results && (
-          <motion.div key="res" className="bg-overlay"
+          <motion.div key="res" className="bg-overlay bg-overlay-report"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <motion.div className="bg-card bg-results-card"
-              initial={{ scale: 0.86, y: 40, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 24 }}>
-              <div className="bg-confetti" aria-hidden="true">
-                {Array.from({ length: 14 }).map((_, i) => (
-                  <span key={i} style={{ '--i': i }} />
-                ))}
-              </div>
-
-              <h2 className="bg-results-title">
-                <CheckCircle size={26} />{' '}
-                {results.endedEarly ? 'Session ended' : "Time's up!"}
-              </h2>
-              <p className="bg-results-sub">
-                {cfg.emoji} {cfg.label} · {mode === 'camera' ? 'Camera' : 'Touch'}
-              </p>
-
-              <div className="bg-perf-ring" style={{ '--pct': results.composite }}>
-                <div className="bg-perf-inner">
-                  <span className="bg-perf-val">{results.composite}</span>
-                  <span className="bg-perf-lbl">OT Score</span>
-                </div>
-              </div>
-
-              <div className="bg-metrics">
-                <Metric icon={<Star size={16} />}      label="Score"           value={results.score} />
-                <Metric icon={<Crosshair size={16} />} label="Bubbles Popped"
-                  value={`${results.popped} / ${results.spawned}`} />
-                <Metric icon={<Target size={16} />}    label="Touch Accuracy"  value={`${results.accuracy}%`} />
-                <Metric icon={<Zap size={16} />}       label="Reaction Time"
-                  value={results.reactionMs == null ? '—' : `${(results.reactionMs / 1000).toFixed(2)}s`} />
-                <Metric icon={<Clock size={16} />}     label="Movement Time"
-                  value={results.movementMs == null ? '—' : `${(results.movementMs / 1000).toFixed(2)}s`} />
-                <Metric icon={<TrendingUp size={16} />} label="Throughput"
-                  value={`${results.throughput} bit/s`} />
-                <Metric icon={<GitBranch size={16} />} label="Path Efficiency"
-                  value={results.pathEfficiency == null ? '—' : `${results.pathEfficiency}%`} />
-                <Metric icon={<RotateCcw size={16} />} label="Corrections"     value={results.corrections} />
-                <Metric icon={<Activity size={16} />}  label="Smoothness"
-                  value={results.smoothness == null ? '—' : `${results.smoothness}%`} />
-                <Metric icon={<XCircle size={16} />}   label="Missed"          value={results.missed} />
-              </div>
-
-              {results.sweeping && (
-                <div className="bg-note">
-                  <AlertTriangle size={18} />
-                  <span>
-                    Path efficiency is low ({results.pathEfficiency}%) — the movement looks
-                    like sweeping rather than aiming at individual bubbles.
-                  </span>
-                </div>
-              )}
-
-              <div className="bg-actions">
-                <button className="bg-btn bg-btn-primary" onClick={restart}>
-                  <RotateCcw size={18} /> Play again
-                </button>
-                <button className="bg-btn bg-btn-ghost"
+            {/* Shared platform report — see components/game/GameResults.jsx. */}
+            <GameResults
+              gameId="bubble"
+              reflexMeasurements={results.grasp && results.grasp.measured
+                ? { 'Palmar Grasp': { reflex_key: 'Palmar Grasp', reflex_name: 'Palmar Grasp Reflex', ...results.grasp } }
+                : null}
+              emoji={results.endedEarly ? '💪' : '🏆'}
+              title={results.endedEarly ? 'Session ended' : "Time's up!"}
+              subtitle={`${cfg.emoji} ${cfg.label} · ${mode === 'camera' ? 'Camera' : 'Touch'}`}
+              endedEarly={results.endedEarly}
+              headline={{ value: results.composite, caption: 'OT Score' }}
+              breakdown={[
+                { label: 'Reach accuracy',  value: results.accuracy,       weight: '30%' },
+                { label: 'Throughput',      value: results.throughput,     weight: '25%' },
+                { label: 'Path efficiency', value: results.pathEfficiency, weight: '20%' },
+                { label: 'Smoothness',      value: results.smoothness,     weight: '15%' },
+              ]}
+              metrics={[
+                { icon: '🏆', label: 'Score', value: results.score },
+                { icon: '🫧', label: 'Popped', value: `${results.popped}/${results.spawned}` },
+                { icon: '❌', label: 'Missed', value: results.missed },
+                { icon: '⚡', label: 'Reaction', value: results.reactionMs == null ? '—' : `${(results.reactionMs / 1000).toFixed(2)}s` },
+                { icon: '➡️', label: 'Movement', value: results.movementMs == null ? '—' : `${(results.movementMs / 1000).toFixed(2)}s` },
+                { icon: '🔁', label: 'Corrections', value: results.corrections },
+              ]}
+              onPlayAgain={restart}
+              onExit={goHome}
+              exitLabel="Home"
+              actionsExtra={(
+                <button type="button" className="gr-btn gr-btn-secondary"
                   onClick={() => navigate('/play/bubble-difficulty')}>
                   Levels
                 </button>
-                <button className="bg-btn bg-btn-ghost" onClick={goHome}>
-                  <Home size={18} /> Home
-                </button>
-              </div>
-            </motion.div>
+              )}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -1496,14 +1484,3 @@ function RulesModal({ level, mode, cfg, onStart, resume = false }) {
   );
 }
 
-function Metric({ icon, label, value }) {
-  return (
-    <div className="bg-metric">
-      <div className="bg-metric-ico">{icon}</div>
-      <div className="bg-metric-body">
-        <span className="bg-metric-label">{label}</span>
-        <span className="bg-metric-value">{value}</span>
-      </div>
-    </div>
-  );
-}

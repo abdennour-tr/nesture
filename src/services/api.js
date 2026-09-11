@@ -8,7 +8,8 @@
  * existing page code (`api.get(url)`, `api.post(url, body)`) works unchanged.
  */
 import * as localDB from './supabaseDB.js';
-import { generateSessionReportBytes } from './reportBuilder.js';
+import { generateGameReportBytes } from './reportBuilder.js';
+import { buildReflexSections, reflexMapFromStoredRows, gameIdFromName } from './reflexProfiles';
 
 // ── Route handlers ────────────────────────────────────────────────────────────
 
@@ -135,21 +136,65 @@ async function handleGet(url) {
     return localDB.getAllPrescriptions();
   }
 
-  // GET /reports/:sessionId/pdf — generate and return as ArrayBuffer
+  /* GET /reports/:sessionId/pdf
+     ------------------------------------------------------------------------
+     Builds the SAME report the results screen shows, from the same model, so a
+     PDF pulled from a dashboard states the same findings as the screen the
+     child and parent saw at the end of the round. The previous builder drew its
+     own reflex table: a missing score defaulted to 50 and the status column was
+     computed from confidence, so a settled, well-observed reflex printed
+     "Action recommended". */
   const reportPdf = path.match(/^\/reports\/([^/]+)\/pdf$/);
   if (reportPdf) {
     const sessionId = reportPdf[1];
     const { session, learner, reflexScores, exercises, analysis } = await localDB.getReportData(sessionId);
-    const buffer = generateSessionReportBytes({
-      learner,
-      session,
-      reflexScores,
-      recommendations: analysis.recommendations,
+
+    const gameId = gameIdFromName(session?.game_name) || 'letterquest';
+    const sections = buildReflexSections(gameId, reflexMapFromStoredRows(reflexScores));
+    const pct = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Number(v) * 100);
+    const lpi = Number(session?.lpi_score) || Number(analysis?.lpi_score) || null;
+    const seconds = Number(session?.duration_seconds) || 0;
+
+    const buffer = generateGameReportBytes({
+      gameId,
+      gameName: session?.game_name || 'Session',
+      title: 'Session report',
+      subtitle: session?.difficulty ? `Level: ${session.difficulty}` : undefined,
+      endedEarly: false,
+      headline: { value: lpi, caption: 'LPI Score' },
+      breakdown: [
+        { label: 'Accuracy', value: pct(session?.accuracy_score) },
+        { label: 'Movement smoothness', value: pct(session?.trajectory_smoothness) },
+        {
+          label: 'Stamina through the round',
+          value: session?.fatigue_index == null ? null : (1 - Number(session.fatigue_index)) * 100,
+        },
+      ],
+      metrics: [
+        { label: 'Total attempts', value: session?.total_attempts ?? '-' },
+        { label: 'Perfect actions', value: session?.perfect_grabs ?? '-' },
+        {
+          label: 'Avg response',
+          value: session?.avg_response_time_ms
+            ? `${(Number(session.avg_response_time_ms) / 1000).toFixed(1)}s` : '-',
+        },
+        {
+          label: 'Time played',
+          value: seconds ? `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '-',
+        },
+      ],
+      sections,
+      notMeasuredReason: analysis?.reflex_not_measured_reason || null,
+    }, {
+      learnerName: learner?.name,
+      sessionId,
+      date: (session?.start_time || '').slice(0, 10),
+      narrative: analysis?.narrative,
+      recommendations: analysis?.recommendations,
       exercises,
-      narrative: analysis.narrative,
-      lpiScore: analysis.lpi_score,
     });
-    // Return raw ArrayBuffer — caller will wrap in new Blob([res.data], { type: 'application/pdf' })
+
+    // Raw ArrayBuffer — the caller wraps it in new Blob([res.data], { type: 'application/pdf' })
     return buffer;
   }
 

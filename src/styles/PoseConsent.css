@@ -1,0 +1,211 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   PoseConsentPrompt — asked before the camera opens in touch mode
+   Uses the platform tokens (teal primary, orange accent, deep teal ground) and
+   the same clamped, auto-fit approach as GameResults, so it reads correctly
+   from a 320px phone to a desktop without breakpoint tables.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.pc-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(12px, 3vh, 32px) clamp(12px, 3vw, 28px);
+  background: rgba(9, 15, 17, 0.82);
+  backdrop-filter: blur(6px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  box-sizing: border-box;
+}
+
+.pc-overlay *, .pc-overlay *::before, .pc-overlay *::after { box-sizing: border-box; }
+
+.pc-card {
+  width: min(100%, 620px);
+  margin: auto;
+  background: #14262B;
+  color: #C8E8ED;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: clamp(16px, 2.4vw, 24px);
+  padding: clamp(20px, 3.4vh, 34px) clamp(18px, 3vw, 34px);
+  box-shadow: 0 26px 54px -26px rgba(0, 0, 0, 0.75);
+  text-align: center;
+}
+
+.tt-light-mode .pc-card {
+  background: #FFFFFF;
+  color: #334155;
+  border-color: rgba(15, 30, 34, 0.10);
+}
+
+.pc-icon {
+  width: clamp(44px, 7vh, 56px);
+  height: clamp(44px, 7vh, 56px);
+  margin: 0 auto clamp(10px, 1.8vh, 16px);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(26, 143, 160, 0.18);
+  color: #6FD3E2;
+}
+
+.tt-light-mode .pc-icon { background: rgba(13, 94, 107, 0.10); color: #0D5E6B; }
+
+.pc-title {
+  margin: 0 0 8px;
+  font-size: clamp(1.15rem, 3vh, 1.55rem);
+  font-weight: 900;
+  line-height: 1.2;
+  color: #FFFFFF;
+}
+
+.tt-light-mode .pc-title { color: #0F1E22; }
+
+.pc-body {
+  margin: 0 auto clamp(14px, 2.2vh, 22px);
+  max-width: 46ch;
+  font-size: clamp(0.88rem, 1.9vh, 1rem);
+  line-height: 1.55;
+  color: #9FC4CC;
+}
+
+.tt-light-mode .pc-body { color: #475569; }
+
+/* Two columns where there is room, stacked where there is not. */
+.pc-lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: clamp(9px, 1.5vh, 14px);
+  text-align: left;
+  margin-bottom: clamp(12px, 2vh, 18px);
+}
+
+.pc-list {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left-width: 3px;
+  border-radius: 13px;
+  padding: clamp(11px, 1.8vh, 15px) clamp(12px, 1.6vw, 16px);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.tt-light-mode .pc-list {
+  background: rgba(15, 30, 34, 0.03);
+  border-color: rgba(15, 30, 34, 0.10);
+}
+
+.pc-list-yes { border-left-color: #1A8FA0; }
+.pc-list-no  { border-left-color: #10B981; }
+
+.pc-list-title {
+  margin: 0 0 7px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #7BA3AB;
+}
+
+.tt-light-mode .pc-list-title { color: #64748B; }
+
+.pc-list ul { margin: 0; padding-left: 17px; }
+
+.pc-list li {
+  font-size: clamp(0.76rem, 1.6vh, 0.86rem);
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+.pc-optional {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 0 0 clamp(14px, 2.2vh, 20px);
+  font-size: clamp(0.78rem, 1.7vh, 0.88rem);
+  font-weight: 600;
+  color: #10B981;
+}
+
+.pc-optional svg { flex: none; }
+
+.pc-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.pc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 150px;
+  padding: clamp(11px, 1.8vh, 15px) clamp(16px, 2vw, 26px);
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: clamp(0.84rem, 1.8vh, 0.96rem);
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.15s ease;
+}
+
+.pc-btn:hover { transform: translateY(-1px); filter: brightness(1.08); }
+.pc-btn:focus-visible { outline: 2px solid #E8841A; outline-offset: 2px; }
+
+/* Both choices carry the same visual weight. Making "yes" louder than "no"
+   would be nudging a child toward being recorded. */
+.pc-btn-no {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #C8E8ED;
+}
+
+.tt-light-mode .pc-btn-no {
+  background: #F1F5F9;
+  border-color: rgba(15, 30, 34, 0.12);
+  color: #334155;
+}
+
+.pc-btn-yes {
+  background: linear-gradient(135deg, #1A8FA0, #2AA9BC);
+  color: #FFFFFF;
+  box-shadow: 0 8px 22px -10px rgba(26, 143, 160, 0.9);
+}
+
+@media (max-width: 430px) {
+  .pc-actions { flex-direction: column-reverse; }
+  .pc-btn { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-btn { transition: none; }
+  .pc-btn:hover { transform: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   The pose camera's own <video> element (components/game/TouchModePose).
+
+   Not `display: none` and not `visibility: hidden`. Both let a browser stop
+   compositing the element, and a video the compositor has given up on can stop
+   delivering frames to MediaPipe — the tracker then sits there recording
+   nothing while the privacy light is on, which is the worst of both. So it
+   stays painted: two pixels, effectively transparent, pinned out of the way and
+   inert to the pointer.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.tmp-pose-video {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 2px;
+  height: 2px;
+  opacity: 0.01;
+  pointer-events: none;
+  z-index: -1;
+  transform: scaleX(-1);
+}

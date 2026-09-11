@@ -8,6 +8,8 @@
  * Developmental patterns detection (non-diagnostic)
  */
 
+import { reflexGroup, describeReflexLabel } from '../reflexProfiles';
+
 // ── Educational Metadata ─────────────────────────────────────────────────────
 
 export const REFLEX_EDUCATION = {
@@ -221,11 +223,28 @@ export function formatOutput(rawResults, sessionMeta = {}) {
   for (const [reflexKey, result] of Object.entries(complete)) {
     const education = REFLEX_EDUCATION[reflexKey] || {};
 
+    /* ── Which KIND of thing is this? ──────────────────────────────────────
+       A primitive reflex should integrate, so an active one is the finding.
+       The VOR and the oculomotor skills are lifelong and should be working
+       well, so a WEAK one is the finding. Both arrive here with a score that
+       means "how much of a problem is there", but they are read in opposite
+       directions, and one shared vocabulary made "VOR: strong" — a failing
+       vestibulo-ocular reflex — look like good news. Group and phrasing travel
+       with the reflex from here on, so no screen has to work it out again. */
+    const group = reflexGroup(reflexKey);
+    const phrasing = describeReflexLabel(reflexKey, result.label ?? 'none');
+
     formatted[reflexKey] = {
       // ── Identification ─────────────────────────────────────────────────────
       reflex_key:  reflexKey,
       reflex_name: education.fullName || reflexKey,
       category:    education.category || 'Unknown',
+      group,                       // 'primitive' | 'function'
+      is_primitive: group === 'primitive',
+      /* Plain-language reading of `label`, correct for this group. */
+      status_text: phrasing.text,  // e.g. 'Clearly active' | 'Working well'
+      status_tone: phrasing.tone,  // 'good' | 'watch' | 'attention' | 'none'
+      status_hint: phrasing.hint,
 
       /* ── Scores ───────────────────────────────────────────────────────
          `score` is null when the reflex could not be measured — NOT 0. The old

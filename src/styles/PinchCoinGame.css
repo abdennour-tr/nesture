@@ -1621,3 +1621,32 @@
     transition: none !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESULTS OVERLAY: STOP CENTRING, START SCROLLING
+   ───────────────────────────────────────────────────────────────────────────
+   `.pcg-overlay` was `position: fixed` with `justify-content: center` and no
+   scroll container of its own — the one overlay in the platform still carrying
+   that combination. Bubble, Ladybug, Finger Piano and Magic Finger Copy were
+   all corrected long ago; this one was missed, and Trace -> Find -> Type had a
+   worse version of the same fault.
+
+   Centring on the block axis is what does the damage: a report taller than the
+   window overflows at BOTH ends, so the top is cut off and the Play again /
+   Download report / Back to games row at the bottom cannot be reached at all.
+
+   Same fix as the others: the overlay stops centring and scrolls, and the card
+   centres itself with `margin: auto`, which centres while it fits and gives up
+   cleanly when it does not.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.pcg-overlay {
+  justify-content: flex-start;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.pcg-card, .pcg-rules-card, .pcg-pause-card, .pcg-results-card {
+  /* Centres in the free space, never clips when there is none. */
+  margin: auto;
+}

@@ -131,10 +131,35 @@ export function applyStoredGameTheme() {
 }
 
 /* ── Registry: title, emoji, accent + instructions for every game ─────────
-   One place to edit copy, so the tone stays the same everywhere. */
+   One place to edit copy, so the tone stays the same everywhere.
+
+   `rulesInGame`
+   -------------
+   THE RULES WERE BEING SHOWN TWICE. Two independent systems had grown up
+   around the same GameRules card:
+
+     1. this registry's `steps`, auto-opened on the LEVEL screen by
+        InstructionsModal (flag: localStorage `nesture.instructionsSeen.<id>`)
+     2. each game's own RulesModal, auto-opened when the round loads
+        (flag: sessionStorage `<game>_rules_seen`)
+
+   On a first visit a child met the same card twice in a row, and because the
+   two flags live in different storages they also expired differently.
+
+   The in-game card is the one that stays: it knows which input mode was
+   chosen (Pinch the Coin's touch instructions are not its camera ones with a
+   word changed) and which level, and it is what the in-game "?" button
+   reopens. So a game that carries its own rules card sets this flag, and the
+   level screen then offers its instructions behind the "How to play" button
+   instead of opening them unasked. Games WITHOUT their own card — Trace the
+   Shape — leave it unset and keep the automatic first-visit walkthrough. */
 export const GAMES = {
   ladybug: {
     id: 'ladybug',
+    /* This game shows its OWN rules card when the round loads, so the level
+       screen must not auto-open the instructions as well — see the note on
+       `rulesInGame` at the top of this registry. */
+    rulesInGame: true,
     emoji: '🐞',
     title: 'Follow the Ladybug',
     route: '/play/ladybug-game',
@@ -153,6 +178,10 @@ export const GAMES = {
   },
   bubble: {
     id: 'bubble',
+    /* This game shows its OWN rules card when the round loads, so the level
+       screen must not auto-open the instructions as well — see the note on
+       `rulesInGame` at the top of this registry. */
+    rulesInGame: true,
     emoji: '🫧',
     title: 'Pop the Bubble',
     route: '/play/bubble-game',
@@ -168,6 +197,10 @@ export const GAMES = {
   },
   'pinch-coin': {
     id: 'pinch-coin',
+    /* This game shows its OWN rules card when the round loads, so the level
+       screen must not auto-open the instructions as well — see the note on
+       `rulesInGame` at the top of this registry. */
+    rulesInGame: true,
     emoji: '🪙',
     title: 'Pinch the Coin',
     route: '/play/pinch-coin-game',
@@ -183,6 +216,10 @@ export const GAMES = {
   },
   'finger-copy': {
     id: 'finger-copy',
+    /* This game shows its OWN rules card when the round loads, so the level
+       screen must not auto-open the instructions as well — see the note on
+       `rulesInGame` at the top of this registry. */
+    rulesInGame: true,
     emoji: '🖐️',
     title: 'Magic Finger Copy',
     route: '/play/finger-copy-game',
@@ -198,6 +235,10 @@ export const GAMES = {
   },
   'finger-piano': {
     id: 'finger-piano',
+    /* This game shows its OWN rules card when the round loads, so the level
+       screen must not auto-open the instructions as well — see the note on
+       `rulesInGame` at the top of this registry. */
+    rulesInGame: true,
     emoji: '🎹',
     title: 'Finger Piano',
     route: '/play/finger-piano-game',
@@ -213,6 +254,10 @@ export const GAMES = {
   },
   'trace-type': {
     id: 'trace-type',
+    /* This game shows its OWN rules card when the round loads, so the level
+       screen must not auto-open the instructions as well — see the note on
+       `rulesInGame` at the top of this registry. */
+    rulesInGame: true,
     emoji: '✏️',
     title: 'Trace → Find → Type',
     route: '/play/trace-type-game',

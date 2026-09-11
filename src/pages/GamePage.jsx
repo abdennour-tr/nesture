@@ -8,6 +8,7 @@ import useTextToSpeech from '../hooks/useTextToSpeech';
 import useMediaPipeTracking, { LANDMARKS, calculateSmoothness } from '../hooks/useMediaPipeTracking';
 import { useReflexEngine } from '../hooks/useReflexEngine';
 import CalibrationScreen from './CalibrationScreen';
+import TouchModePose from '../components/game/TouchModePose';
 import { soundManager } from '../utils/soundManager';
 import api from '../services/api';
 import { supabase } from '../services/supabaseClient';
@@ -606,6 +607,10 @@ export default function GamePage() {
   const phaseRef = useRef('playing');
   const activeSessionRef = useRef(null);
   const capturedPositions = useRef([]);
+  /* LetterQuest leaves for a results ROUTE instead of switching to a results
+     phase, so the pose upload cannot wait on an effect that fires after the
+     unmount. This handle lets handleEndSession start it explicitly. */
+  const poseRef = useRef(null);
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { showSuperAnimRef.current = showSuperAnim; }, [showSuperAnim]);
@@ -1450,6 +1455,12 @@ export default function GamePage() {
     // whole session, so this batch is the tail rather than the only data.
     await flushTrackingPositions(true);
 
+    /* Start the pose upload before navigating away. Not awaited: the analysis
+       runs synchronously here and the insert is a fetch already in flight by
+       the time this component unmounts, so it completes on its own. A research
+       row must never delay a child's results screen. */
+    poseRef.current?.finalise();
+
     // Arrêter le moteur de réflexes et récupérer le résultat final
     const reflexOutput = stopTracking();
     reflexEngineOutputRef.current = reflexOutput;
@@ -1584,6 +1595,19 @@ export default function GamePage() {
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div style={styles.root} className="gp-root">
+      {/* Touch-mode upper-body observation. In camera mode the hand/face
+          tracker already owns the webcam, so `active` is gated on touch mode;
+          nothing starts until the consent prompt is answered with a yes.
+          See components/game/TouchModePose. */}
+      <TouchModePose
+        ref={poseRef}
+        gameId="letterquest"
+        active={isTouchMode && phase === 'playing'}
+        finished={phase === 'ending'}
+        sessionId={activeSession?.id || null}
+        childId={learnerId}
+        learnerName={profile?.first_name}
+      />
 
       {/* ── Calibration gate ─────────────────────────────────────────────
           Rendered as a full-screen OVERLAY rather than in place of the game.

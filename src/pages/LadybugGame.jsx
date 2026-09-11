@@ -24,10 +24,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  Home, Pause, Play, RotateCcw, Clock, Star, Hand, MousePointer2,
-  Volume2, VolumeX, Target, Activity, Zap, TrendingUp, CheckCircle, HelpCircle,
-} from 'lucide-react';
+import {Home, Pause, Play, RotateCcw, Clock, Star, Hand, MousePointer2, Volume2, VolumeX, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
 import GameRules from '../components/game/GameRules';
@@ -43,7 +40,10 @@ import '../styles/LadybugGame.css';
 
 import { HandDefs, HandArt, followHand, makeHandState } from '../components/game/HandPointer';
 import { createHandPointerFilter, handDepthScale, STABLE_POINTER_OPTIONS } from '../utils/handPointerFilter';
-import { otComposite, otRound, otPct, FINISH } from '../utils/otScore';
+import {otComposite, otRound, FINISH} from '../utils/otScore';
+import GameResults from '../components/game/GameResults';
+import TouchModePose from '../components/game/TouchModePose';
+import useGraspMeasure from '../hooks/useGraspMeasure';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — the play field uses a fixed virtual coordinate space that is
    scaled to the rendered element. All game math happens in this space so the
@@ -446,6 +446,13 @@ export default function LadybugGame() {
     { stableSelection: true }
   );
 
+  /* Palmar grasp is the one reflex this game's sensors can honestly measure:
+     the task needs a sustained pointing finger, so a hand pulling closed is
+     unwanted rather than instructed. See hooks/useGraspMeasure.js. */
+  const graspRef = useRef(null);
+  const grasp = useGraspMeasure();
+  graspRef.current = grasp;
+
   /* ── Turn the camera off when the round ends ────────────────────────────
      Client feedback: "when the game finish the camera need to turn off."
 
@@ -534,6 +541,7 @@ export default function LadybugGame() {
       trailRef.current = [];
       input.key = activeHandKey;
     }
+    graspRef.current.push(landmarks, trackingTimestamp, null);
     const p = handFilterRef.current.push(landmarks, trackingTimestamp);
     input.accepted = !!p && p.accepted !== false;
     if (!input.accepted) pointerRef.current = null;
@@ -662,6 +670,7 @@ export default function LadybugGame() {
     const payload = {
       endedEarly: reason === FINISH.ENDED,
       score: Math.round(scoreRef.current),
+      grasp: graspRef.current.result(),
       accuracy: otRound(accuracy),
       smoothness: otRound(smoothness),
       speedScore: otRound(speedScore),
@@ -1407,6 +1416,18 @@ export default function LadybugGame() {
         </div>
       </main>
 
+      {/* Touch-mode upper-body observation. Nothing starts until the child is
+          asked; the webcam is released the moment the round ends. Renders its
+          own hidden <video> and consent overlay — see TouchModePose. */}
+      <TouchModePose
+        gameId="ladybug"
+        active={mode === 'touch' && (gamePhase === 'countdown' || gamePhase === 'playing')}
+        finished={gamePhase === 'results'}
+        sessionId={sessionId}
+        childId={profile?.learner_id || user?.id || null}
+        learnerName={profile?.first_name}
+      />
+
       {/* ═══ OVERLAYS ═══════════════════════════════════════════════════ */}
       <AnimatePresence>
         {gamePhase === 'rules' && (
@@ -1461,74 +1482,44 @@ export default function LadybugGame() {
         )}
 
         {gamePhase === 'results' && results && (
-          <motion.div key="res" className="lb-overlay"
+          <motion.div key="res" className="lb-overlay lb-overlay-report"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            <motion.div className="lb-results-card"
-              initial={{ scale: 0.86, y: 40, opacity: 0 }}
-              animate={{ scale: 1, y: 0, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 24 }}
-            >
-              <div className="lb-results-confetti" aria-hidden="true">
-                {Array.from({ length: 14 }).map((_, i) => (
-                  <span key={i} style={{ '--i': i }} />
-                ))}
-              </div>
-
-              {/* An honest heading: "Level complete!" over a round the learner
-                  stopped early (or never started) is a claim the report cannot
-                  support. */}
-              <h2 className="lb-results-title">
-                <CheckCircle size={26} />{' '}
-                {results.endedEarly ? 'Session ended' : 'Level complete!'}
-              </h2>
-              <p className="lb-results-sub">
-                {cfg.emoji} {cfg.label} · {mode === 'camera' ? 'Camera' : 'Touch'}
-              </p>
-
-              {/* No composite means nothing was measured — show a plain note
-                  rather than a ring around a number that does not exist. */}
-              {results.composite != null ? (
-                <div className="lb-perf-ring" style={{ '--pct': results.composite }}>
-                  <div className="lb-perf-inner">
-                    <span className="lb-perf-val">{results.composite}</span>
-                    <span className="lb-perf-lbl">OT Score</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="tt-ot-none">
-                  No OT score for this session — the round ended before the
-                  ladybug was picked up, so there is nothing to measure.
-                </div>
-              )}
-
-              <div className="lb-metrics">
-                <Metric icon={<Star size={16} />}       label="Score"             value={results.score} />
-                <Metric icon={<Target size={16} />}     label="Path Accuracy"     value={otPct(results.accuracy)} />
-                <Metric icon={<Activity size={16} />}   label="Smoothness"        value={otPct(results.smoothness)} />
-                <Metric icon={<Hand size={16} />}       label="Grip"              value={otPct(results.grip)} />
-                <Metric icon={<MousePointer2 size={16} />} label="Drops"          value={results.drops} />
-                <Metric icon={<Zap size={16} />}        label="Reaction Time"
-                  value={results.reactionMs == null ? '—' : `${(results.reactionMs / 1000).toFixed(2)}s`} />
-                <Metric icon={<Clock size={16} />}      label="Completion Time"   value={fmtTime(results.completionSec)} />
-                <Metric icon={<Pause size={16} />}      label="Pauses"
-                  value={`${results.pauses} · ${(results.pauseMs / 1000).toFixed(1)}s`} />
-                <Metric icon={<RotateCcw size={16} />}  label="Direction Changes" value={results.directionChanges} />
-                <Metric icon={<TrendingUp size={16} />} label="Speed Score"       value={otPct(results.speedScore)} />
-              </div>
-
-              <div className="lb-results-actions">
-                <button className="lb-btn lb-btn-primary" onClick={restart}>
-                  <RotateCcw size={18} /> Play again
-                </button>
-                <button className="lb-btn lb-btn-ghost"
+            {/* Shared platform report — this game's own numbers, the platform's
+                shape and reflex framing. See components/game/GameResults.jsx. */}
+            <GameResults
+              gameId="ladybug"
+              reflexMeasurements={results.grasp && results.grasp.measured
+                ? { 'Palmar Grasp': { reflex_key: 'Palmar Grasp', reflex_name: 'Palmar Grasp Reflex', ...results.grasp } }
+                : null}
+              emoji={results.endedEarly ? '💪' : '🏆'}
+              title={results.endedEarly ? 'Session ended' : 'Level complete!'}
+              subtitle={`${cfg.emoji} ${cfg.label} · ${mode === 'camera' ? 'Camera' : 'Touch'}`}
+              endedEarly={results.endedEarly}
+              headline={{ value: results.composite, caption: 'OT Score' }}
+              breakdown={[
+                { label: 'Path accuracy',    value: results.accuracy,   weight: '40%' },
+                { label: 'Smoothness',       value: results.smoothness, weight: '25%' },
+                { label: 'Speed',            value: results.speedScore, weight: '20%' },
+                { label: 'Grip consistency', value: results.grip,       weight: '15%' },
+              ]}
+              metrics={[
+                { icon: '🏆', label: 'Score', value: results.score },
+                { icon: '⚡', label: 'Reaction', value: results.reactionMs == null ? '—' : `${(results.reactionMs / 1000).toFixed(2)}s` },
+                { icon: '🔄', label: 'Direction changes', value: results.directionChanges },
+                { icon: '✋', label: 'Drops', value: results.drops },
+                { icon: '⏸️', label: 'Pauses', value: `${results.pauses} · ${(results.pauseMs / 1000).toFixed(1)}s` },
+                { icon: '⏱️', label: 'Time', value: fmtTime(results.completionSec) },
+              ]}
+              onPlayAgain={restart}
+              onExit={goHome}
+              exitLabel="Home"
+              actionsExtra={(
+                <button type="button" className="gr-btn gr-btn-secondary"
                   onClick={() => navigate('/play/ladybug-difficulty')}>
                   Levels
                 </button>
-                <button className="lb-btn lb-btn-ghost" onClick={goHome}>
-                  <Home size={18} /> Home
-                </button>
-              </div>
-            </motion.div>
+              )}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -1536,15 +1527,3 @@ export default function LadybugGame() {
   );
 }
 
-/* ── Small presentational helper ────────────────────────────────────────── */
-function Metric({ icon, label, value }) {
-  return (
-    <div className="lb-metric">
-      <div className="lb-metric-ico">{icon}</div>
-      <div className="lb-metric-body">
-        <span className="lb-metric-label">{label}</span>
-        <span className="lb-metric-value">{value}</span>
-      </div>
-    </div>
-  );
-}

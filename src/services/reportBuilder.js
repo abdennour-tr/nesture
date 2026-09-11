@@ -4,6 +4,8 @@
  * Uses jsPDF to generate downloadable reports without a server.
  */
 import { jsPDF } from 'jspdf';
+import { REPORT_DISCLAIMER } from './reflexProfiles';
+import { accuracyPercent } from '../utils/otScore';
 
 // Brand colours (matching Python report_generator.py)
 const TEAL   = '#0D5E6B';
@@ -113,14 +115,11 @@ const METRIC_SKIP = new Set([
   'game', 'mechanic', 'level', 'mode', 'otScore', 'performanceScore', 'composite',
 ]);
 
-/* accuracy_score is not stored in one unit across games: some rows hold a 0-1
-   fraction, others a 0-100 percentage. Anything above 1 is already a
-   percentage. Same rule as the dashboards. */
-function toPercent(raw) {
-  const v = parseFloat(raw);
-  if (!Number.isFinite(v) || v <= 0) return 0;
-  return Math.min(100, Math.round(v > 1 ? v : v * 100));
-}
+/* accuracy_score is not stored in one unit across games — see the note on
+   accuracyPercent in utils/otScore.js. This used to be a private copy of that
+   rule, which is precisely how the admin dashboard ended up with a different
+   one and printed 5600%. One definition now, imported by every reader. */
+const toPercent = accuracyPercent;
 
 /** Pull the per-game detail out of whichever field the game used. */
 function readGameMetrics(session) {
@@ -1164,4 +1163,336 @@ export async function generateAtlasProfileReport({ profile, childName, scores, c
   doc.text('This report is synthesized from documents & caregiver questionnaires. Not a medical record. Consult a licensed specialist for clinical decisions.', 105, 287, { align: 'center' });
 
   doc.save(`Atlas_360_Report_${childName ? childName.replace(/\s+/g, '_') : 'Child'}.pdf`);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GAME SESSION REPORT — the PDF of the on-screen report
+   ---------------------------------------------------------------------------
+   This draws exactly what <GameResults> shows, from exactly the same model.
+
+   The older `_buildDoc` above reads stored session rows and builds its own
+   reflex table. That table disagreed with the screen in three ways: a reflex
+   with no score defaulted to 50, its "status" column was computed from
+   CONFIDENCE (so a well-observed, settled reflex printed "Action recommended"),
+   and it knew nothing about which reflexes the activity TARGETS but did not
+   measure. A parent could put the screen and the print-out side by side and
+   read two different findings for one session.
+
+   Everything below takes the model from services/reflexProfiles.js —
+   buildReflexSections() — and the same breakdown and metric arrays the screen
+   was given. Nothing here decides what a finding is; it only decides where on
+   the page it goes.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const TONE_HEX = {
+  attention: '#DC2626',
+  watch:     '#D97706',
+  good:      '#16A34A',
+  none:      '#9CA3AF',
+};
+
+const TIER_TEXT = { primary: 'Main focus', secondary: 'Also works on' };
+
+/** Wrap at a set font size, because splitTextToSize measures the ACTIVE size. */
+function wrapAt(doc, text, width, size, style = 'normal') {
+  doc.setFont('helvetica', style);
+  doc.setFontSize(size);
+  return doc.splitTextToSize(String(text), width);
+}
+
+/** A labelled bar: the same weighted sub-score row the screen shows. */
+function drawBarRow(doc, x, y, w, label, value, weight) {
+  const measured = value != null && Number.isFinite(value);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  setTextHex(doc, DARK);
+  doc.text(String(label), x, y);
+
+  if (weight) {
+    doc.setFontSize(6.5);
+    setTextHex(doc, GRAY);
+    doc.text(String(weight), x + doc.getTextWidth(String(label)) + 2.5, y);
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  setTextHex(doc, measured ? DARK : GRAY);
+  const shown = measured ? `${Math.round(value)}%` : '-';
+  doc.text(shown, x + w, y, { align: 'right' });
+
+  const trackY = y + 1.8;
+  setFillHex(doc, '#E5E7EB');
+  doc.roundedRect(x, trackY, w, 2, 1, 1, 'F');
+  if (measured && value > 0) {
+    setFillHex(doc, TEAL);
+    doc.roundedRect(x, trackY, Math.max(1, (w * value) / 100), 2, 1, 1, 'F');
+  }
+  return trackY + 6;
+}
+
+/** One reflex block: identity, tier, why the activity trains it, the finding. */
+function drawReflexEntry(doc, x, y, w, entry) {
+  const whyLines = entry.why ? wrapAt(doc, entry.why, w - 8, 7.5) : [];
+  const noteLines = !entry.measured && entry.blockedReason
+    ? wrapAt(doc, entry.blockedReason, w - 8, 7, 'italic') : [];
+  const blockH = 11 + whyLines.length * 3.4 + (entry.measured ? 9 : noteLines.length * 3.2 + 1);
+
+  y = ensureSpace(doc, y, blockH + 4);
+
+  // The coloured edge carries the finding, as it does on screen.
+  setFillHex(doc, TONE_HEX[entry.tone] || TONE_HEX.none);
+  doc.rect(x, y, 1.2, blockH, 'F');
+
+  setFillHex(doc, '#F8FAFC');
+  doc.rect(x + 1.2, y, w - 1.2, blockH, 'F');
+
+  const tx = x + 5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  setTextHex(doc, DARK);
+  doc.text(entry.key, tx, y + 5);
+
+  if (entry.tier) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6);
+    setTextHex(doc, TEAL);
+    doc.text((TIER_TEXT[entry.tier] || entry.tier).toUpperCase(), x + w - 3, y + 5, { align: 'right' });
+  }
+
+  if (entry.name && entry.name !== entry.key) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    setTextHex(doc, GRAY);
+    doc.text(entry.name, tx, y + 8.6);
+  }
+
+  let ly = y + 12;
+  if (whyLines.length) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    setTextHex(doc, DARK);
+    doc.text(whyLines, tx, ly);
+    ly += whyLines.length * 3.4;
+  }
+
+  if (entry.measured) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    setTextHex(doc, TONE_HEX[entry.tone] || DARK);
+    doc.text(entry.statusText, tx, ly + 1.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    setTextHex(doc, GRAY);
+    doc.text(entry.statusHint, tx + doc.getTextWidth(entry.statusText) + 15, ly + 1.5);
+
+    const barW = w - 10;
+    setFillHex(doc, '#E5E7EB');
+    doc.roundedRect(tx, ly + 3.5, barW, 1.6, 0.8, 0.8, 'F');
+    setFillHex(doc, TONE_HEX[entry.tone] || TONE_HEX.none);
+    doc.roundedRect(tx, ly + 3.5, Math.max(1, (barW * entry.score) / 100), 1.6, 0.8, 0.8, 'F');
+  } else if (noteLines.length) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(7);
+    setTextHex(doc, GRAY);
+    doc.text(noteLines, tx, ly + 1);
+  }
+
+  return y + blockH + 4;
+}
+
+/**
+ * Build the PDF of a game session report.
+ *
+ * @param {Object} model  the same shape <GameResults> was rendered with:
+ *        { gameId, gameName, title, subtitle, endedEarly, headline,
+ *          breakdown[], metrics[], sections[], notMeasuredReason }
+ * @param {Object} [extras]  { learnerName, sessionId, date, narrative,
+ *        recommendations, exercises } — LetterQuest carries these, the
+ *        in-game reports do not.
+ */
+export function buildGameReportDoc(model, extras = {}) {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  let y = MARGIN;
+
+  const headlineVal = model.headline?.value;
+  const hasHeadline = headlineVal != null && Number.isFinite(headlineVal);
+  const ringColour = !hasHeadline ? GRAY
+    : headlineVal >= 80 ? '#16A34A' : headlineVal >= 60 ? ORANGE : '#DC2626';
+
+  // ── Header band ──────────────────────────────────────────────────────────
+  setFillHex(doc, TEAL);
+  doc.roundedRect(MARGIN, y, CONTENT_W, 26, 3, 3, 'F');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  setTextHex(doc, WHITE);
+  doc.text(model.title || 'Session report', MARGIN + 6, y + 10);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  const who = extras.learnerName ? `${extras.learnerName}  |  ` : '';
+  doc.text(`${who}${model.gameName || ''}`, MARGIN + 6, y + 17);
+
+  doc.setFontSize(6.5);
+  const generated = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  const idPart = extras.sessionId ? `Report ${String(extras.sessionId).slice(0, 8)}   ` : '';
+  doc.text(`${extras.date || ''}   ${idPart}Generated ${generated}`, MARGIN + 6, y + 22);
+
+  if (hasHeadline) {
+    drawScoreRing(doc, PAGE_W - MARGIN - 18, y + 13, 9, Math.round(headlineVal), ringColour);
+  }
+  y += 32;
+
+  // A round stopped early is said out loud, exactly as on screen — otherwise
+  // the numbers below look like a full session's.
+  if (model.endedEarly) {
+    setFillHex(doc, '#FEF3C7');
+    setDrawHex(doc, '#F59E0B');
+    doc.setLineWidth(0.3);
+    doc.roundedRect(MARGIN, y, CONTENT_W, 9, 1.5, 1.5, 'FD');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    setTextHex(doc, '#92400E');
+    doc.text(
+      'This round was stopped before the end, so the scores below cover only the part that was played.',
+      MARGIN + 4, y + 5.8
+    );
+    y += 14;
+  }
+
+  // ── Performance ──────────────────────────────────────────────────────────
+  const bars = (model.breakdown || []).filter((b) => b && b.label);
+  if (hasHeadline || bars.length) {
+    y = ensureSpace(doc, y, 24 + bars.length * 8);
+    y = _sectionTitle(doc, 'Performance', MARGIN, y, CONTENT_W);
+
+    if (hasHeadline) {
+      const figure = String(Math.round(headlineVal));
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      setTextHex(doc, ringColour);
+      /* Measure at the size the figure is DRAWN at. Measuring after switching
+         to the caption's 7pt put the caption on top of the number. */
+      const figureW = doc.getTextWidth(figure);
+      doc.text(figure, MARGIN, y + 4);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      setTextHex(doc, GRAY);
+      doc.text(String(model.headline.caption || 'Score').toUpperCase(),
+        MARGIN + figureW + 3, y + 4);
+      y += 9;
+    }
+
+    let by = y;
+    bars.forEach((b) => { by = drawBarRow(doc, MARGIN, by, CONTENT_W, b.label, b.value, b.weight); });
+    y = by + 2;
+  }
+
+  // ── Session detail ───────────────────────────────────────────────────────
+  const tiles = (model.metrics || []).filter((m) => m && m.label);
+  if (tiles.length) {
+    y = ensureSpace(doc, y, 30);
+    y = _sectionTitle(doc, 'Session detail', MARGIN, y, CONTENT_W);
+    const perRow = 4;
+    const tw = (CONTENT_W - (perRow - 1) * 3) / perRow;
+    tiles.forEach((m, i) => {
+      const col = i % perRow;
+      const rowStart = col === 0;
+      if (rowStart && i > 0) y += 18;
+      if (rowStart) y = ensureSpace(doc, y, 20);
+      drawKpi(doc, MARGIN + col * (tw + 3), y, tw, 15, String(m.label), String(m.value), TEAL);
+    });
+    y += 22;
+  }
+
+  // ── Reflex sections — the same entries the screen rendered ───────────────
+  (model.sections || []).forEach((section, si) => {
+    const blurbLines = wrapAt(doc, section.blurb, CONTENT_W, 7.5);
+    y = ensureSpace(doc, y, 22 + blurbLines.length * 3.4);
+    y = _sectionTitle(doc, section.title, MARGIN, y, CONTENT_W);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    setTextHex(doc, GRAY);
+    doc.text(blurbLines, MARGIN, y);
+    y += blurbLines.length * 3.4 + 2;
+
+    if (si === 0 && model.notMeasuredReason
+        && !section.entries.some((e) => e.measured)) {
+      const lines = wrapAt(doc, model.notMeasuredReason, CONTENT_W - 6, 7, 'italic');
+      y = ensureSpace(doc, y, lines.length * 3.2 + 6);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7);
+      setTextHex(doc, GRAY);
+      doc.text(lines, MARGIN + 2, y);
+      y += lines.length * 3.2 + 3;
+    }
+
+    section.entries.forEach((entry) => { y = drawReflexEntry(doc, MARGIN, y, CONTENT_W, entry); });
+    y += 2;
+  });
+
+  // ── Narrative (LetterQuest carries one) ──────────────────────────────────
+  if (extras.narrative) {
+    const lines = wrapAt(doc, extras.narrative, CONTENT_W - 12, 8.5);
+    y = ensureSpace(doc, y, lines.length * 4.6 + 22);
+    y = _sectionTitle(doc, 'What we noticed', MARGIN, y, CONTENT_W);
+    setFillHex(doc, CREAM);
+    setDrawHex(doc, TEAL);
+    doc.setLineWidth(0.3);
+    const boxH = lines.length * 4.6 + 9;
+    doc.roundedRect(MARGIN, y, CONTENT_W, boxH, 2, 2, 'FD');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    setTextHex(doc, DARK);
+    doc.text(lines, MARGIN + 6, y + 6.5);
+    y += boxH + 6;
+  }
+
+  // ── Recommended exercises (LetterQuest / Path Tracing) ───────────────────
+  const actionable = (extras.recommendations || []).filter((r) => r && r.exercise_id);
+  if (actionable.length) {
+    y = ensureSpace(doc, y, 34);
+    y = _sectionTitle(doc, 'Recommended movement activities', MARGIN, y, CONTENT_W);
+    const exMap = Object.fromEntries((extras.exercises || []).map((e) => [e.id, e]));
+    const exRows = [['Activity', 'Target reflex', 'Duration', 'Instructions']];
+    actionable.forEach((rec) => {
+      const ex = exMap[rec.exercise_id] || {};
+      const desc = ex.description || '';
+      exRows.push([
+        ex.name || '-',
+        rec.target_reflex || '-',
+        `${ex.duration_minutes || '-'} min`,
+        desc.length > 78 ? `${desc.slice(0, 78)}...` : desc,
+      ]);
+    });
+    y = _drawTable(doc, exRows, MARGIN, y, [34, 34, 20, 90], CONTENT_W, ORANGE);
+    y += 4;
+  }
+
+  // ── Disclaimer, the same sentence the screen ends on ─────────────────────
+  const dis = wrapAt(doc, REPORT_DISCLAIMER, CONTENT_W, 7, 'italic');
+  y = ensureSpace(doc, y, dis.length * 3.2 + 6);
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(7);
+  setTextHex(doc, GRAY);
+  doc.text(dis, MARGIN, y + 2);
+
+  stampFooters(doc);
+  return doc;
+}
+
+/** ArrayBuffer of the game session report, for download. */
+export function generateGameReportBytes(model, extras) {
+  return buildGameReportDoc(model, extras).output('arraybuffer');
+}
+
+/** Save it straight to the user's downloads. */
+export function downloadGameReport(model, extras = {}) {
+  const doc = buildGameReportDoc(model, extras);
+  const name = (model.gameName || 'Session').replace(/[^A-Za-z0-9]+/g, '');
+  const stamp = new Date().toISOString().slice(0, 10);
+  doc.save(`Nesture_${name}_${stamp}.pdf`);
 }
