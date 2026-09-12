@@ -221,8 +221,6 @@ export default function ResetPasswordPage() {
                       placeholder="Min. 8 characters"
                       style={{ ...s.input, paddingRight: 40 }}
                       required
-                      readOnly
-                      onFocus={(e) => e.target.removeAttribute('readonly')}
                       autoComplete="new-password"
                     />
                     <button
@@ -249,8 +247,6 @@ export default function ResetPasswordPage() {
                       placeholder="••••••••"
                       style={{ ...s.input, paddingRight: 40 }}
                       required
-                      readOnly
-                      onFocus={(e) => e.target.removeAttribute('readonly')}
                       autoComplete="new-password"
                     />
                     <button

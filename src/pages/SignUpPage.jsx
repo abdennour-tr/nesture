@@ -350,9 +350,7 @@ export default function SignUpPage() {
                     onBlur={handleFirstNameBlur}
                     required 
                     placeholder="Jennifer" 
-                    readOnly
-                    onFocus={(e) => e.target.removeAttribute('readonly')}
-                    autoComplete="off"
+                    autoComplete="given-name"
                   />
                   {firstNameError && <div style={s.inlineError}>{firstNameError}</div>}
                 </div>
@@ -364,9 +362,7 @@ export default function SignUpPage() {
                     onChange={(e) => handleLastNameChange(e.target.value)} 
                     onBlur={handleLastNameBlur}
                     placeholder="Chen" 
-                    readOnly
-                    onFocus={(e) => e.target.removeAttribute('readonly')}
-                    autoComplete="off"
+                    autoComplete="family-name"
                   />
                   {lastNameError && <div style={s.inlineError}>{lastNameError}</div>}
                 </div>
@@ -381,9 +377,7 @@ export default function SignUpPage() {
                   onBlur={handleEmailBlur}
                   required 
                   placeholder="you@example.com" 
-                  readOnly
-                  onFocus={(e) => e.target.removeAttribute('readonly')}
-                  autoComplete="off"
+                  autoComplete="email"
                 />
                 {emailError && <div style={s.inlineError}>{emailError}</div>}
               </div>
@@ -398,8 +392,6 @@ export default function SignUpPage() {
                     onBlur={handlePasswordBlur}
                     required 
                     placeholder="Min. 8 characters" 
-                    readOnly
-                    onFocus={(e) => e.target.removeAttribute('readonly')}
                     autoComplete="new-password"
                   />
                   <button type="button" onClick={() => setShowPassword(!showPassword)} style={s.eyeBtn}>
@@ -419,8 +411,6 @@ export default function SignUpPage() {
                     onBlur={handleConfirmBlur}
                     required 
                     placeholder="••••••••" 
-                    readOnly
-                    onFocus={(e) => e.target.removeAttribute('readonly')}
                     autoComplete="new-password"
                   />
                   <button type="button" onClick={() => setShowConfirm(!showConfirm)} style={s.eyeBtn}>

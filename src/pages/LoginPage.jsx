@@ -339,9 +339,7 @@ export default function LoginPage() {
                       placeholder="Email address" 
                       style={s.input} 
                       required
-                      readOnly
-                      onFocus={(e) => e.target.removeAttribute('readonly')}
-                      autoComplete="off"
+                      autoComplete="email"
                       disabled={isLoading || isSubmitting}
                     />
                   </div>
@@ -357,9 +355,7 @@ export default function LoginPage() {
                       placeholder="Password" 
                       style={{ ...s.input, paddingRight: 40 }} 
                       required
-                      readOnly
-                      onFocus={(e) => e.target.removeAttribute('readonly')}
-                      autoComplete="off"
+                      autoComplete="current-password"
                       disabled={isLoading || isSubmitting}
                     />
                     <button
@@ -406,9 +402,8 @@ export default function LoginPage() {
                       placeholder="Learner Nickname" 
                       style={s.input} 
                       required
-                      readOnly
-                      onFocus={(e) => e.target.removeAttribute('readonly')}
-                      autoComplete="off"
+                      autoComplete="username"
+                      autoCapitalize="none"
                       disabled={isLoading || isSubmitting}
                     />
                   </div>
@@ -424,9 +419,7 @@ export default function LoginPage() {
                       placeholder="Password" 
                       style={{ ...s.input, paddingRight: 40 }} 
                       required
-                      readOnly
-                      onFocus={(e) => e.target.removeAttribute('readonly')}
-                      autoComplete="off"
+                      autoComplete="current-password"
                       disabled={isLoading || isSubmitting}
                     />
                     <button
