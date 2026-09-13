@@ -750,6 +750,20 @@ export default function TraceTypeGame() {
     }
   }, [step, gamePhase, isPaused, currentLetter, typedCount, typeStartTime, soundEnabled]);
 
+  /* On-screen taps must only count in TOUCH mode. In camera ("hand in the air")
+     mode the keys are pressed by dwelling the tracked fingertip, so a stray
+     finger/mouse tap on the screen should do nothing — matching the other games,
+     which ignore touch while the camera is the active input. */
+  const handleFindKeyClick = useCallback((key) => {
+    if (inputMethod !== 'touch') return;
+    handleFindKeyPress(key);
+  }, [inputMethod, handleFindKeyPress]);
+
+  const handleTypeKeyClick = useCallback((key) => {
+    if (inputMethod !== 'touch') return;
+    handleTypeKeyPress(key);
+  }, [inputMethod, handleTypeKeyPress]);
+
   const cameraPointerActive = inputMethod === 'camera' && gamePhase === 'playing' && !isPaused;
   cameraContextRef.current = { active: cameraPointerActive, step, handleFindKeyPress, handleTypeKeyPress };
 
@@ -1150,8 +1164,34 @@ export default function TraceTypeGame() {
     setHandVisible((v) => (v ? false : v));
   }, []);
 
+  /* ── Switch input method mid-game ────────────────────────────────────────
+     Lets the child move between "hand in the air" (camera) and touch without
+     leaving the round — parity with the other games. Any in-progress trace or
+     dwell is cleared so it does not carry across the switch. Switching to touch
+     resumes play immediately; switching to camera re-enters the same warm-up
+     ("show your hand") path the initial camera choice uses, so consent and hand
+     detection are handled exactly as before. The current word and letter are
+     preserved either way. */
+  const switchMode = useCallback(() => {
+    const next = inputMethod === 'camera' ? 'touch' : 'camera';
+    setIsDrawing(false);
+    hideHand();
+    clearCameraInteraction();
+    setInputMethod(next);
+    if (next === 'touch') {
+      setGamePhase('playing');
+      letterStartTimeRef.current = Date.now();
+    } else {
+      setGamePhase('waiting');
+    }
+    if (soundEnabled) soundManager.playClick?.();
+  }, [inputMethod, soundEnabled, hideHand, clearCameraInteraction]);
+
   // Touch/Mouse Support for Trace Phase
   const handlePointerEvent = (e) => {
+    // Touch/mouse tracing is honoured only in touch mode; in camera mode the
+    // trace is driven by the tracked fingertip, never by screen contact.
+    if (inputMethod !== 'touch') return;
     if (e.type === 'pointermove' && !isDrawing) return;
     if (step !== 'trace' || gamePhase !== 'playing' || isPaused) return;
 
@@ -1853,6 +1893,16 @@ export default function TraceTypeGame() {
           >
             <HelpCircle size={18} />
           </button>
+          {inputMethod && (
+            <button
+              className="tt-icon-btn"
+              onClick={switchMode}
+              title={inputMethod === 'camera' ? 'Switch to touch' : 'Switch to hand in the air'}
+              aria-label={inputMethod === 'camera' ? 'Switch to touch' : 'Switch to hand in the air'}
+            >
+              {inputMethod === 'camera' ? <MousePointer2 size={18} /> : <Hand size={18} />}
+            </button>
+          )}
           <button
             className="tt-icon-btn"
             onClick={() => toggleGameTheme()}
@@ -1905,7 +1955,7 @@ export default function TraceTypeGame() {
                       : i === currentLetterIdx ? 'active' : 'todo'
                   }`}
                 >
-                  {i <= currentLetterIdx ? ch : '_'}
+                  {ch}
                 </span>
               ))}
             </div>
@@ -1970,6 +2020,7 @@ export default function TraceTypeGame() {
                 ref={traceSvgRef}
                 viewBox="20 20 260 260"
                 onPointerDown={(e) => {
+                  if (inputMethod !== 'touch') return;
                   e.currentTarget.setPointerCapture(e.pointerId);
                   setIsDrawing(true);
                   handlePointerEvent(e);
@@ -2170,7 +2221,7 @@ export default function TraceTypeGame() {
                   </motion.div>
                   <VirtualKeyboard
                     targetLetter={currentLetter}
-                    onKeyPress={handleFindKeyPress}
+                    onKeyPress={handleFindKeyClick}
                     highlightTarget={true}
                     keyStates={keyStates}
                   />
@@ -2214,7 +2265,7 @@ export default function TraceTypeGame() {
                   </div>
                   <VirtualKeyboard
                     targetLetter={currentLetter}
-                    onKeyPress={handleTypeKeyPress}
+                    onKeyPress={handleTypeKeyClick}
                     highlightTarget={false}
                     keyStates={keyStates}
                   />

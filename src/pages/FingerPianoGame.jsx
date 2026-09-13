@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {Home, Pause, Play, RotateCcw, Clock, Star, Volume2, VolumeX, CheckCircle, Info} from 'lucide-react';
+import {Home, Pause, Play, RotateCcw, Clock, Star, Volume2, VolumeX, CheckCircle, Info, ArrowLeftRight} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
 import GameRules from '../components/game/GameRules';
@@ -251,6 +251,16 @@ export default function FingerPianoGame() {
     sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules'
   );
   const [isPaused, setIsPaused] = useState(false);
+  /* Which physical hand feeds each on-screen side. The correct value depends on
+     the camera / mirror setup, so it is a remembered, one-click choice rather
+     than a guess. Defaults to the mirrored mapping most webcams need; the
+     "Swap hands" button flips it if the sides feel reversed. */
+  const [handInvert, setHandInvert] = useState(() => {
+    try {
+      const stored = localStorage.getItem('fingerpiano_hand_invert');
+      return stored === null ? true : stored === '1';
+    } catch { return true; }
+  });
   /* True while the end-game confirmation is on screen. The round is paused
      then, but the PAUSE CARD must stay hidden so only one card shows. */
   const [endAsking, setEndAsking] = useState(false);
@@ -352,7 +362,16 @@ export default function FingerPianoGame() {
     if (mode !== 'camera' || !isPlaying) return;
     const now = performance.now();
     for (const hand of ['right', 'left']) {
-      const landmarks = multiHandData?.[hand];
+      /* `hand` is the on-screen side (and the side of the keys, the hand visual
+         and the ready state). Which physical hand the shared tracking hook puts
+         in each slot depends on the camera / mirror setup, and there are only
+         two possibilities — so a single "Swap hands" toggle (persisted) lets the
+         child land on the one where the on-screen LEFT hand is their real left
+         hand and the RIGHT is their real right. When `handInvert` is on we read
+         the opposite slot. The shared hook is left untouched (the other games
+         and the reflex engine also rely on it). */
+      const dataHand = handInvert ? (hand === 'right' ? 'left' : 'right') : hand;
+      const landmarks = multiHandData?.[dataHand];
       const visual = hand === 'right' ? rightHandRef.current : leftHandRef.current;
       let track = handsRef.current[hand];
       if (!landmarks?.[0]) continue;
@@ -376,7 +395,7 @@ export default function FingerPianoGame() {
         }
       }
     }
-  }, [multiHandData, isPlaying, mode, activeKeyCount]);
+  }, [multiHandData, isPlaying, mode, activeKeyCount, handInvert]);
 
   const queueTouchKey = useCallback((keyIdx) => {
     if (mode !== 'touch' || !isPlaying || !targetRef.current) return;
@@ -864,6 +883,23 @@ export default function FingerPianoGame() {
     if (soundEnabled) soundManager.playClick();
   }, [soundEnabled]);
 
+  /* Flip which physical hand drives each on-screen side, and remember it. The
+     current tracks are dropped so both hands re-acquire under the new mapping
+     rather than jumping. */
+  const toggleHandInvert = useCallback(() => {
+    setHandInvert((v) => {
+      const next = !v;
+      try { localStorage.setItem('fingerpiano_hand_invert', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+    handsRef.current = {};
+    cameraTapsRef.current = [];
+    rightHandRef.current?.clear();
+    leftHandRef.current?.clear();
+    setHandReady({ left: false, right: false });
+    if (soundEnabled) soundManager.playClick();
+  }, [soundEnabled]);
+
   const restart = useCallback(() => {
     sessionSavedRef.current = false;
     setSessionId(null);
@@ -922,6 +958,13 @@ export default function FingerPianoGame() {
           onTogglePause={gamePhase === 'playing' ? togglePause : undefined}
           onExit={goHome}
           extraActions={<>
+            {mode === 'camera' && (
+              <button className="gs-action gs-action--icon" onClick={toggleHandInvert}
+                aria-label="Swap which hand controls each side"
+                title="Swap hands — use if your left/right hands feel reversed on screen">
+                <ArrowLeftRight size={18} />
+              </button>
+            )}
             <button className="gs-action gs-action--icon" onClick={() => setSoundEnabled(value => !value)}
               aria-label={soundEnabled ? 'Mute sound' : 'Enable sound'} title={soundEnabled ? 'Mute sound' : 'Enable sound'}>
               {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}

@@ -1576,6 +1576,25 @@
   gap: 12px;
 }
 
+/* The pause overlay is always dark (in both themes), so its content must read
+   light-on-dark. In light mode the theme's text variables are near-black, which
+   made "Game Paused" and the "Quit" button invisible on the dark overlay.
+   These overrides are scoped to the overlay so the Results screen's own
+   secondary button (on a light card) is left untouched. */
+.tt-pause-title {
+  color: #fff;
+}
+
+.tt-pause-overlay .tt-results-btn.secondary {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.tt-pause-overlay .tt-results-btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════════
    RESPONSIVE
    ══════════════════════════════════════════════════════════════════════════════ */
@@ -2230,6 +2249,15 @@
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
 }
 
+/* In light mode the neutral-key background above (same specificity, later in
+   the sheet) was overriding the highlighted key's orange fill while its white
+   text stayed — a white letter on a white key. Restore the orange gradient so
+   the target letter reads. */
+.tt-light-mode .tt-key.highlighted {
+  background: linear-gradient(135deg, var(--tt-accent), #D97706);
+  color: #fff;
+}
+
 /* ── Short windows: trade the display letter for keyboard room ───────────── */
 @media (max-height: 700px) {
   .tt-step-container { --tt-radius: 16px; }
@@ -2441,28 +2469,54 @@
 
 .tt-word-letters {
   display: flex;
-  align-items: baseline;
-  gap: clamp(5px, 0.9vw, 12px);
+  align-items: flex-end;
+  gap: clamp(6px, 1vw, 14px);
   line-height: 1;
 }
 
+/* Each position is a letter of the word sitting on its own slot underline, so
+   the child reads it as "a word being filled in" — not a row of floating
+   dashes. The full word is always shown: completed letters solid green, the
+   current letter glowing orange, and upcoming letters ghosted but legible. */
 .tt-word-letter {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2em;
   font-size: clamp(1.25rem, 3.4vh, 2.15rem);
   font-weight: 900;
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
-  min-width: 0.72em;
-  text-align: center;
+  min-width: 0.9em;
+  text-transform: uppercase;
   transition: color 0.25s ease, text-shadow 0.25s ease, transform 0.25s ease;
 }
 
+/* the slot underline under each letter */
+.tt-word-letter::after {
+  content: "";
+  display: block;
+  width: 0.9em;
+  height: 0.13em;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.32;
+  transition: opacity 0.25s ease;
+}
+
 .tt-word-letter.done   { color: var(--tt-success); }
-.tt-word-letter.todo   { color: var(--tt-text-dim); opacity: 0.45; }
+.tt-word-letter.done::after { opacity: 0.55; }
+
+.tt-word-letter.todo   { color: var(--tt-text-dim); opacity: 0.4; }
+.tt-word-letter.todo::after { opacity: 0.45; }
+
 .tt-word-letter.active {
   color: var(--tt-accent);
   text-shadow: 0 0 22px var(--tt-accent-glow);
   transform: translateY(-1px) scale(1.12);
 }
+.tt-word-letter.active::after { opacity: 0.9; }
 
 /* ── Step pills ──────────────────────────────────────────────────────────── */
 .tt-step-indicator {
@@ -2693,7 +2747,7 @@
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
 }
 
-.tt-light-mode .tt-word-letter.todo { opacity: 0.55; }
+.tt-light-mode .tt-word-letter.todo { opacity: 0.5; }
 
 .tt-light-mode .tt-trace-area {
   background:

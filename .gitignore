@@ -7,3 +7,15 @@ scratch.js
 test-results/
 playwright-report/
 scratch/
+
+# Local helper scripts — machine-specific and may contain secrets (API keys).
+# (create-env.bat, start-nesture.bat, push-to-github.bat, …)
+*.bat
+
+# Environment files (all variants)
+.env*
+env
+
+# Temporary / Scratch
+Claude outputs/
+

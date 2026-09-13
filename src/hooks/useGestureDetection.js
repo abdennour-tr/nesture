@@ -36,7 +36,10 @@ export const GESTURE_DEFS = {
   open_hand:   { thumb: 'up',   index: 'up',   middle: 'up',   ring: 'up',   pinky: 'up'   },
   closed_fist: { thumb: 'down', index: 'down', middle: 'down', ring: 'down', pinky: 'down' },
   // ── Added so Medium has its own distinct, finer-motor set (see LEVELS) ──
-  three_fingers: { thumb: 'down', index: 'up',   middle: 'up',   ring: 'up',   pinky: 'down' },
+  /* Matches the 🤟 emoji shown on the card (thumb + index + pinky extended,
+     middle + ring folded). It previously expected index+middle+ring, so the
+     shape a child copied from the card could never reach the match threshold. */
+  three_fingers: { thumb: 'up',   index: 'up',   middle: 'down', ring: 'down', pinky: 'up'   },
   rock:          { thumb: 'down', index: 'up',   middle: 'down', ring: 'down', pinky: 'up'   },
   pinky_up:      { thumb: 'down', index: 'down', middle: 'down', ring: 'down', pinky: 'up'   },
   call_me:       { thumb: 'up',   index: 'down', middle: 'down', ring: 'down', pinky: 'up'   },

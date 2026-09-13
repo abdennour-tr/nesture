@@ -46,6 +46,14 @@
 
   box-sizing: border-box;
   min-height: 100%;
+  /* Bound the report to the viewport so its own vertical scroll actually
+     engages. Without this it only had `min-height: 100%`, so it grew to fit its
+     content; when an ancestor clips overflow (the game pages run at viewport
+     height with `overflow: hidden`), a tall report — reflex cards plus the
+     Play again / Back to games buttons — was cut off with no way to scroll to
+     it. Capping the height here makes `.gr-root` the scroller in every host,
+     whether it is the routed results page or a fixed results overlay. */
+  max-height: 100dvh;
   width: 100%;
   display: flex;
   justify-content: center;

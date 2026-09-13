@@ -110,6 +110,20 @@
 .fp-digit.is-wanted { color: var(--fc); }
 .fp-digit.is-wanted .fp-digit-surface { fill: color-mix(in srgb, var(--fc) 14%, #10263B); stroke-width: 1.7; }
 .fp-digit.is-wanted .fp-digit-mesh { opacity: 0.9; }
+/* The wanted finger performs a gentle, looping "press" so the child sees the
+   exact motion to make — a live demo on top of the colour, glow and label. The
+   animated transform overrides the flex-driven scaleY for this one finger while
+   it is the target; every other finger still mirrors the live hand. It pivots
+   at the finger base (transform-origin is set inline per digit), so the tip
+   dips down like a real press. */
+.fp-digit.is-wanted { animation: fpFingerPress 1.05s ease-in-out infinite; }
+@keyframes fpFingerPress {
+  0%, 100% { transform: scaleY(1); }
+  45%      { transform: scaleY(0.7); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fp-digit.is-wanted { animation: none; }
+}
 .fp-hand-figure.is-detected { --hand-ink: #9CE6FF; }
 .fp-hand-figure.is-detected .fp-hand-art { filter: drop-shadow(0 0 5px #38BDF85A) drop-shadow(0 0 15px #0EA5E940); }
 .fp-hand-figure.is-detected .fp-hand-signal { color: #99F6E4; border-color: #5EEAD450; }
