@@ -1,6 +1,7 @@
 /**
  * A key's number, colour, note and finger never change.
- * Right-hand keys 1–5 are introduced first; left-hand keys 6–10 join later.
+ * Left-hand keys 1–5 (screen-left) are introduced first; right-hand keys 6–10
+ * (screen-right) join later — so each hand plays the keys on its own side.
  */
 export const PIANO_FINGERS = [
   { key: 'thumb', n: 1, label: 'Thumb', color: '#4ADE80' },
@@ -18,7 +19,7 @@ const NOTES = [
 const COLORS = [...PIANO_FINGERS.map(f => f.color), '#2DD4BF', '#FACC15', '#FB7185', '#818CF8', '#E879F9'];
 export const PIANO_KEYS = NOTES.map(([name, midi], i) => {
   const finger = PIANO_FINGERS[i % 5];
-  const hand = i < 5 ? 'right' : 'left';
+  const hand = i < 5 ? 'left' : 'right';
   return {
     id: hand + '-' + finger.key, i, n: i + 1, name, midi,
     fingerKey: finger.key, hand, color: COLORS[i],
@@ -27,9 +28,9 @@ export const PIANO_KEYS = NOTES.map(([name, midi], i) => {
   };
 });
 export const PIANO_EASY_STAGES = [
-  { id: 1, keys: 3, notes: 9, title: 'Your first three', hint: 'Right thumb, index and middle finger.' },
-  { id: 2, keys: 5, notes: 15, title: 'All five fingers', hint: 'Your right ring and little finger join in.' },
-  { id: 3, keys: 10, notes: 20, title: 'Two hands, one tune', hint: 'Keep both hands in view. Left-hand keys 6–10 are ready.' },
+  { id: 1, keys: 3, notes: 9, title: 'Your first three', hint: 'Left thumb, index and middle finger.' },
+  { id: 2, keys: 5, notes: 15, title: 'All five fingers', hint: 'Your left ring and little finger join in.' },
+  { id: 3, keys: 10, notes: 20, title: 'Two hands, one tune', hint: 'Keep both hands in view. Right-hand keys 6–10 are ready.' },
 ];
 export const PIANO_LEVELS = {
   1: {
@@ -38,7 +39,7 @@ export const PIANO_LEVELS = {
   },
   2: {
     id: 2, key: 'medium', label: 'Medium', emoji: '⚡', color: '#E8841A',
-    stages: [{ id: 1, keys: 5, notes: 30, title: 'Five-finger melody', hint: 'Play with all five fingers of your right hand.' }],
+    stages: [{ id: 1, keys: 5, notes: 30, title: 'Five-finger melody', hint: 'Play with all five fingers of your left hand.' }],
     notes: 30, restMs: 380,
   },
   3: {

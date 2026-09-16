@@ -142,6 +142,49 @@
 .fp-tracking-status.is-ready .fp-status-light { background: #5EEAD4; box-shadow: 0 0 9px #5EEAD480; }
 .fp-tracking-status button { border: 1px solid #67E8F94D; border-radius: 6px; padding: 4px 8px; background: #164E63; color: #E0F2FE; font: inherit; cursor: pointer; }
 .fpp-cam-hidden { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+
+/* ── Camera + hand-landmarks preview (picture-in-picture, top-left) ───────────
+   A compact, styled version of LetterQuest's camera panel. Video and canvas are
+   mirrored together so the landmark dots track the live image. */
+.fp-cam-widget {
+  position: absolute; top: 14px; left: 14px; z-index: 10;
+  width: clamp(140px, 19vw, 216px); aspect-ratio: 16 / 10;
+  border-radius: 16px; overflow: hidden;
+  border: 1px solid #7DD3FC45;
+  background: #0A1420;
+  box-shadow: 0 12px 34px -12px rgba(0, 0, 0, 0.72), inset 0 1px 0 #FFFFFF12;
+}
+.fp-cam-widget::after {
+  /* a soft top scrim so the badge stays legible over a bright frame */
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 42px; pointer-events: none;
+  background: linear-gradient(180deg, rgba(6, 14, 26, 0.55), transparent);
+}
+.fp-cam-video, .fp-cam-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; transform: scaleX(-1);
+}
+.fp-cam-canvas { pointer-events: none; z-index: 1; }
+.fp-cam-badge {
+  position: absolute; top: 8px; left: 8px; z-index: 2;
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 9px; border-radius: 99px;
+  background: rgba(6, 14, 26, 0.68); backdrop-filter: blur(6px);
+  font-size: 0.6rem; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase;
+  color: #CBD5E1;
+}
+.fp-cam-dot { width: 7px; height: 7px; border-radius: 50%; background: #64748B; flex: none; }
+.fp-cam-badge.is-live { color: #A7F3D0; }
+.fp-cam-badge.is-live .fp-cam-dot { background: #10B981; box-shadow: 0 0 8px #10B981; animation: fpCamPulse 1.4s ease-in-out infinite; }
+@keyframes fpCamPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.fp-cam-fallback {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+  color: #94A3B8; font-size: 0.72rem; text-align: center; padding: 10px;
+}
+.fp-cam-fallback span { font-size: 1.5rem; }
+@media (max-width: 560px) {
+  .fp-cam-widget { top: 8px; left: 8px; width: 116px; border-radius: 12px; }
+}
 .fp-session-progress { display: flex; align-items: center; gap: 16px; color: var(--gs-ink-soft); font-size: 0.71rem; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .fp-progress-track { height: 6px; border-radius: 5px; background: var(--gs-surface-2); overflow: hidden; flex: 1; }
 .fp-progress-track > div { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--gs-accent), var(--gs-accent-2)); transition: width 220ms ease; }

@@ -41,6 +41,7 @@ import piggyImg from '../assets/pinch-coin/piggy.png';
 import tutorialHandImg from '../assets/pinch-coin/tutorial-pinch-hand-v2.png';
 import GameResults from '../components/game/GameResults';
 import TouchModePose from '../components/game/TouchModePose';
+import CameraLandmarks from '../components/game/CameraLandmarks';
 /* NOTE: GameShell.css is NOT imported here on purpose. It is already pulled in
    by GameRules / EndGameControl above, and an ES module is evaluated once at
    its FIRST import — so a later import would be a no-op and could not change
@@ -1195,10 +1196,16 @@ export default function PinchCoinGame() {
             )}
           </AnimatePresence>
 
-          <div className="pcg-cam-hidden">
-            <video ref={videoRef} playsInline muted />
-            <canvas ref={canvasRef} />
-          </div>
+          {/* Camera + hand-landmarks preview (styled, top-left) in camera mode;
+              hidden plumbing in touch mode where no camera runs. */}
+          {mode === 'camera' ? (
+            <CameraLandmarks videoRef={videoRef} canvasRef={canvasRef} detected={isTracking} />
+          ) : (
+            <div className="pcg-cam-hidden">
+              <video ref={videoRef} playsInline muted />
+              <canvas ref={canvasRef} />
+            </div>
+          )}
 
           {mode === 'camera' && gamePhase === 'playing' && (
             <div className={`pcg-cam-status ${isTracking ? 'ok' : 'wait'}`}>

@@ -46,6 +46,7 @@ import { HandDefs, HandArt, followHand, makeHandState } from '../components/game
 import { createHandPointerFilter, handDepthScale, STABLE_POINTER_OPTIONS } from '../utils/handPointerFilter';
 import GameResults from '../components/game/GameResults';
 import TouchModePose from '../components/game/TouchModePose';
+import CameraLandmarks from '../components/game/CameraLandmarks';
 import useGraspMeasure from '../hooks/useGraspMeasure';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — fixed virtual space, scaled to the rendered field, so difficulty
@@ -1322,10 +1323,16 @@ export default function BubbleGame() {
             </g>
           </svg>
 
-          <div className="bg-cam-hidden">
-            <video ref={videoRef} playsInline muted />
-            <canvas ref={trackCanvasRef} />
-          </div>
+          {/* Camera + hand-landmarks preview (styled, top-left) in camera mode;
+              hidden plumbing in touch mode where no camera runs. */}
+          {mode === 'camera' ? (
+            <CameraLandmarks videoRef={videoRef} canvasRef={trackCanvasRef} detected={isTracking} />
+          ) : (
+            <div className="bg-cam-hidden">
+              <video ref={videoRef} playsInline muted />
+              <canvas ref={trackCanvasRef} />
+            </div>
+          )}
 
           {mode === 'camera' && gamePhase === 'playing' && (
             <div className={`bg-cam-status ${isTracking ? 'ok' : 'wait'}`}>

@@ -251,15 +251,17 @@ export default function FingerPianoGame() {
     sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules'
   );
   const [isPaused, setIsPaused] = useState(false);
-  /* Which physical hand feeds each on-screen side. The correct value depends on
-     the camera / mirror setup, so it is a remembered, one-click choice rather
-     than a guess. Defaults to the mirrored mapping most webcams need; the
-     "Swap hands" button flips it if the sides feel reversed. */
+  /* Which physical hand feeds each on-screen side. Keys 1–5 are the LEFT hand
+     (screen-left) and 6–10 the RIGHT hand (screen-right); with the default
+     mapping each side reads its own tracked hand, so the real left hand plays
+     1–5 and the real right hand plays 6–10. The correct value can still depend
+     on an unusual camera / mirror setup, so it stays a remembered, one-click
+     choice — the "Swap hands" button flips it if the sides ever feel reversed. */
   const [handInvert, setHandInvert] = useState(() => {
     try {
       const stored = localStorage.getItem('fingerpiano_hand_invert');
-      return stored === null ? true : stored === '1';
-    } catch { return true; }
+      return stored === null ? false : stored === '1';
+    } catch { return false; }
   });
   /* True while the end-game confirmation is on screen. The round is paused
      then, but the PAUSE CARD must stay hidden so only one card shows. */
@@ -278,6 +280,7 @@ export default function FingerPianoGame() {
 
   /* ── DOM refs ── */
   const videoRef   = useRef(null);
+  const camCanvasRef = useRef(null);   // hand landmarks drawn by useHandTracking
   const fieldRef   = useRef(null);
   const fxCanvasRef = useRef(null);
   const rightHandRef = useRef(null);
@@ -324,7 +327,7 @@ export default function FingerPianoGame() {
   const trackingEnabled = mode === 'camera' && ['countdown', 'playing', 'stage'].includes(gamePhase);
 
   const { multiHandData, error: cameraError, releaseCamera } = useHandTracking(
-    videoRef, null, trackingEnabled, isPaused || gamePhase === 'stage', 2
+    videoRef, camCanvasRef, trackingEnabled, isPaused || gamePhase === 'stage', 2
   );
 
   /* ── Turn the camera off when the round ends ────────────────────────────
@@ -667,7 +670,9 @@ export default function FingerPianoGame() {
         ready[hand] = !!track?.detected && now - track.lastSeen < 300;
         if (!ready[hand]) (hand === 'right' ? rightHandRef.current : leftHandRef.current)?.clear();
       }
-      const cameraReady = ready.right && (activeKeyCount <= 5 || ready.left);
+      // Single-hand stages (≤5 keys) use keys 1–5 = the LEFT hand; both-hand
+      // stages also need the right.
+      const cameraReady = ready.left && (activeKeyCount <= 5 || ready.right);
       const waitingBetweenNotes = !targetRef.current && doneRef.current > 0;
       if (mode === 'touch' || cameraReady || waitingBetweenNotes) elapsedRef.current += dt;
       const ts = elapsedRef.current;
@@ -776,6 +781,14 @@ export default function FingerPianoGame() {
 
   useEffect(() => {
     if (synthRef.current) synthRef.current.enabled = soundEnabled;
+    /* soundManager is a singleton SHARED with the other games. This game's sound
+       button only flipped local state before, so a mute left on in another game
+       silenced Finger Piano's effects with no way to turn them back on here.
+       Keep the singleton in sync with this game's toggle (and resume the audio
+       context when enabling) so the button always works and the game is not
+       silent on entry. */
+    soundManager.enabled = soundEnabled;
+    if (soundEnabled) soundManager.init();
   }, [soundEnabled]);
 
   /* ═════════════════════════════════════════════════════════════════════════
@@ -935,11 +948,11 @@ export default function FingerPianoGame() {
   const progressPct = clamp01(uiHit / cfg.notes) * 100;
   const stageStart = cfg.stages.slice(0, stageIndex).reduce((total, item) => total + item.notes, 0);
   const stageHits = Math.max(0, uiHit - stageStart);
-  const cameraReady = handReady.right && (activeKeyCount <= 5 || handReady.left);
+  const cameraReady = handReady.left && (activeKeyCount <= 5 || handReady.right);
   const handMessage = cameraError
     ? 'Camera unavailable. Check camera access, or use Touch / Mouse.'
-    : cameraReady ? (activeKeyCount > 5 ? 'Both hands detected' : 'Right hand detected')
-      : activeKeyCount > 5 ? 'Open both hands in front of the camera' : 'Open your right hand in front of the camera';
+    : cameraReady ? (activeKeyCount > 5 ? 'Both hands detected' : 'Left hand detected')
+      : activeKeyCount > 5 ? 'Open both hands in front of the camera' : 'Open your left hand in front of the camera';
 
   return (
     <div className="fpp-page">
@@ -985,7 +998,7 @@ export default function FingerPianoGame() {
                 <li key={item.id} className={index === stageIndex ? 'is-current' : index < stageIndex ? 'is-complete' : ''}
                   aria-current={index === stageIndex ? 'step' : undefined}>
                   <span>{index < stageIndex ? '✓' : item.id}</span>
-                  <div>{item.keys} keys<small>{item.keys === 10 ? 'Both hands' : 'Right hand'}</small></div>
+                  <div>{item.keys} keys<small>{item.keys === 10 ? 'Both hands' : 'Left hand'}</small></div>
                 </li>
               ))}
             </ol>
@@ -1032,10 +1045,13 @@ export default function FingerPianoGame() {
             </> : <span>{gamePhase === 'playing' ? 'Relax your fingers — the next note is coming.' : 'One finger. One colour. One note.'}</span>}
           </div>
           <div className={'fp-hands' + (activeKeyCount > 5 ? ' fp-hands-both' : '')}>
-            {activeKeyCount > 5 && <PianoHand ref={leftHandRef} hand="left"
-              keyCount={activeKeyCount} mode={mode} detected={handReady.left} wanted={litKey?.id} />}
-            <PianoHand ref={rightHandRef} hand="right" keyCount={activeKeyCount} mode={mode}
-              detected={handReady.right} wanted={litKey?.id} />
+            {/* Left hand (keys 1–5) is always shown and sits on the left; the
+                right hand (keys 6–10) joins only in the two-hand stages, on the
+                right — so each panel is on the same side as its keys. */}
+            <PianoHand ref={leftHandRef} hand="left" keyCount={activeKeyCount} mode={mode}
+              detected={handReady.left} wanted={litKey?.id} />
+            {activeKeyCount > 5 && <PianoHand ref={rightHandRef} hand="right"
+              keyCount={activeKeyCount} mode={mode} detected={handReady.right} wanted={litKey?.id} />}
           </div>
           <canvas className="fpp-fx-canvas" ref={fxCanvasRef} aria-hidden="true" />
           <div className="fp-feedback" role="status" aria-live="polite">
@@ -1043,7 +1059,27 @@ export default function FingerPianoGame() {
               {toast.kind === 'ok' ? <CheckCircle size={16} /> : <Info size={16} />}{toast.text}
             </span>}
           </div>
-          <div className="fpp-cam-hidden" aria-hidden="true"><video ref={videoRef} playsInline muted /></div>
+          {/* Styled camera + hand-landmarks preview, top-left of the field —
+              like LetterQuest, but a compact picture-in-picture. The video and
+              the landmark canvas are mirrored together (selfie view) so the
+              overlaid dots line up with the live image. */}
+          {mode === 'camera' ? (
+            <div className="fp-cam-widget">
+              {cameraError ? (
+                <div className="fp-cam-fallback"><span aria-hidden="true">📷</span>Caméra indisponible</div>
+              ) : (
+                <>
+                  <video ref={videoRef} className="fp-cam-video" playsInline muted autoPlay />
+                  <canvas ref={camCanvasRef} width={640} height={360} className="fp-cam-canvas" aria-hidden="true" />
+                  <div className={'fp-cam-badge' + (cameraReady ? ' is-live' : '')}>
+                    <span className="fp-cam-dot" aria-hidden="true" />{cameraReady ? 'LIVE' : 'Recherche…'}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="fpp-cam-hidden" aria-hidden="true"><video ref={videoRef} playsInline muted /></div>
+          )}
           <div className={'fp-tracking-status' + (cameraReady ? ' is-ready' : '')} role="status">
             {mode === 'camera' ? <>
               <span className="fp-status-light" aria-hidden="true" />{handMessage}

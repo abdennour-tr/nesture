@@ -43,6 +43,7 @@ import { createHandPointerFilter, handDepthScale, STABLE_POINTER_OPTIONS } from 
 import {otComposite, otRound, FINISH} from '../utils/otScore';
 import GameResults from '../components/game/GameResults';
 import TouchModePose from '../components/game/TouchModePose';
+import CameraLandmarks from '../components/game/CameraLandmarks';
 import useGraspMeasure from '../hooks/useGraspMeasure';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — the play field uses a fixed virtual coordinate space that is
@@ -1381,11 +1382,16 @@ export default function LadybugGame() {
             )}
           </AnimatePresence>
 
-          {/* Hidden MediaPipe plumbing */}
-          <div className="lb-cam-hidden">
-            <video ref={videoRef} playsInline muted />
-            <canvas ref={trackCanvasRef} />
-          </div>
+          {/* Camera + hand-landmarks preview (styled, top-left) in camera mode;
+              the same video/canvas stay hidden in touch mode where no camera runs. */}
+          {mode === 'camera' ? (
+            <CameraLandmarks videoRef={videoRef} canvasRef={trackCanvasRef} detected={isTracking} />
+          ) : (
+            <div className="lb-cam-hidden">
+              <video ref={videoRef} playsInline muted />
+              <canvas ref={trackCanvasRef} />
+            </div>
+          )}
 
           {/* Camera status pill */}
           {mode === 'camera' && gamePhase === 'playing' && (
