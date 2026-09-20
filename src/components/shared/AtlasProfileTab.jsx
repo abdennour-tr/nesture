@@ -139,7 +139,7 @@ function ProfileCard({ title, icon, color = '#0D5E6B', badge, badgeColor, childr
                 gap: 4
               }}>
                 EVIDENCE REQUIRED
-                <TooltipInfo text="Aucun rapport médical/clinique n'est encore associé à ce domaine. Importez un document pour valider ces observations." />
+                <TooltipInfo text="No medical or clinical report is linked to this area yet. Upload a document to validate these observations." />
               </span>
             </div>
           ) : (

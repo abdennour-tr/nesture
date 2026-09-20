@@ -203,14 +203,14 @@ export default function AtlasDeepDiveModal({
   const renderScoreBadge = (score, band) => {
     if (score === undefined || score === null) return null;
     const bandMap = {
-      'strength': { bg: '#D1FAE5', color: '#065F46', label: 'Niveau de soutien : Force majeure (Autonomie)' },
-      'developing': { bg: '#FEF3C7', color: '#92400E', label: 'Niveau de soutien : Compétence en développement' },
-      'support_area': { bg: '#FEE2E2', color: '#991B1B', label: 'Niveau de soutien : Zone de soutien nécessaire' },
+      'strength': { bg: '#D1FAE5', color: '#065F46', label: 'Support level: Key strength (independent)' },
+      'developing': { bg: '#FEF3C7', color: '#92400E', label: 'Support level: Developing skill' },
+      'support_area': { bg: '#FEE2E2', color: '#991B1B', label: 'Support level: Needs support' },
     };
     const b = bandMap[band] || {
       bg: '#F3F4F6',
       color: '#374151',
-      label: band ? `Niveau de soutien : ${band.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}` : 'Évalué'
+      label: band ? `Support level: ${band.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}` : 'Assessed'
     };
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
@@ -219,7 +219,7 @@ export default function AtlasDeepDiveModal({
         </span>
         <span style={{ fontSize: '0.65rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', background: b.bg, color: b.color, padding: '3px 8px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           {b.label}
-          <TooltipInfo text="Indique le niveau d'accompagnement recommandé pour ce domaine basé sur les scores du questionnaire et documents." />
+          <TooltipInfo text="Shows the level of support recommended for this area, based on questionnaire scores and uploaded documents." />
         </span>
       </div>
     );

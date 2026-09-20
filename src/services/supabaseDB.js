@@ -576,7 +576,7 @@ export async function endSession(sessionId, gestures, reflexEngineOutput = null,
     score:            rs.score,
     indicators_found: rs.indicators_found.length,
     created_at:       endTime.toISOString(),
-    // Colonnes v2.0 — Détection de patrons développementaux (non diagnostique)
+    // v2.0 columns — developmental pattern detection (non-diagnostic)
     label:            rs.label       || 'aucun',
     explanation:      rs.education?.explanation || null,
     activities:       rs.education?.activities  || [],

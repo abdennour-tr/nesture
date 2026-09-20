@@ -995,8 +995,8 @@ export default function ParentDashboard() {
               </>
             ) : (
               <>
-                <h3 style={{ fontFamily:'Inter,sans-serif', color:'#374151', marginBottom: 8 }}>Choisissez un abonnement</h3>
-                <p style={{ fontSize:'0.875rem', marginBottom: 24 }}>Vous devez souscrire à un abonnement pour ajouter un enfant et accéder à toutes les fonctionnalités.</p>
+                <h3 style={{ fontFamily:'Inter,sans-serif', color:'#374151', marginBottom: 8 }}>Choose a subscription</h3>
+                <p style={{ fontSize:'0.875rem', marginBottom: 24 }}>You need an active subscription to add a child and unlock all features.</p>
                 <button
                   onClick={() => navigate('/pricing')}
                   style={{
@@ -1007,7 +1007,7 @@ export default function ParentDashboard() {
                     display: 'inline-flex', alignItems: 'center', gap: 8
                   }}
                 >
-                  🔒 Voir les abonnements
+                  🔒 View subscription plans
                 </button>
               </>
             )}
