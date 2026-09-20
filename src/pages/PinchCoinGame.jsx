@@ -31,6 +31,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {Home, Pause, Play, RotateCcw, Clock, Hand, MousePointer2, Volume2, VolumeX, Info, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
+import useSoundEnabled from '../hooks/useSoundEnabled';
 import GameRules from '../components/game/GameRules';
 import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
@@ -42,6 +43,7 @@ import tutorialHandImg from '../assets/pinch-coin/tutorial-pinch-hand-v2.png';
 import GameResults from '../components/game/GameResults';
 import TouchModePose from '../components/game/TouchModePose';
 import CameraLandmarks from '../components/game/CameraLandmarks';
+import HandGate, { useHandGate, firstPhaseFor } from '../components/game/HandGate';
 /* NOTE: GameShell.css is NOT imported here on purpose. It is already pulled in
    by GameRules / EndGameControl above, and an ES module is evaluated once at
    its FIRST import — so a later import would be a no-op and could not change
@@ -283,10 +285,11 @@ export default function PinchCoinGame() {
   const [mode, setMode] = useState(
     (searchParams.get('mode') || 'touch').toLowerCase() === 'camera' ? 'camera' : 'touch'
   );
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  /* Shared app-wide sound state — the icon always matches what you hear. */
+  const [soundEnabled, setSoundEnabled] = useSoundEnabled();
 
   const [gamePhase, setGamePhase] = useState(() =>
-    sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules'
+    sessionStorage.getItem(RULES_FLAG) ? firstPhaseFor(mode) : 'rules'
   );
   const [isPaused, setIsPaused] = useState(false);
   /* True while the end-game confirmation is on screen. The round is paused
@@ -354,11 +357,19 @@ export default function PinchCoinGame() {
   const sessionSavedRef = useRef(false);
 
   const isPlaying = gamePhase === 'playing' && !isPaused;
-  const trackingEnabled = mode === 'camera' && (gamePhase === 'countdown' || gamePhase === 'playing');
+  const trackingEnabled = mode === 'camera'
+    && (gamePhase === 'waiting' || gamePhase === 'countdown' || gamePhase === 'playing');
 
-  /* Keep the existing 3-argument call signature of the hook. */
+  /* ONE hand plays. Client feedback: a learner who shakes the other hand
+     (excited / nervous) kept losing the coin, because the default hand picker
+     favours the hand that moves most and so jumped to the shaking hand.
+     `handSideLock`: the side (right or left) of the first hand seen owns the
+     round — only its landmarks reach the game, the other hand is ignored and
+     not drawn. Positional args 4–5 are the hook's defaults (not paused, 2
+     hands — MediaPipe still has to SEE both to tell them apart). */
   const { landmarks, isTracking, isSimulationMode, releaseCamera } = useHandTracking(
-    videoRef, canvasRef, trackingEnabled
+    videoRef, canvasRef, trackingEnabled, false, 2,
+    { handSideLock: true, drawOnlyActiveHand: true }
   );
 
   /* ── Turn the camera off when the round ends ────────────────────────────
@@ -972,11 +983,23 @@ export default function PinchCoinGame() {
   /* ═════════════════════════════════════════════════════════════════════════
      CONTROLS
      ═════════════════════════════════════════════════════════════════════════ */
+  /* ── Hand gate (camera mode) ─────────────────────────────────────────
+     Client feedback: the "Show one of your hands" screen existed only in
+     Trace → Find → Type. Without it the 3-2-1 and the round clock started
+     with nobody in front of the camera. The round now waits in 'waiting'
+     until a hand is detected, then runs the normal countdown. See
+     components/game/HandGate.jsx. */
+  const openHandGate = useCallback(() => setGamePhase('countdown'), []);
+  useHandGate({
+    phase: gamePhase, landmarks, isSimulationMode,
+    bypass: mode !== 'camera', onHand: openHandGate,
+  });
+
   const startFromRules = useCallback(() => {
     sessionStorage.setItem(RULES_FLAG, '1');
     if (soundEnabled) { soundManager.init(); soundManager.playClick(); }
-    setGamePhase('countdown');
-  }, [soundEnabled]);
+    setGamePhase(firstPhaseFor(mode));
+  }, [soundEnabled, mode]);
 
   /* ── "How to play", available DURING the game ───────────────────────────
      The rules are shown once automatically on the first visit; this button
@@ -1020,8 +1043,8 @@ export default function PinchCoinGame() {
     setSessionId(null);
     setResults(null);
     setIsPaused(false);
-    setGamePhase('countdown');
-  }, []);
+    setGamePhase(firstPhaseFor(mode));
+  }, [mode]);
 
   const goHome = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -1093,7 +1116,7 @@ export default function PinchCoinGame() {
             {mode === 'camera' ? <Hand size={20} /> : <MousePointer2 size={20} />}
           </button>
           <button className="pcg-icon-btn"
-            onClick={() => setSoundEnabled((s) => { soundManager.toggle?.(); return !s; })}
+            onClick={() => setSoundEnabled((s) => !s)}
             title="Sound">
             {soundEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
           </button>
@@ -1260,6 +1283,14 @@ export default function PinchCoinGame() {
         {showHelp && gamePhase !== 'rules' && (
           <RulesModal key="help" cfg={cfg} mode={mode} onStart={closeHelp} resume />
         )}
+
+        <HandGate
+          key="hand-gate"
+          visible={gamePhase === 'waiting'}
+          isTracking={isTracking}
+          onUseTouch={switchMode}
+          onExit={goHome}
+        />
 
         {gamePhase === 'countdown' && (
           <motion.div key="cd" className="pcg-overlay pcg-overlay-soft"

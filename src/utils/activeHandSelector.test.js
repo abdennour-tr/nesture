@@ -190,3 +190,74 @@ test('releaseActiveHand lets the child swap hands without waiting for the timer'
   expect(result.index).toBe(1);
   expect(result.reason).toBe('ok');
 });
+
+/* ── Hand-side lock (Pinch the Coin) ────────────────────────────────────────
+   Client feedback: a learner shaking her other hand (excited / nervous) kept
+   losing the coin, because the picker jumped to the hand that moved most.
+   With `handSideLock` the side of the first hand seen owns the round. */
+const sideSelector = (options = {}) => createActiveHandSelector({
+  handSideLock: true, ...options,
+});
+const R = { label: 'Right' };
+const L = { label: 'Left' };
+
+test('side lock: the first hand seen keeps the game while the other hand shakes hard', () => {
+  const selector = sideSelector();
+  // The playing hand appears first, alone.
+  const first = selector.select([hand(0.3)], [R], 0);
+  expect(first).toMatchObject({ key: 'side:Right', reason: 'ok', index: 0 });
+
+  // The other hand now enters and shakes violently for 3s while the playing
+  // hand is almost still (pinching). MediaPipe's result order also flips.
+  for (let i = 0; i < 90; i += 1) {
+    const shake = 0.7 + (i % 2 ? 0.12 : -0.12);
+    const flipOrder = i % 3 === 0;
+    const hands = flipOrder ? [hand(shake, 0.1), hand(0.3 + (i % 2) * 0.002)] : [hand(0.3), hand(shake, 0.1)];
+    const labelsNow = flipOrder ? [L, R] : [R, L];
+    const result = selector.select(hands, labelsNow, 33 + i * 33);
+    expect(result.key).toBe('side:Right');
+    expect(result.landmarks[0].x).toBeCloseTo(0.3, 1);   // always the playing hand
+  }
+});
+
+test('side lock: acquisition with two hands ignores motion (shaking hand cannot win)', () => {
+  const selector = sideSelector();
+  // Both hands appear together; the shaking one is further out at the edge.
+  const r = selector.select([hand(0.92, 0.12), hand(0.45)], [L, R], 0);
+  expect(r.key).toBe('side:Right');
+  expect(r.index).toBe(1);
+});
+
+test('side lock: the locked hand disappearing never hands the game to the other hand', () => {
+  const selector = sideSelector();
+  selector.select([hand(0.3)], [R], 0);
+  for (let t = 33; t < 3500; t += 33) {
+    const result = selector.select([hand(0.8, 0.1)], [L], t);   // only the other hand visible
+    expect(result.landmarks).toBeNull();
+    expect(result.reason).toBe('blink');
+  }
+  // It comes back → same side, straight away.
+  expect(selector.select([hand(0.8, 0.1), hand(0.32)], [L, R], 3600))
+    .toMatchObject({ key: 'side:Right', index: 1, reason: 'ok' });
+});
+
+test('side lock: a one-frame label swap does not jump to the other hand', () => {
+  const selector = sideSelector();
+  selector.select([hand(0.3), hand(0.75)], [R, L], 0);
+  // MediaPipe swaps the labels for one frame.
+  const swapped = selector.select([hand(0.3), hand(0.75)], [L, R], 33);
+  expect(swapped.landmarks[0].x).toBeCloseTo(0.3, 2);
+  // A single mislabelled frame while alone is also still the same hand.
+  const alone = selector.select([hand(0.31)], [L], 66);
+  expect(alone.landmarks[0].x).toBeCloseTo(0.31, 2);
+});
+
+test('side lock: released only after a long absence or reset, then the new first hand wins', () => {
+  const selector = sideSelector();
+  selector.select([hand(0.3)], [R], 0);
+  for (let t = 33; t <= 4100; t += 33) selector.select([hand(0.8)], [L], t);
+  expect(selector.select([hand(0.8)], [L], 4200)).toMatchObject({ key: 'side:Left', reason: 'ok' });
+
+  selector.reset();
+  expect(selector.select([hand(0.3)], [R], 5000).key).toBe('side:Right');
+});

@@ -63,6 +63,38 @@ const SWITCH_MARGIN = 0.10;
    cheek. It is the switching, not the choosing, that had to go. */
 const LOCK_RELEASE_MS = 900;
 
+/* ── Hand-SIDE lock (Pinch the Coin) ───────────────────────────────────────
+   Client feedback: "this may be the reality of many of our learners where they
+   are shaking their other hand too much (my daughter does this all the time —
+   specially if she is excited or nervous) … Even though i was pinching and
+   moving the coin correctly the app kept dropping the coin as it got confused
+   between both the hand movements."
+
+   Root cause: Pinch the Coin used the default per-frame scoring, where MOTION
+   is 50 % of the score — so the hand shaking the hardest won the frame, the
+   pinch point jumped to it, its (open) thumb–index aperture read as "released"
+   and the coin dropped.
+
+   The side lock uses MediaPipe's handedness label as the identity: whichever
+   side (Right / Left) is seen FIRST owns the game for the whole round. The
+   other side's landmarks are never scored, compared or returned — however
+   much it moves. Acquisition deliberately ignores motion so a shaking hand
+   cannot win the very first frame either.
+
+   Handedness labels are occasionally wrong for a single frame, so two narrow,
+   physically-motivated guards keep the lock on the right hand:
+     - label SWAP: both hands visible, but the "locked-side" hand has teleported
+       more than SIDE_SWAP_JUMP while the other one sits exactly where the
+       locked hand was → the labels swapped, follow the hand, not the label.
+     - label FLIP while alone: a single hand with the other label, sitting
+       exactly where the locked hand was a moment ago → same hand, mislabelled.
+   The lock is only released if the locked hand is gone for SIDE_RELEASE_MS
+   (the child really put it down / switched hands), or on reset(). */
+const SIDE_RELEASE_MS = 4000;
+const SIDE_SWAP_JUMP = 0.25;   // normalised wrist travel in one frame = impossible
+const SIDE_NEAR = 0.08;        // "same place as the locked hand was"
+const SIDE_RECENT_MS = 300;    // the guards only trust a very recent position
+
 function span(lm) {
   if (!lm) return 0;
   return Math.hypot(lm[WRIST].x - lm[PINKY_MCP].x, lm[WRIST].y - lm[PINKY_MCP].y);
@@ -80,6 +112,8 @@ export function createActiveHandSelector({
   stableSelection = false,   // pointer games keep control through stillness and brief dropouts
   singleHandLock = false,    // once acquired, one hand keeps the pointer outright
   lockReleaseMs = LOCK_RELEASE_MS,
+  handSideLock = false,      // lock onto the first hand's SIDE (Right/Left) for the round
+  sideReleaseMs = SIDE_RELEASE_MS,
 } = {}) {
   /** key → [{x, y, t}] */
   const history = new Map();
@@ -94,6 +128,91 @@ export function createActiveHandSelector({
      being visible, or null while it is on screen. */
   let lockedKey = null;
   let lockedMissingSince = null;
+
+  /* Hand-side lock state (see SIDE_* above). */
+  let lockedSide = null;         // 'Right' | 'Left' — MediaPipe label, used only for consistency
+  let sideLastWrist = null;      // last wrist position of the locked hand
+  let sideLastSeen = 0;
+  let sideMissingSince = null;
+
+  function releaseSide() {
+    lockedSide = null;
+    sideLastWrist = null;
+    sideLastSeen = 0;
+    sideMissingSince = null;
+  }
+
+  function selectBySide(hands, handedness, now) {
+    const visible = (hands || []).map((lm, i) => ({
+      i, lm, label: handedness[i]?.label || null,
+    }));
+    const sideKey = (side) => (side ? `side:${side}` : null);
+    const wristDist = (v) => (sideLastWrist
+      ? Math.hypot(v.lm[WRIST].x - sideLastWrist.x, v.lm[WRIST].y - sideLastWrist.y)
+      : 0);
+    const accept = (v) => {
+      sideLastWrist = { x: v.lm[WRIST].x, y: v.lm[WRIST].y };
+      sideLastSeen = now;
+      sideMissingSince = null;
+      currentKey = sideKey(lockedSide);
+      lastSeenAt = now;
+      return { landmarks: v.lm, index: v.i, key: sideKey(lockedSide), reason: 'ok', scores: [] };
+    };
+
+    /* ── Acquisition: the first hand seen owns the round ─────────────────── */
+    if (!lockedSide) {
+      const labelled = visible.filter((v) => v.label);
+      if (!labelled.length) {
+        return { landmarks: null, index: -1, key: null, reason: 'no-hand', scores: [] };
+      }
+      // Two hands appeared in the same frame: pick by size + centring, NOT by
+      // motion — motion is exactly what a shaking hand has most of.
+      let pick = labelled[0];
+      if (labelled.length > 1) {
+        const rank = (v) => {
+          const size = Math.min(1, span(v.lm) / 0.22);
+          const centred = 1 - Math.min(1, Math.hypot(v.lm[9].x - 0.5, v.lm[9].y - 0.5) / 0.7);
+          return size * 0.6 + centred * 0.4;
+        };
+        pick = labelled.reduce((a, b) => (rank(b) > rank(a) ? b : a));
+      }
+      lockedSide = pick.label;
+      sideLastWrist = null;
+      return accept(pick);
+    }
+
+    /* ── Locked: only the locked side exists ─────────────────────────────── */
+    const same  = visible.filter((v) => v.label === lockedSide);
+    const other = visible.filter((v) => v.label !== lockedSide);
+    const nearest = (list) => (list.length
+      ? list.reduce((a, b) => (wristDist(b) < wristDist(a) ? b : a))
+      : null);
+    const recent = sideLastWrist && now - sideLastSeen < SIDE_RECENT_MS;
+
+    let pick = nearest(same);
+
+    // Guard 1 — labels swapped between the two hands for a frame.
+    if (pick && recent && wristDist(pick) > SIDE_SWAP_JUMP) {
+      const alt = nearest(other);
+      if (alt && wristDist(alt) < SIDE_NEAR) pick = alt;
+    }
+    // Guard 2 — the locked hand alone, mislabelled for a frame.
+    if (!pick && recent && other.length === 1 && wristDist(other[0]) < SIDE_NEAR) {
+      pick = other[0];
+    }
+
+    if (pick) return accept(pick);
+
+    // Locked hand not visible. Do NOT hand the game to the other hand.
+    if (sideMissingSince === null) sideMissingSince = now;
+    if (now - sideMissingSince >= sideReleaseMs) {
+      // Gone long enough to be a real "put it down / switch hands".
+      releaseSide();
+      currentKey = null;
+      return { landmarks: null, index: -1, key: null, reason: 'no-hand', scores: [] };
+    }
+    return { landmarks: null, index: -1, key: sideKey(lockedSide), reason: 'blink', scores: [] };
+  }
 
   function clearContender() {
     contenderKey = null;
@@ -171,6 +290,8 @@ export function createActiveHandSelector({
    * @returns {{ landmarks, index, key, reason, scores }}
    */
   function select(hands, handedness = [], now = performance.now()) {
+    if (handSideLock) return selectBySide(hands, handedness, now);
+
     if (!hands || hands.length === 0) {
       clearContender();
       /* A locked hand is allowed to disappear for longer than an unlocked one
@@ -328,17 +449,23 @@ export function createActiveHandSelector({
     lastSeenAt = 0;
     clearContender();
     releaseLock();
+    releaseSide();
   }
 
   /** Drop the current hand and re-acquire on the next frame (e.g. the child
    *  wants to swap hands mid-round without waiting for the release timer). */
   function releaseActiveHand() {
     releaseLock();
+    releaseSide();
     currentKey = null;
     clearContender();
   }
 
-  return { select, reset, releaseActiveHand, get lockedKey() { return lockedKey; } };
+  return {
+    select, reset, releaseActiveHand,
+    get lockedKey() { return lockedKey; },
+    get lockedSide() { return lockedSide; },
+  };
 }
 
 export default createActiveHandSelector;

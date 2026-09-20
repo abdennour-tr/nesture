@@ -61,9 +61,29 @@ async function advance(ms) {
   }
 }
 
+const frameSeqRef = { current: 0 };
+const landmarksRef = { current: null };
+const trackingTimestampRef = { current: null };
+const activeHandKeyRef = { current: null };
+
 async function sample(key = 'hand-1', present = true, position = []) {
-  tracking = { ...tracking, landmarks: present ? hand(...position) : null,
-    isTracking: present, activeHandKey: key, trackingTimestamp: performance.now() };
+  const ts = performance.now();
+  const lm = present ? hand(...position) : null;
+  frameSeqRef.current += 1;
+  landmarksRef.current = lm;
+  trackingTimestampRef.current = ts;
+  activeHandKeyRef.current = key;
+  tracking = {
+    ...tracking,
+    landmarks: lm,
+    isTracking: present,
+    activeHandKey: key,
+    trackingTimestamp: ts,
+    frameSeqRef,
+    landmarksRef,
+    trackingTimestampRef,
+    activeHandKeyRef,
+  };
   await render();
 }
 
@@ -89,7 +109,21 @@ beforeEach(async () => {
   SVGElement.prototype.getScreenCTM = () => ({ a: 1.6, b: 0, c: 0, d: 1.6, e: 0, f: 0,
     inverse: () => ({ a: 0.625, b: 0, c: 0, d: 0.625, e: 0, f: 0 }) });
   sessionStorage.setItem('tracetype_rules_seen', '1');
-  tracking = { landmarks: null, trackingTimestamp: null, activeHandKey: null, isTracking: false, releaseCamera };
+  frameSeqRef.current = 0;
+  landmarksRef.current = null;
+  trackingTimestampRef.current = null;
+  activeHandKeyRef.current = null;
+  tracking = {
+    landmarks: null,
+    trackingTimestamp: null,
+    activeHandKey: null,
+    isTracking: false,
+    releaseCamera,
+    frameSeqRef,
+    landmarksRef,
+    trackingTimestampRef,
+    activeHandKeyRef,
+  };
   useHandTracking.mockImplementation(() => tracking);
   container = document.createElement('div');
   document.body.appendChild(container);

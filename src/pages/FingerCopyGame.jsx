@@ -17,9 +17,12 @@ import useGestureDetection, {
   LEVELS,
   GESTURE_INFO,
   GESTURE_DEFS,
+  MATCH_RULES,
 } from '../hooks/useGestureDetection';
 import { soundManager } from '../utils/soundManager';
+import useSoundEnabled from '../hooks/useSoundEnabled';
 import GameRules from '../components/game/GameRules';
+import HandGate, { useHandGate, firstPhaseFor } from '../components/game/HandGate';
 import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
@@ -32,11 +35,12 @@ import '../styles/FingerCopyGame.css';
    section 11 of GameShell.css. */
 
 // ── Constants ──────────────────────────────────────────────────────────────
-/* 80, not 100. Demanding a perfect landmark match made the game unplayable for
-   the children it is meant for: a hand with reduced motor control rarely hits
-   every finger exactly, and MediaPipe itself jitters by a few percent. 80 still
-   requires the right shape, but leaves room for a real hand. */
-const MATCH_THRESHOLD   = 80;    // Accuracy % needed to count as matching
+/* Acceptance is decided in useGestureDetection (MATCH_RULES): average ≥ 85 %
+   AND no single finger clearly wrong. The old rule (binary fingers, ≥ 80 %)
+   let one finger be completely wrong and still validate. Per-finger scores are
+   now continuous, so borderline/jittery fingers get partial credit and the
+   game does not go back to being too strict. */
+const MATCH_THRESHOLD   = MATCH_RULES.startAccuracy; // used for ring colour / tips
 const HOLD_DURATION_MS  = 1000;  // Hold gesture for 1 second to confirm
 const SUCCESS_DELAY_MS  = 1800;  // Delay before advancing to next challenge
 const COUNTDOWN_SECONDS = 3;     // 3…2…1…Go!
@@ -190,8 +194,8 @@ export default function FingerCopyGame() {
      [the instructions] again if they wish to." */
   const [showHelp, setShowHelp] = useState(false);
   const [gamePhase, setGamePhase]       = useState(
-    () => (sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules')
-  ); // rules | countdown | playing | success | results
+    () => (sessionStorage.getItem(RULES_FLAG) ? firstPhaseFor('camera') : 'rules')
+  ); // rules | waiting | countdown | playing | success | results
 
   /* Whenever the round is not actually running, the camera must be off.
      This is the safety net that catches every exit path — finishing the last
@@ -208,7 +212,8 @@ export default function FingerCopyGame() {
   const [currentIdx, setCurrentIdx]     = useState(0);
   const [seqIdx, setSeqIdx]             = useState(0); // For Level 3 sequences
   const [score, setScore]               = useState(0);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  /* Shared app-wide sound state — the icon always matches what you hear. */
+  const [soundEnabled, setSoundEnabled] = useSoundEnabled();
   const [encourageMsg, setEncourageMsg] = useState('');
   const [showConfetti, setShowConfetti] = useState(false);
   const [successPoints, setSuccessPoints] = useState(0);
@@ -245,7 +250,7 @@ export default function FingerCopyGame() {
   }
 
   // ── Gesture detection ───────────────────────────────────────────────────
-  const { detectedGesture, fingerStates, accuracy, handedness, isHandDetected } =
+  const { detectedGesture, fingerStates, accuracy, isMatch, isHoldable, handedness, isHandDetected } =
     useGestureDetection(landmarks, multiHandData, currentTargetGesture);
 
   // ── Refs for interval/timeout IDs ───────────────────────────────────────
@@ -391,6 +396,18 @@ export default function FingerCopyGame() {
       }).catch(err => console.error('[FingerCopyGame] Failed to save end session:', err));
     }
   }, [gamePhase, currentSessionId, sessionSaved, sessionStats, challenges.length, gameStartTime, storeEndSession]);
+  /* ── Hand gate ────────────────────────────────────────────────────────
+     Client feedback: "Show one of your hands" existed only in Trace → Find
+     → Type. This game ran its 3-2-1 with nobody in front of the camera and
+     the first challenge's clock started regardless. It now waits in
+     'waiting' — with the camera ON, since the camera used to start only at
+     "Go!" — until a hand is detected. See components/game/HandGate.jsx. */
+  useEffect(() => {
+    if (gamePhase === 'waiting') setTrackingEnabled(true);
+  }, [gamePhase]);
+  const openHandGate = useCallback(() => setGamePhase('countdown'), []);
+  useHandGate({ phase: gamePhase, landmarks, isSimulationMode, onHand: openHandGate });
+
   // ── Countdown phase ─────────────────────────────────────────────────────
   useEffect(() => {
     if (gamePhase !== 'countdown') return;
@@ -462,7 +479,10 @@ export default function FingerCopyGame() {
   useEffect(() => {
     if (gamePhase !== 'playing' || showHelp || !currentTargetGesture) return;
 
-    const isMatching = accuracy >= MATCH_THRESHOLD;
+    /* Start needs a clean match; a hold already running only needs to stay
+       "holdable" (slightly lower bar, still no clearly-wrong finger), so one
+       jittery frame does not wipe the progress. */
+    const isMatching = holdStartTime ? isHoldable : isMatch;
 
     if (isMatching) {
       if (!holdStartTime) {
@@ -480,7 +500,7 @@ export default function FingerCopyGame() {
         setHoldProgress(0);
       }
     }
-  }, [accuracy, gamePhase, showHelp, currentTargetGesture, holdStartTime]);
+  }, [isMatch, isHoldable, gamePhase, showHelp, currentTargetGesture, holdStartTime]);
 
   // ── Handle successful gesture match ─────────────────────────────────────
   const handleSuccess = useCallback(() => {
@@ -599,7 +619,7 @@ export default function FingerCopyGame() {
     setHoldProgress(0);
     setElapsedTime(0);
     setCountdown(COUNTDOWN_SECONDS);
-    setGamePhase('countdown');
+    setGamePhase(firstPhaseFor('camera'));
     setEncourageMsg('');
     setCurrentSessionId(null);
     setSessionSaved(false);
@@ -617,7 +637,7 @@ export default function FingerCopyGame() {
   const ringRadius     = 42;
   const ringCirc       = 2 * Math.PI * ringRadius;
   const accuracyFill   = ringCirc - (ringCirc * Math.min(accuracy, 100)) / 100;
-  const isHighAccuracy = accuracy >= MATCH_THRESHOLD;
+  const isHighAccuracy = holdStartTime ? isHoldable : isMatch;
 
   // ── Finger status display ───────────────────────────────────────────────
   const fingerNames = ['thumb', 'index', 'middle', 'ring', 'pinky'];
@@ -667,7 +687,7 @@ export default function FingerCopyGame() {
               /* Remembered per tab: replaying skips the rules, a fresh visit
                  always shows them. */
               sessionStorage.setItem(RULES_FLAG, '1');
-              setGamePhase('countdown');
+              setGamePhase(firstPhaseFor('camera'));
             }}
           />
         )}
@@ -685,6 +705,13 @@ export default function FingerCopyGame() {
 
       {/* ── Countdown Overlay ────────────────────────────────────────── */}
       <AnimatePresence>
+        <HandGate
+          key="hand-gate"
+          visible={gamePhase === 'waiting'}
+          isTracking={isTracking}
+          onExit={() => navigate('/play')}
+        />
+
         {gamePhase === 'countdown' && (
           <motion.div
             className="fc-countdown-overlay"

@@ -147,6 +147,10 @@ export function detectMidlineCrossing(startX, endX) {
  *   hand is acquired it keeps control outright — a second hand in frame is not
  *   scored and cannot take over — until the locked hand has been gone long
  *   enough to count as put down. See src/utils/activeHandSelector.js.
+ * @param {boolean} handSideLock  Stricter: the SIDE (right/left, from
+ *   MediaPipe handedness) of the first hand seen is locked for the round. Only
+ *   that hand's landmarks are ever returned; the other hand — even shaking hard
+ *   — is ignored. Used by Pinch the Coin. See activeHandSelector.js.
  * @param {0|1} modelComplexity  MediaPipe model. 0 is the lite graph: roughly
  *   twice the frame rate for a little more landmark noise, which is the right
  *   trade for a pointer (the noise is filtered downstream; the frame rate is
@@ -169,6 +173,7 @@ export default function useHandTracking(
     requireMotion = false,
     stableSelection = false,
     singleHandLock = false,
+    handSideLock = false,       // first hand's side (Right/Left) owns the round
     modelComplexity = 1,
     publishIntervalMs = 0,      // 0 = every frame; see the note above
     drawOnlyActiveHand = false,
@@ -191,7 +196,7 @@ export default function useHandTracking(
   const selectorRef = useRef(null);
   if (!selectorRef.current) {
     selectorRef.current = createActiveHandSelector({
-      requireMotion, stableSelection, singleHandLock,
+      requireMotion, stableSelection, singleHandLock, handSideLock,
     });
   }
 

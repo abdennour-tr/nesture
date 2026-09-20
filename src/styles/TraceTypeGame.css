@@ -2258,6 +2258,16 @@
   color: #fff;
 }
 
+/* The word slots on the TYPE step. The empty ones are drawn in translucent
+   WHITE (made for the dark card), so on the white light-mode card they
+   vanished and only the current slot was visible — the learner could not see
+   how many letters the word has. Give them a slate outline and a soft grey
+   fill instead; the current and filled states already read in both themes. */
+.tt-light-mode .tt-type-slot.empty {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.28);
+}
+
 /* ── Short windows: trade the display letter for keyboard room ───────────── */
 @media (max-height: 700px) {
   .tt-step-container { --tt-radius: 16px; }

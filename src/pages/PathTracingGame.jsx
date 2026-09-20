@@ -10,6 +10,7 @@ import { useReflexEngine } from '../hooks/useReflexEngine';
 import api from '../services/api';
 import { ALL_PATHS, DIFFICULTY_CONFIG, samplePathPoints, getRandomPaths } from '../components/game/pathData';
 import { soundManager } from '../utils/soundManager';
+import useSoundEnabled from '../hooks/useSoundEnabled';
 import '../styles/PathTracingGame.css';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -106,7 +107,8 @@ export default function PathTracingGame() {
   const [sessionTime, setSessionTime]         = useState(0);
   const [pathsCompleted, setPathsCompleted]   = useState(0);
   const [encouragement, setEncouragement]     = useState('');
-  const [soundEnabled, setSoundEnabled]       = useState(true);
+  /* Shared app-wide sound state — the icon always matches what you hear. */
+  const [soundEnabled, setSoundEnabled] = useSoundEnabled();
   const [processing, setProcessing]           = useState(false);
   const [showSuperAnim, setShowSuperAnim]     = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen]   = useState(false);

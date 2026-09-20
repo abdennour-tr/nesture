@@ -27,6 +27,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {Home, Pause, Play, RotateCcw, Clock, Star, Hand, MousePointer2, Volume2, VolumeX, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
+import useSoundEnabled from '../hooks/useSoundEnabled';
 import GameRules from '../components/game/GameRules';
 import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
@@ -44,6 +45,7 @@ import {otComposite, otRound, FINISH} from '../utils/otScore';
 import GameResults from '../components/game/GameResults';
 import TouchModePose from '../components/game/TouchModePose';
 import CameraLandmarks from '../components/game/CameraLandmarks';
+import HandGate, { useHandGate, firstPhaseFor } from '../components/game/HandGate';
 import useGraspMeasure from '../hooks/useGraspMeasure';
 /* ═══════════════════════════════════════════════════════════════════════════
    GEOMETRY — the play field uses a fixed virtual coordinate space that is
@@ -335,11 +337,12 @@ export default function LadybugGame() {
   const [mode, setMode] = useState(
     (searchParams.get('mode') || 'camera').toLowerCase() === 'touch' ? 'touch' : 'camera'
   );
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  /* Shared app-wide sound state — the icon always matches what you hear. */
+  const [soundEnabled, setSoundEnabled] = useSoundEnabled();
 
   /* ── Phases: rules → countdown → playing → results ── */
   const [gamePhase, setGamePhase] = useState(() =>
-    sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules'
+    sessionStorage.getItem(RULES_FLAG) ? firstPhaseFor(mode) : 'rules'
   );
   const [isPaused, setIsPaused] = useState(false);
   /* True while the end-game confirmation is on screen. The round is paused
@@ -440,7 +443,8 @@ export default function LadybugGame() {
   const goal = useMemo(() => pathPointAt(1, cfg), [cfg]);
 
   const isPlaying = gamePhase === 'playing' && !isPaused;
-  const trackingEnabled = mode === 'camera' && (gamePhase === 'countdown' || gamePhase === 'playing');
+  const trackingEnabled = mode === 'camera'
+    && (gamePhase === 'waiting' || gamePhase === 'countdown' || gamePhase === 'playing');
 
   const { landmarks, trackingTimestamp, activeHandKey, isTracking, isSimulationMode, releaseCamera } = useHandTracking(
     videoRef, trackCanvasRef, trackingEnabled, isPaused, 2,
@@ -1174,11 +1178,23 @@ export default function LadybugGame() {
   /* ═════════════════════════════════════════════════════════════════════════
      CONTROLS
      ═════════════════════════════════════════════════════════════════════════ */
+  /* ── Hand gate (camera mode) ─────────────────────────────────────────
+     Client feedback: the "Show one of your hands" screen existed only in
+     Trace → Find → Type. Without it the 3-2-1 and the round clock started
+     with nobody in front of the camera. The round now waits in 'waiting'
+     until a hand is detected, then runs the normal countdown. See
+     components/game/HandGate.jsx. */
+  const openHandGate = useCallback(() => setGamePhase('countdown'), []);
+  useHandGate({
+    phase: gamePhase, landmarks, isSimulationMode,
+    bypass: mode !== 'camera', onHand: openHandGate,
+  });
+
   const startFromRules = useCallback(() => {
     sessionStorage.setItem(RULES_FLAG, '1');
     if (soundEnabled) { soundManager.init(); soundManager.playClick(); }
-    setGamePhase('countdown');
-  }, [soundEnabled]);
+    setGamePhase(firstPhaseFor(mode));
+  }, [soundEnabled, mode]);
 
   /* ── "How to play", available DURING the game ───────────────────────────
      Client feedback: "there should be an optional provision for user to see
@@ -1242,8 +1258,8 @@ export default function LadybugGame() {
     paintBug();
     if (fieldRef.current) fieldRef.current.classList.remove('lb-off-path');
     setIsPaused(false);
-    setGamePhase('countdown');
-  }, [cfg, paintBug]);
+    setGamePhase(firstPhaseFor(mode));
+  }, [cfg, paintBug, mode]);
 
   const goHome = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -1313,10 +1329,7 @@ export default function LadybugGame() {
             title={mode === 'camera' ? 'Switch to touch' : 'Switch to camera'}>
             {mode === 'camera' ? <Hand size={20} /> : <MousePointer2 size={20} />}
           </button>
-          <button className="lb-icon-btn" onClick={() => setSoundEnabled((s) => {
-            soundManager.toggle?.();
-            return !s;
-          })} title="Sound">
+          <button className="lb-icon-btn" onClick={() => setSoundEnabled((s) => !s)} title="Sound">
             {soundEnabled ? <Volume2 size={20} /> : <VolumeX size={20} />}
           </button>
           <button className="lb-icon-btn lb-pause-btn" onClick={togglePause}
@@ -1444,6 +1457,14 @@ export default function LadybugGame() {
         {showHelp && gamePhase !== 'rules' && (
           <RulesModal key="help" level={level} mode={mode} onStart={closeHelp} resume />
         )}
+
+        <HandGate
+          key="hand-gate"
+          visible={gamePhase === 'waiting'}
+          isTracking={isTracking}
+          onUseTouch={switchMode}
+          onExit={goHome}
+        />
 
         {gamePhase === 'countdown' && (
           <motion.div key="cd" className="lb-overlay lb-overlay-soft lb-overlay-center"

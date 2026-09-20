@@ -45,7 +45,9 @@ export const GESTURE_DEFS = {
   call_me:       { thumb: 'up',   index: 'down', middle: 'down', ring: 'down', pinky: 'up'   },
   // OK and Pinch need special handling — see classifyGesture()
   ok_sign:     { thumb: 'special', index: 'special', middle: 'up', ring: 'up', pinky: 'up'   },
-  pinch:       { thumb: 'special', index: 'special', middle: 'any', ring: 'any', pinky: 'any' },
+  /* middle must be folded — otherwise a pinch is indistinguishable from an
+     OK sign, and it matches what classifyGesture() already required. */
+  pinch:       { thumb: 'special', index: 'special', middle: 'down', ring: 'any', pinky: 'any' },
 };
 
 // ── Gesture display info ───────────────────────────────────────────────────
@@ -258,55 +260,127 @@ export function classifyGesture(lm, fingerStates) {
   return null;
 }
 
-// ── Calculate accuracy against a target gesture ────────────────────────────
+// ── Match scoring against a target gesture ─────────────────────────────────
 /**
- * Compute how closely the user's finger states match the target gesture.
- * Each correct finger contributes 20% (5 fingers × 20% = 100%).
+ * WHY THIS IS NOT A SIMPLE "COUNT THE CORRECT FINGERS" ANY MORE
  *
- * For special gestures (OK, Pinch), the thumb–index distance is also factored.
+ * The old score gave each finger a binary 20 % and the game accepted at 80 %,
+ * so ONE FINGER COULD BE COMPLETELY WRONG and the gesture still validated
+ * (☝️ passed for ✌️, ✋ passed with the thumb tucked, …). Pinch/OK were even
+ * looser: ring/pinky 'any' were free points and "thumb roughly near index"
+ * earned partial credit, so a relaxed hand reached 80 %.
  *
- * @param {object} fingerStates — current finger states
- * @param {string} targetGesture — target gesture key
- * @param {Array}  lm — landmarks (for distance checks)
- * @returns {number} — 0–100 accuracy percentage
+ * Going back to "100 % of binary fingers" is what made the game too strict
+ * before: a finger sitting right on the up/down boundary flickers between
+ * frames and keeps breaking the hold.
+ *
+ * So each finger now gets a CONTINUOUS score in 0..1 from how clearly it is
+ * extended or folded, with a soft band around the boundary:
+ *   - clearly in the right state        → 1
+ *   - ambiguous / half-bent             → ~0.5 (partial credit, absorbs jitter)
+ *   - clearly in the wrong state        → 0
+ * A gesture is accepted only when the average is high AND no single part
+ * is below a floor — a wrong finger can no longer be "averaged away".
  */
-export function calculateAccuracy(fingerStates, targetGesture, lm) {
-  if (!fingerStates || !targetGesture) return 0;
 
+// Extension ratio bands. Below LO = clearly folded, above HI = clearly extended.
+// Fingers: dist(wrist, tip) / dist(wrist, PIP). Old binary cut-off was 1.0.
+const FINGER_LO = 0.92, FINGER_HI = 1.12;
+// Thumb: dist(tip, indexMCP) / dist(IP, indexMCP). Old binary cut-off was 1.1.
+const THUMB_LO = 0.97, THUMB_HI = 1.25;
+// Thumb–index contact, normalised by hand size (wrist → middle MCP) so it
+// does not depend on how far the child sits from the camera.
+const TOUCH_CLOSE = 0.30, TOUCH_FAR = 0.60;
+// Index must not be fully rolled into the palm for OK / pinch (stops a fist
+// with the thumb resting on the index from counting as a pinch).
+const INDEX_CURL_LO = 0.80, INDEX_CURL_HI = 0.95;
+
+/** Acceptance rules — shared with FingerCopyGame via the hook's return value. */
+export const MATCH_RULES = {
+  startAccuracy: 85,   // average needed to START the hold
+  startMinPart: 0.5,   // …and every part must be at least "ambiguous", never wrong
+  keepAccuracy: 75,    // hysteresis: a hold already running survives small dips
+  keepMinPart: 0.35,
+};
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const ramp = (v, lo, hi) => clamp01((v - lo) / (hi - lo)); // 0 at lo → 1 at hi
+
+/** 0..1 "how extended" for each finger (continuous version of detectFingerStates). */
+export function fingerExtension(lm) {
+  if (!lm || lm.length < 21) return null;
+  const wrist = lm[LM.WRIST];
+  const ratio = (tip, pip) => {
+    const d = dist(wrist, lm[pip]);
+    return d > 0 ? dist(wrist, lm[tip]) / d : 0;
+  };
+  const thumbIPDist = dist(lm[LM.THUMB_IP], lm[LM.INDEX_MCP]);
+  const thumbRatio = thumbIPDist > 0
+    ? dist(lm[LM.THUMB_TIP], lm[LM.INDEX_MCP]) / thumbIPDist : 0;
+  const indexRatio = ratio(LM.INDEX_TIP, LM.INDEX_PIP);
+
+  return {
+    thumb:  ramp(thumbRatio, THUMB_LO, THUMB_HI),
+    index:  ramp(indexRatio, FINGER_LO, FINGER_HI),
+    middle: ramp(ratio(LM.MIDDLE_TIP, LM.MIDDLE_PIP), FINGER_LO, FINGER_HI),
+    ring:   ramp(ratio(LM.RING_TIP,   LM.RING_PIP),   FINGER_LO, FINGER_HI),
+    pinky:  ramp(ratio(LM.PINKY_TIP,  LM.PINKY_PIP),  FINGER_LO, FINGER_HI),
+    _indexNotCurled: ramp(indexRatio, INDEX_CURL_LO, INDEX_CURL_HI),
+  };
+}
+
+/**
+ * Score the hand against a target gesture.
+ * @returns {{ accuracy: number, minPart: number, parts: object }}
+ *   accuracy — 0..100 weighted average (what the ring shows)
+ *   minPart  — lowest single part score 0..1 (the "no wrong finger" gate)
+ */
+export function scoreGesture(targetGesture, lm) {
+  const empty = { accuracy: 0, minPart: 0, parts: {} };
   const def = GESTURE_DEFS[targetGesture];
-  if (!def) return 0;
+  const ext = fingerExtension(lm);
+  if (!def || !ext) return empty;
 
-  const fingers = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-  let matchCount = 0;
+  const parts = {};    // name → score 0..1
+  const weights = {};  // name → weight
 
-  // For special gestures, handle thumb and index differently
+  const addFinger = (finger) => {
+    const expected = def[finger];
+    if (expected === 'up')   { parts[finger] = ext[finger];     weights[finger] = 1; }
+    if (expected === 'down') { parts[finger] = 1 - ext[finger]; weights[finger] = 1; }
+    // 'any' is simply not scored — no more free points.
+  };
+
   if (targetGesture === 'ok_sign' || targetGesture === 'pinch') {
-    const thumbIndexDist = lm ? dist(lm[LM.THUMB_TIP], lm[LM.INDEX_TIP]) : 999;
-
-    // Thumb–index proximity check (worth 40% — 2 fingers)
-    if (thumbIndexDist < 0.08) {
-      matchCount += 2; // Both thumb and index are "correct"
-    } else if (thumbIndexDist < 0.12) {
-      matchCount += 1; // Partial credit
-    }
-
-    // Check remaining fingers
-    for (const finger of ['middle', 'ring', 'pinky']) {
-      const expected = def[finger];
-      if (expected === 'any' || fingerStates[finger] === expected) {
-        matchCount++;
-      }
-    }
+    const handSize = dist(lm[LM.WRIST], lm[LM.MIDDLE_MCP]) || 1;
+    const touch = dist(lm[LM.THUMB_TIP], lm[LM.INDEX_TIP]) / handSize;
+    // Thumb–index contact is the defining feature: weight 2.
+    parts.touch = 1 - ramp(touch, TOUCH_CLOSE, TOUCH_FAR);
+    weights.touch = 2;
+    parts.indexShape = ext._indexNotCurled;
+    weights.indexShape = 1;
+    ['middle', 'ring', 'pinky'].forEach(addFinger);
   } else {
-    // Simple pattern matching
-    for (const finger of fingers) {
-      if (fingerStates[finger] === def[finger]) {
-        matchCount++;
-      }
-    }
+    ['thumb', 'index', 'middle', 'ring', 'pinky'].forEach(addFinger);
   }
 
-  return Math.round((matchCount / 5) * 100);
+  let sum = 0, wsum = 0, minPart = 1;
+  for (const k of Object.keys(parts)) {
+    sum += parts[k] * weights[k];
+    wsum += weights[k];
+    if (parts[k] < minPart) minPart = parts[k];
+  }
+  return {
+    accuracy: wsum ? Math.round((sum / wsum) * 100) : 0,
+    minPart,
+    parts,
+  };
+}
+
+/** Backwards-compatible wrapper: 0–100 accuracy only. */
+export function calculateAccuracy(fingerStates, targetGesture, lm) {
+  if (!targetGesture) return 0;
+  return scoreGesture(targetGesture, lm).accuracy;
 }
 
 // ── Main hook ──────────────────────────────────────────────────────────────
@@ -327,6 +401,8 @@ export default function useGestureDetection(landmarks, multiHandData, targetGest
         detectedGesture: null,
         fingerStates: null,
         accuracy: 0,
+        isMatch: false,
+        isHoldable: false,
         handedness: null,
         isHandDetected: false,
       };
@@ -351,15 +427,24 @@ export default function useGestureDetection(landmarks, multiHandData, targetGest
     // Classify gesture
     const detectedGesture = classifyGesture(landmarks, fingerStates);
 
-    // Calculate accuracy against target
-    const accuracy = targetGesture
-      ? calculateAccuracy(fingerStates, targetGesture, landmarks)
-      : 0;
+    // Score against target
+    const { accuracy, minPart } = targetGesture
+      ? scoreGesture(targetGesture, landmarks)
+      : { accuracy: 0, minPart: 0 };
+
+    // isMatch    → good enough to START a hold
+    // isHoldable → good enough to KEEP a hold that is already running
+    const isMatch = accuracy >= MATCH_RULES.startAccuracy
+      && minPart >= MATCH_RULES.startMinPart;
+    const isHoldable = accuracy >= MATCH_RULES.keepAccuracy
+      && minPart >= MATCH_RULES.keepMinPart;
 
     return {
       detectedGesture,
       fingerStates,
       accuracy,
+      isMatch,
+      isHoldable,
       handedness,
       isHandDetected,
     };

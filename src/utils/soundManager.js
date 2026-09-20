@@ -41,8 +41,17 @@ class SoundManager {
     /** @type {AudioContext|null} */
     this.ctx = null;
 
-    /** Whether sound effects are enabled */
+    /** Whether sound effects are enabled. This singleton is shared by EVERY
+        game, so this flag is the ONE source of truth for "is the sound on".
+        Games read it through the useSoundEnabled hook instead of keeping
+        their own copy (see setEnabled below). */
     this.enabled = true;
+
+    /** Listeners told whenever `enabled` changes (useSoundEnabled). */
+    this._listeners = new Set();
+    // Bound so they can be handed straight to useSyncExternalStore.
+    this.subscribe = this.subscribe.bind(this);
+    this.isEnabled = this.isEnabled.bind(this);
 
     /** Master volume (0–1). Default is child-friendly quiet. */
     this.volume = 0.3;
@@ -634,14 +643,50 @@ class SoundManager {
    * @returns {boolean} The new enabled state
    */
   toggle() {
-    this.enabled = !this.enabled;
+    return this.setEnabled(!this.enabled);
+  }
 
-    if (!this.enabled) {
+  /**
+   * Turn sound on or off for the whole app.
+   *
+   * Client feedback: "i did switch off the sound in trace->find->type and since
+   * then i can not hear sound in any other game — even when i go in the games
+   * it says sound icon is turned on". Muting flipped this shared flag, but each
+   * game started its own icon at "on" without reading it, so the icon lied and
+   * the sound stayed off everywhere. Every game now reads and writes the state
+   * here, and is re-rendered through the listeners when it changes.
+   *
+   * @param {boolean} on
+   * @returns {boolean} The new enabled state
+   */
+  setEnabled(on) {
+    const next = !!on;
+    if (next === this.enabled) return this.enabled;
+    this.enabled = next;
+
+    if (!next) {
       this.stopOnPath();
       this.stopAmbient();
+    } else {
+      // Called from a click, so the browser allows resuming audio here.
+      this.init();
+      if (this.ctx?.state === 'suspended') this.ctx.resume();
     }
 
-    return this.enabled;
+    this._listeners.forEach((fn) => {
+      try { fn(next); } catch (err) { console.warn('[SoundManager] listener failed:', err); }
+    });
+    return next;
+  }
+
+  /**
+   * Be told when sound is turned on/off anywhere in the app.
+   * @param {(enabled: boolean) => void} fn
+   * @returns {() => void} unsubscribe
+   */
+  subscribe(fn) {
+    this._listeners.add(fn);
+    return () => this._listeners.delete(fn);
   }
 
   /**

@@ -19,6 +19,7 @@ import {LogOut, Volume2, VolumeX, Clock, Pause, Play, Home, ChevronRight, CheckC
 import useHandTracking from '../hooks/useHandTracking';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
 import { soundManager } from '../utils/soundManager';
+import useSoundEnabled from '../hooks/useSoundEnabled';
 import EndGameControl from '../components/game/EndGameControl';
 import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
@@ -33,6 +34,7 @@ import GameRules from '../components/game/GameRules';
 import { getGameTheme, toggleGameTheme, subscribeGameTheme } from '../components/game/gameShell';
 import GameResults from '../components/game/GameResults';
 import TouchModePose from '../components/game/TouchModePose';
+import HandGate from '../components/game/HandGate';
 import useGraspMeasure from '../hooks/useGraspMeasure';
 // ── Constants ──────────────────────────────────────────────────────────────
 const COUNTDOWN_SECONDS = 3;
@@ -297,6 +299,13 @@ export default function TraceTypeGame() {
   const level = parseInt(searchParams.get('level') || '1', 10);
   const levelKey = searchParams.get('difficulty')
     || (level === 3 ? 'hard' : level === 2 ? 'medium' : 'easy');
+  /* The level screen already asks "Hand in the air / Touch" and passes the
+     answer as `?mode=camera|touch`. Asking the same question again in a popup
+     here was redundant (client feedback), so a valid `mode` in the URL is used
+     directly. The popup is kept ONLY as a fallback for a URL without a mode
+     (old links, assigned exercises opened directly). */
+  const urlMode = searchParams.get('mode');
+  const presetInputMethod = urlMode === 'camera' || urlMode === 'touch' ? urlMode : null;
 
   /* ── A ROUND IS A WORD ──────────────────────────────────────────────────
      Product owner's intent, restated in the client's feedback:
@@ -331,7 +340,8 @@ export default function TraceTypeGame() {
   const [currentLetterIdx, setCurrentLetterIdx] = useState(0);
   const [step, setStep]                 = useState('trace'); // trace | find | type
   const [score, setScore]               = useState(0);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  /* Shared app-wide sound state — the icon always matches what you hear. */
+  const [soundEnabled, setSoundEnabled] = useSoundEnabled();
   /* Follows the ONE shared theme instead of keeping a private switch. This
      game used to own an `isLightMode` of its own, so its toggle and the toggle
      on every other screen disagreed — the original "this game has an option to
@@ -1355,10 +1365,32 @@ export default function TraceTypeGame() {
   // ── Countdown overlay ──
   const renderCountdown = () => null;
 
-  // ── Input Selection Overlay ──
+  /* Start the round with the chosen control method. Shared by the fallback
+     popup below and by the automatic start when the URL already carries it. */
+  const beginWithInputMethod = useCallback((method) => {
+    if (method === 'camera') {
+      if (soundEnabled) soundManager.playProgress();
+      setInputMethod('camera');
+      setGamePhase('waiting');
+    } else {
+      if (soundEnabled) soundManager.playCountdownGo();
+      setInputMethod('touch');
+      setGamePhase('playing');
+      letterStartTimeRef.current = Date.now();
+    }
+  }, [soundEnabled]);
+
+  /* Mode chosen on the level screen → skip the popup entirely. */
+  useEffect(() => {
+    if (gamePhase === 'inputSelection' && presetInputMethod) {
+      beginWithInputMethod(presetInputMethod);
+    }
+  }, [gamePhase, presetInputMethod, beginWithInputMethod]);
+
+  // ── Input Selection Overlay (fallback: only when the URL has no mode) ──
   const renderInputSelection = () => (
     <AnimatePresence>
-      {gamePhase === 'inputSelection' && (
+      {gamePhase === 'inputSelection' && !presetInputMethod && (
         <motion.div
           className="tt-hand-detect-overlay"
           initial={{ opacity: 0 }}
@@ -1412,11 +1444,7 @@ export default function TraceTypeGame() {
               <motion.button
                 whileHover={{ scale: 1.05, backgroundColor: 'rgba(99, 102, 241, 0.2)' }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => {
-                  if (soundEnabled) soundManager.playProgress();
-                  setInputMethod('camera');
-                  setGamePhase('waiting');
-                }}
+                onClick={() => beginWithInputMethod('camera')}
                 style={{
                   flex: '1 1 200px',
                   background: 'rgba(30, 41, 59, 0.6)',
@@ -1440,12 +1468,7 @@ export default function TraceTypeGame() {
               <motion.button
                 whileHover={{ scale: 1.05, backgroundColor: 'rgba(34, 211, 238, 0.2)' }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => {
-                  if (soundEnabled) soundManager.playCountdownGo();
-                  setInputMethod('touch');
-                  setGamePhase('playing');
-                  letterStartTimeRef.current = Date.now();
-                }}
+                onClick={() => beginWithInputMethod('touch')}
                 style={{
                   flex: '1 1 200px',
                   background: 'rgba(30, 41, 59, 0.6)',
@@ -1473,155 +1496,16 @@ export default function TraceTypeGame() {
   );
 
   // ── Hand Detection Overlay ──
+  /* Shared with every one-hand camera game — see components/game/HandGate.jsx.
+     The auto-start rule for this game stays in the effect above (it goes
+     straight to 'playing', there is no 3-2-1 here). */
   const renderHandDetection = () => (
-    <AnimatePresence>
-      {gamePhase === 'waiting' && (
-        <motion.div
-          className="tt-hand-detect-overlay"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 200,
-            background: 'rgba(8, 10, 22, 0.9)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          {/* Card */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ type: 'tween', duration: 0.2 }}
-            style={{
-              background: '#151726',
-              border: '1px solid rgba(99, 102, 241, 0.2)',
-              borderRadius: 24,
-              padding: '40px 48px',
-              maxWidth: 520,
-              width: '90%',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 24,
-              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.5)',
-            }}
-          >
-            {/* Message */}
-            <div style={{ textAlign: 'center' }}>
-              <div style={{
-                fontSize: '1.4rem',
-                fontWeight: 700,
-                color: '#fff',
-                marginBottom: 4,
-              }}>
-                <span style={{ color: 'rgba(255,255,255,0.4)' }}>«</span>
-                {' '}Show one of your hands{' '}
-              </div>
-              <div style={{
-                fontSize: '1.4rem',
-                fontWeight: 700,
-                color: '#fff',
-              }}>
-                to start playing{' '}
-                <span style={{ color: 'rgba(255,255,255,0.4)' }}>»</span>
-              </div>
-            </div>
-
-            {/* Hand Illustration Container - Simplified */}
-            <div
-              style={{
-                position: 'relative',
-                width: 180,
-                height: 220,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {/* Simple pulsing background instead of blurred radial gradient */}
-              <motion.div
-                animate={{ opacity: [0.1, 0.3, 0.1] }}
-                transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-                style={{
-                  position: 'absolute',
-                  width: '100%',
-                  height: '100%',
-                  borderRadius: '50%',
-                  background: '#6366f1',
-                }}
-              />
-
-              {/* Static Hand Image without expensive filters */}
-              <img 
-                src="/hand-wireframe.png" 
-                alt="Wireframe Hand"
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  objectFit: 'contain',
-                  position: 'relative',
-                  zIndex: 2,
-                }}
-              />
-            </div>
-
-            {/* Simple Loading text/dots */}
-            <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-              {[0, 1, 2].map((i) => (
-                <motion.div
-                  key={i}
-                  animate={{ opacity: [0.3, 1, 0.3] }}
-                  transition={{
-                    duration: 1,
-                    repeat: Infinity,
-                    delay: i * 0.2,
-                  }}
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: '#8b8eff',
-                  }}
-                />
-              ))}
-            </div>
-
-            {/* MediaPipe Badge */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '8px 16px',
-                borderRadius: 20,
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-              }}
-            >
-              <div style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: isTracking ? '#10B981' : '#F59E0B',
-              }} />
-              <span style={{
-                fontSize: '0.8rem',
-                color: 'rgba(255, 255, 255, 0.7)',
-                fontWeight: 500,
-              }}>
-                {isTracking ? 'MediaPipe™ Active' : 'Initializing Tracking...'}
-              </span>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <HandGate
+      visible={gamePhase === 'waiting'}
+      isTracking={isTracking}
+      onUseTouch={switchMode}
+      onExit={() => navigate('/play')}
+    />
   );
 
   // ── Letter Success Overlay ──

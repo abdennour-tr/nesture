@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {Home, Pause, Play, RotateCcw, Clock, Star, Volume2, VolumeX, CheckCircle, Info, ArrowLeftRight} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
 import { soundManager } from '../utils/soundManager';
+import useSoundEnabled from '../hooks/useSoundEnabled';
 import GameRules from '../components/game/GameRules';
 import {otComposite, otRound, FINISH} from '../utils/otScore';
 import { PIANO_LEVELS, PIANO_KEYS, buildPianoQueue } from './fingerPianoLevels';
@@ -245,7 +246,8 @@ export default function FingerPianoGame() {
   const [mode, setMode] = useState(
     (searchParams.get('mode') || 'camera').toLowerCase() === 'touch' ? 'touch' : 'camera'
   );
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  /* Shared app-wide sound state — the icon always matches what you hear. */
+  const [soundEnabled, setSoundEnabled] = useSoundEnabled();
 
   const [gamePhase, setGamePhase] = useState(() =>
     sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules'
@@ -787,7 +789,8 @@ export default function FingerPianoGame() {
        Keep the singleton in sync with this game's toggle (and resume the audio
        context when enabling) so the button always works and the game is not
        silent on entry. */
-    soundManager.enabled = soundEnabled;
+    /* `soundEnabled` now IS the shared flag (useSoundEnabled), so there is
+       nothing to copy back — only resume the audio context when it is on. */
     if (soundEnabled) soundManager.init();
   }, [soundEnabled]);
 
