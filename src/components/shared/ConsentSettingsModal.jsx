@@ -21,11 +21,13 @@ export default function ConsentSettingsModal({ isOpen, onClose }) {
   const points = [
     "Data Encryption: All data is encrypted in transit and at rest using AES-256.",
     "Data Minimization: We only collect reports and session metrics necessary for the 6-agent AI pipeline.",
+    "Camera Stays On Device: Activities analyse the camera image on your device. No video or photo is ever uploaded or stored \u2014 only the positions of tracked points such as wrists and shoulders.",
     "Right to Erasure: You can revoke access and delete all data at any time.",
     "No Third-Party Selling: Your data is never sold to third-party brokers.",
     "Specialist Access: Only specialists you explicitly link can view the Atlas Profile.",
-    "AI Training Opt-Out: By default, your raw data is NOT used to train global AI models.",
-    "Auto-Deletion: Raw uploaded PDFs are deleted automatically after processing."
+    "AI Training Opt-Out: Our AI and OCR providers process your data under contract and do not use it to train their models.",
+    "Auto-Deletion: The original file you upload is deleted as soon as processing completes. The text extracted from it is kept so your profile can be updated, and you can delete that too at any time.",
+    "Name Removal: Profile data sent to our AI provider for insight generation has your child\u2019s name removed before it leaves NestureAI."
   ];
 
   return (
@@ -63,7 +65,7 @@ export default function ConsentSettingsModal({ isOpen, onClose }) {
             </div>
             
             <p style={styles.introText}>
-              By using NestureAI, you have agreed to our 7-point data pledge. We believe in complete transparency regarding your child's data.
+              By using NestureAI, you have agreed to our data pledge. We believe in complete transparency regarding your child's data.
             </p>
 
             <ul style={styles.pointsList}>

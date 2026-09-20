@@ -18,12 +18,22 @@ const CONSENT_POINTS = [
   {
     id: 'document_processing',
     title: 'Document processing',
-    text: 'I agree that NestureAI will process my uploaded documents for the sole purpose of generating the learning and movement profile. Documents are processed and then deleted. Only the structured profile output is retained.',
+    text: 'I agree that NestureAI will process my uploaded documents for the sole purpose of generating the learning and movement profile. The original file is deleted automatically as soon as processing completes, and is purged from encrypted backups within 30 days. The text extracted from it is retained alongside the structured profile so the profile can be updated later, and I can delete both at any time from my dashboard.',
+  },
+  {
+    id: 'camera_movement',
+    title: 'Camera and movement data',
+    text: 'I understand that NestureAI uses the device camera during activities to follow where my child\u2019s hands and body are. The camera image is analysed on the device itself and is never uploaded: no video or photograph is recorded or stored, and nobody watches live. What is saved is the position of tracked points \u2014 such as wrists, shoulders and head \u2014 over the course of a session, stored against my child\u2019s account and used to measure progress. Before any activity that also records upper-body posture, my child is asked separately and can say no; the activity works the same either way.',
+  },
+  {
+    id: 'ai_processing',
+    title: 'AI processing and providers',
+    text: 'I understand that NestureAI uses external providers to read uploaded documents and to generate insights, and that the text of my documents is sent to them for that purpose. Profile data sent for insight generation has my child\u2019s name removed before it leaves NestureAI. These providers process the data on NestureAI\u2019s behalf under their data-processing terms, and NestureAI does not use my documents or my child\u2019s profile to train its own models.',
   },
   {
     id: 'data_privacy',
     title: 'Data privacy',
-    text: 'I understand that NestureAI stores profile data securely and does not share it with third parties. NestureAI complies with COPPA for learners under 13 and FERPA where educational records are involved.',
+    text: 'I understand that NestureAI stores profile data securely, never sells it, and does not share it with advertisers or data brokers. It is shared only with the service providers described above and with specialists I choose to connect. NestureAI is designed to align its handling of children\u2019s data with COPPA for learners under 13, and with FERPA where educational records are involved.',
   },
   {
     id: 'practitioner_sharing',

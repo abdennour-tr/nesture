@@ -107,6 +107,11 @@ serve(async (req) => {
 
   let documentIdToRollback = null;
   let supabaseForRollback = null;
+  let opTypeForRollback = "upload";
+  // Hoisted: file_path is declared inside the try block, so the catch below could
+  // not see it and every rollback threw a swallowed ReferenceError instead of
+  // cleaning up storage.
+  let filePathForRollback: string | null = null;
 
   try {
     const supabase = createClient(
@@ -118,6 +123,8 @@ serve(async (req) => {
     documentIdToRollback = document_id;
     supabaseForRollback = supabase;
     const opType = operation_type || 'upload';
+    opTypeForRollback = opType;
+    filePathForRollback = file_path ?? null;
     const ocrApiKey = Deno.env.get("OCR_API_KEY");
     const serviceKey = Deno.env.get("SERVICE_ROLE_KEY");
 
@@ -165,8 +172,30 @@ serve(async (req) => {
       .from("patient-documents")
       .download(file_path);
 
-    if (downloadError) throw new Error(`Storage download failed: ${downloadError.message}`);
-    console.log(`[Step 1] ✅ File downloaded (${(fileData.size / 1024).toFixed(1)} KB)`);
+    // The raw file is deleted once it has been processed (see Step 6), so on a
+    // refresh it is expected to be gone. The text extracted at upload time is
+    // kept instead, and is all the pipeline below actually needs. Only treat a
+    // missing file as fatal when we have no stored text to fall back on.
+    let storedText: string | null = null;
+    if (downloadError) {
+      if (document_id) {
+        const { data: docRow } = await supabase
+          .from("documents")
+          .select("extracted_text")
+          .eq("id", document_id)
+          .maybeSingle();
+        const candidate = docRow?.extracted_text;
+        if (typeof candidate === "string" && candidate.trim().length >= 15) {
+          storedText = candidate;
+        }
+      }
+      if (!storedText) {
+        throw new Error(`Storage download failed: ${downloadError.message}`);
+      }
+      console.log(`[Step 1] ♻️  Raw file already deleted — reusing stored text (${storedText.length} chars)`);
+    } else {
+      console.log(`[Step 1] ✅ File downloaded (${(fileData.size / 1024).toFixed(1)} KB)`);
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // STEP 2 — OCR: Extract text from the document
@@ -182,7 +211,10 @@ serve(async (req) => {
     else if (fileExt === 'doc') fileMime = 'application/msword';
     else if (fileExt === 'docx') fileMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-    if (ocrApiKey) {
+    if (storedText) {
+      console.log("\n[Step 2] ♻️  Reusing previously extracted text — no re-upload to the OCR provider.");
+      extractedText = storedText;
+    } else if (ocrApiKey) {
       console.log(`\n[Step 2] 🔬 Running OCR on document (${fileExt}, ${fileMime})...`);
       const formData = new FormData();
       formData.append("file", new Blob([await fileData.arrayBuffer()], { type: fileMime }), `document.${fileExt}`);
@@ -214,8 +246,10 @@ serve(async (req) => {
           }
         }
       }
-    } else {
-      console.warn("[Step 2] ⚠️  No OCR_API_KEY. Using mock clinical text for AI pipeline demo.");
+    } else if (Deno.env.get("ALLOW_MOCK_OCR") === "true") {
+      // Demo/seed only. Without this flag an unset OCR key must fail loudly rather
+      // than hand a parent a profile built from invented clinical findings.
+      console.warn("[Step 2] ⚠️  ALLOW_MOCK_OCR is on. Using mock clinical text — NOT for production.");
       extractedText = `Clinical Evaluation Report.
 Patient: Age 8. Diagnosis: Autism Spectrum Disorder (Level 2), Sensory Processing Disorder.
 Communication: Primarily non-verbal. Uses AAC device for basic requests (PECS Level 3).
@@ -224,6 +258,10 @@ Sensory: Hypersensitive to auditory stimuli (covers ears frequently). Hyposensit
 Strengths: Strong visual-spatial reasoning. Excellent memory for patterns. Responds well to routine.
 Challenges: Emotional regulation. Transitions between activities. Fine motor grip strength.
 Recommendations: Daily proprioceptive activities, weighted blanket during work sessions, 10-min movement breaks.`;
+    } else {
+      throw new Error(
+        "OCR_API_KEY is not configured. Refusing to generate a profile without real document text.",
+      );
     }
 
     // Reject if no readable text could be extracted (empty file, image of face/animal)
@@ -243,6 +281,22 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 200 }
       );
+    }
+
+    // Persist the extracted text before anything else touches it. This is what
+    // makes Step 6 safe to run: once the text is stored, the raw file is no
+    // longer needed for re-analysis and can be deleted as the consent promises.
+    if (document_id && !storedText) {
+      const { error: textErr } = await supabase
+        .from("documents")
+        .update({ extracted_text: cleanText })
+        .eq("id", document_id);
+      if (textErr) {
+        // Without stored text we must keep the raw file, so surface this loudly.
+        console.error("[Step 2] ❌ Could not persist extracted_text:", textErr.message);
+        throw new Error(`Failed to persist extracted text: ${textErr.message}`);
+      }
+      console.log(`[Step 2] 💾 Stored extracted text (${cleanText.length} chars)`);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -890,9 +944,30 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
     // ─────────────────────────────────────────────────────────────────────────
     // STEP 6 — Delete the raw file (RGPD/HIPAA compliance)
     // ─────────────────────────────────────────────────────────────────────────
-    // NOTE: Only delete if configured — keep for demo purposes.
-    // const { error: deleteError } = await supabase.storage.from('patient-documents').remove([file_path]);
-    // if (deleteError) console.warn('[RGPD] Warning: Could not delete raw file:', deleteError.message);
+    // The consent tells parents their document is processed and then deleted, so
+    // this runs unconditionally. It is safe because the extracted text was stored
+    // above and Step 1 falls back to it, so re-analysis no longer needs the file.
+    // KEEP_RAW_DOCUMENTS=true is an escape hatch for debugging only; turning it on
+    // makes the consent wording untrue.
+    if (Deno.env.get("KEEP_RAW_DOCUMENTS") === "true") {
+      console.warn("[Step 6] ⚠️  KEEP_RAW_DOCUMENTS is on — raw file retained. Consent wording assumes deletion.");
+    } else {
+      const { error: deleteError } = await supabase.storage
+        .from("patient-documents")
+        .remove([file_path]);
+
+      if (deleteError) {
+        console.error("[Step 6] ❌ Could not delete raw file:", deleteError.message);
+      } else {
+        console.log("[Step 6] 🗑️  Raw file deleted — only the extracted text and profile are retained.");
+        if (document_id) {
+          await supabase
+            .from("documents")
+            .update({ raw_file_deleted_at: new Date().toISOString() })
+            .eq("id", document_id);
+        }
+      }
+    }
 
     console.log("\n🎉 Pipeline complete!");
 
@@ -915,10 +990,21 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
     // Safety rollback to unblock UI and cleanup ghost documents
     if (documentIdToRollback && supabaseForRollback) {
       try {
-        console.warn(`[Rollback] 🧹 Error occurred, cleaning up invalid document: ${documentIdToRollback}`);
-        await supabaseForRollback.from("documents").delete().eq("id", documentIdToRollback);
-        if (file_path) {
-          await supabaseForRollback.storage.from("patient-documents").remove([file_path]);
+        // Only a failed first upload may be cleaned up. On a refresh the document
+        // already exists and its raw file is legitimately gone, so deleting the
+        // row here would destroy a record the parent still expects to see.
+        if (opTypeForRollback === "upload") {
+          console.warn(`[Rollback] 🧹 Upload failed, cleaning up invalid document: ${documentIdToRollback}`);
+          await supabaseForRollback.from("documents").delete().eq("id", documentIdToRollback);
+          if (filePathForRollback) {
+            await supabaseForRollback.storage.from("patient-documents").remove([filePathForRollback]);
+          }
+        } else {
+          console.warn(`[Rollback] ↩️  Refresh failed for ${documentIdToRollback}; leaving the record intact.`);
+          await supabaseForRollback
+            .from("documents")
+            .update({ status: "definitive" })
+            .eq("id", documentIdToRollback);
         }
       } catch (rollbackErr) {
         console.error("❌ Failed to rollback document status:", rollbackErr);

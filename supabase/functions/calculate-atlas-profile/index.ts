@@ -84,6 +84,36 @@ serve(async (req) => {
 
     const childName = child.first_name || "Child";
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // De-identification for outbound AI requests.
+    //
+    // Nothing that leaves this function toward a third-party model may carry the
+    // child's name. We know the exact name strings here, so unlike free-form
+    // clinical text this substitution is exact rather than probabilistic.
+    // The model is told to write "[CHILD]"; we substitute the real name back in
+    // once the response is ours again, so the parent still reads a personalised
+    // plan while the provider never receives an identifier.
+    // ──────────────────────────────────────────────────────────────────────────
+    const CHILD_TOKEN = "[CHILD]";
+    const identifiers = [child.first_name, child.last_name]
+      .filter((n: string | null) => typeof n === "string" && n.trim().length > 1)
+      .map((n: string) => n.trim());
+
+    const escapeRegExp = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // Replaces any occurrence of the child's name in free-text parent answers.
+    const scrub = (value: unknown): any => {
+      if (typeof value === "string") {
+        return identifiers.reduce(
+          (acc, id) => acc.replace(new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), CHILD_TOKEN),
+          value,
+        );
+      }
+      if (Array.isArray(value)) return value.map(scrub);
+      return value ?? null;
+    };
+
+
     // 2. Deterministic Scoring Logic
     const LIKERT_MAP: Record<string, number> = {
       'Rarely': 0,
@@ -235,7 +265,8 @@ serve(async (req) => {
       try {
         console.log("[anthropic] Dispatching request to Anthropic Claude 3.5 Sonnet");
         const payloadJSON = {
-          child_name: childName,
+          // Deliberately an opaque token, never the child's name. See scrub() above.
+          child_reference: CHILD_TOKEN,
           domain_scores: {
             "Social & Communication": { score: d2.score, band: d2.band },
             "Academics & Learning": { score: d3.score, band: d3.band },
@@ -248,18 +279,18 @@ serve(async (req) => {
             "Composite Profile Score": compositeScore
           },
           developmental_profile: {
-            communication_mode: responses.d1_communication_mode,
-            strengths_checklist: responses.d1_strengths_checklist || [],
-            who_is: responses.d1_who_is,
-            enjoys: responses.d1_enjoys,
-            would_help: responses.d1_what_helps
+            communication_mode: scrub(responses.d1_communication_mode),
+            strengths_checklist: scrub(responses.d1_strengths_checklist || []),
+            who_is: scrub(responses.d1_who_is),
+            enjoys: scrub(responses.d1_enjoys),
+            would_help: scrub(responses.d1_what_helps)
           },
           environment_and_family: {
-            family_differences: responses.d10_family_differences,
-            family_notes: responses.d10_genetic_notes,
-            daytime_location: responses.d11_location,
-            calm_environment: responses.d11_calm_space,
-            calm_factors: responses.d11_what_helps || []
+            family_differences: scrub(responses.d10_family_differences),
+            family_notes: scrub(responses.d10_genetic_notes),
+            daytime_location: scrub(responses.d11_location),
+            calm_environment: scrub(responses.d11_calm_space),
+            calm_factors: scrub(responses.d11_what_helps || [])
           }
         };
 
@@ -273,7 +304,7 @@ serve(async (req) => {
           body: JSON.stringify({
             model: "claude-3-5-sonnet-20241022",
             max_tokens: 1000,
-            system: "You are a supportive educational assistant helping families understand their child's profile. Write a warm, strengths-first support plan based ONLY on the data provided. Rules: use 'learner' not 'patient'; say 'support area' not 'deficit' or 'disorder'; never suggest a diagnosis; if data is missing, acknowledge it rather than invent; keep it under 300 words.",
+            system: "You are a supportive educational assistant helping families understand their child's profile. Write a warm, strengths-first support plan based ONLY on the data provided. Rules: use 'learner' not 'patient'; say 'support area' not 'deficit' or 'disorder'; never suggest a diagnosis; if data is missing, acknowledge it rather than invent; keep it under 300 words. The learner is identified only as [CHILD] \u2014 refer to them with that exact token wherever you would use a name, and never invent one.",
             messages: [
               {
                 role: "user",
@@ -285,7 +316,8 @@ serve(async (req) => {
 
         if (response.ok) {
           const resJSON = await response.json();
-          d12SupportPlan = resJSON.content[0].text;
+          // Substitute the real name back in now the text is ours again.
+          d12SupportPlan = String(resJSON.content[0].text ?? "").split(CHILD_TOKEN).join(childName);
           console.log("[anthropic] Support plan generated successfully");
         } else {
           const errText = await response.text();
