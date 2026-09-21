@@ -66,7 +66,9 @@ export default function PathTracingGame() {
   const {
     landmarks, multiHandData, isTracking, error: cameraError,
     positionBuffer, faceLandmarks, headPose, faceCanvasRef,
-  } = useMediaPipeTracking(videoRef, canvasRef, true);
+    /* One finger traces the shape, so one hand owns the round — the other
+       hand, however much it moves, is ignored. */
+  } = useMediaPipeTracking(videoRef, canvasRef, true, { handSideLock: true });
 
   // ── Reflex Engine ────────────────────────────────────────────────
   const { startTracking, stopTracking, pushFrame } = useReflexEngine({ analyzeEveryMs: 4000 });

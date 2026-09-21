@@ -186,7 +186,14 @@ export default function FingerCopyGame() {
     error: trackingError,
     isSimulationMode,
     releaseCamera,
-  } = useHandTracking(videoRef, canvasRef, trackingEnabled);
+  } = useHandTracking(
+    videoRef, canvasRef, trackingEnabled, false, 2,
+    /* ONE hand plays. The side (right or left) of the first hand seen owns
+       the round; the other hand is ignored and not drawn, so a learner who
+       shakes it cannot pull the pointer away. Same lock as Pinch the Coin —
+       see utils/activeHandSelector.js. */
+    { handSideLock: true, drawOnlyActiveHand: true }
+  );
 
   // ── Game state ──────────────────────────────────────────────────────────
   /* "How to play" — re-openable at any time from the header's "?" button.

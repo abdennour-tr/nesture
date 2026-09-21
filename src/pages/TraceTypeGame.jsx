@@ -390,7 +390,9 @@ export default function TraceTypeGame() {
   } = useHandTracking(videoRef, canvasRef, trackingEnabled, pauseProcessing, 2, {
     stableSelection: true,
     requireMotion: false,
-    singleHandLock: true,
+    /* Side lock rather than the older wrist-identity lock: the first hand's
+       SIDE owns the round, which is what the other one-hand games use. */
+    handSideLock: true,
     modelComplexity: 0,
     drawOnlyActiveHand: true,
     /* Safe to throttle ONLY because this game reads the *Ref values in its own
@@ -1182,6 +1184,15 @@ export default function TraceTypeGame() {
      ("show your hand") path the initial camera choice uses, so consent and hand
      detection are handled exactly as before. The current word and letter are
      preserved either way. */
+  /* End the round now and show the report. Shared by the header button and the
+     one on the pause card, so both finish a session the same way. */
+  const endGameNow = useCallback(() => {
+    setIsPaused(false);
+    setOtResults(computeOTResults());
+    setGraspResult(graspRef.current.result());
+    setGamePhase('results');
+  }, [computeOTResults]);
+
   const switchMode = useCallback(() => {
     const next = inputMethod === 'camera' ? 'touch' : 'camera';
     setIsDrawing(false);
@@ -1713,6 +1724,14 @@ export default function TraceTypeGame() {
                 <Play size={18} />
                 Resume
               </motion.button>
+              {/* Client feedback: "il faut que end game existe lorsque l'user
+                  click sur pause". Quit leaves with nothing saved; this ends
+                  the round properly and shows the report. */}
+              <EndGameControl
+                className="tt-results-btn secondary gs-end-btn"
+                label="End game"
+                onConfirm={endGameNow}
+              />
               <motion.button
                 className="tt-results-btn secondary"
                 whileHover={{ scale: 1.03 }}
@@ -1762,12 +1781,7 @@ export default function TraceTypeGame() {
             compact
             disabled={gamePhase !== 'playing'}
             onAskingChange={(asking) => { setEndAsking(asking); setIsPaused(asking); }}
-            onConfirm={() => {
-              setIsPaused(false);
-              setOtResults(computeOTResults());
-              setGraspResult(graspRef.current.result());
-              setGamePhase('results');
-            }}
+            onConfirm={endGameNow}
           />
           <button
             className="tt-icon-btn"

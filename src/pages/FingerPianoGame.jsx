@@ -1173,6 +1173,19 @@ export default function FingerPianoGame() {
                 <button className="fpp-btn fpp-btn-ghost" onClick={restart}>
                   <RotateCcw size={18} /> Restart
                 </button>
+                {/* Client feedback: "il faut que end game existe lorsque l'user
+                    click sur pause". The header's End game button is behind
+                    this overlay, so the same control is offered here.
+                    This one does NOT report `onAskingChange`: the button is
+                    inside the pause card, so hiding the card would unmount the
+                    control and take its confirm dialog with it. The dialog is
+                    portalled above everything instead, and the round is already
+                    frozen, so "Keep playing" simply returns to this card. */}
+                <EndGameControl
+                  className="fpp-btn fpp-btn-ghost gs-end-btn"
+                  label="End game"
+                  onConfirm={() => { setIsPaused(false); finishRef.current?.(FINISH.ENDED); }}
+                />
                 <button className="fpp-btn fpp-btn-ghost" onClick={goHome}>
                   <Home size={18} /> Home
                 </button>

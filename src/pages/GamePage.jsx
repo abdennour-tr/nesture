@@ -432,7 +432,9 @@ export default function GamePage() {
     /* enabled=false in touch mode: no getUserMedia, no permission prompt, no
      MediaPipe models downloaded, no frame loop. Touch mode has to work on a
      device that simply has no camera. */
-  } = useMediaPipeTracking(videoRef, canvasRef, !isTouchMode);
+    /* LetterQuest is pointed at with ONE hand: the first hand seen keeps the
+       cursor for the round, so a second (often shaking) hand cannot steal it. */
+  } = useMediaPipeTracking(videoRef, canvasRef, !isTouchMode, { handSideLock: true });
 
   // ── Reflex Engine (temps réel) ─────────────────────────────────────────────
   const { startTracking, stopTracking, pushFrame, setInputMode: setEngineInputMode } =

@@ -448,7 +448,11 @@ export default function LadybugGame() {
 
   const { landmarks, trackingTimestamp, activeHandKey, isTracking, isSimulationMode, releaseCamera } = useHandTracking(
     videoRef, trackCanvasRef, trackingEnabled, isPaused, 2,
-    { stableSelection: true }
+    /* ONE hand plays. The side (right or left) of the first hand seen owns
+       the round; the other hand is ignored and not drawn, so a learner who
+       shakes it cannot pull the pointer away. Same lock as Pinch the Coin —
+       see utils/activeHandSelector.js. */
+    { stableSelection: true, handSideLock: true, drawOnlyActiveHand: true }
   );
 
   /* Palmar grasp is the one reflex this game's sensors can honestly measure:
@@ -1500,6 +1504,19 @@ export default function LadybugGame() {
                 <button className="lb-btn lb-btn-ghost" onClick={restart}>
                   <RotateCcw size={18} /> Restart
                 </button>
+                {/* Client feedback: "il faut que end game existe lorsque l'user
+                    click sur pause". The header's End game button is behind
+                    this overlay, so the same control is offered here.
+                    This one does NOT report `onAskingChange`: the button is
+                    inside the pause card, so hiding the card would unmount the
+                    control and take its confirm dialog with it. The dialog is
+                    portalled above everything instead, and the round is already
+                    frozen, so "Keep playing" simply returns to this card. */}
+                <EndGameControl
+                  className="lb-btn lb-btn-ghost gs-end-btn"
+                  label="End game"
+                  onConfirm={() => { setIsPaused(false); finishRef.current?.('ended'); }}
+                />
                 <button className="lb-btn lb-btn-ghost" onClick={goHome}>
                   <Home size={18} /> Home
                 </button>

@@ -15,6 +15,7 @@
  *   positionBuffer
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
+import createActiveHandSelector from '../utils/activeHandSelector';
 
 export { LANDMARKS, calculateSmoothness, landmarkDistance,
          getPointingVector, isIndexPointing, getPalmCenter,
@@ -165,7 +166,28 @@ function drawHandLandmarks(results, canvas) {
 }
 
 // ── Hook principal ─────────────────────────────────────────────────────────
-export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true) {
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.handSideLock]  One hand plays: the SIDE (right or
+ *   left) of the first hand seen owns the round and only that hand drives the
+ *   cursor. Client feedback: a learner who shakes the other hand (excited or
+ *   nervous) had the cursor jump to it, because this hook used whichever hand
+ *   MediaPipe happened to list first. See utils/activeHandSelector.js — the
+ *   same lock Pinch the Coin uses.
+ */
+export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true, options = {}) {
+  const { handSideLock = false } = options;
+
+  /* Read from the camera callback, which must keep a stable identity (it is
+     handed to MediaPipe once), so the flag travels by ref. */
+  const handSideLockRef = useRef(handSideLock);
+  useEffect(() => { handSideLockRef.current = handSideLock; }, [handSideLock]);
+
+  const handSelectorRef = useRef(null);
+  if (!handSelectorRef.current) {
+    handSelectorRef.current = createActiveHandSelector({ handSideLock: true });
+  }
+
   const [landmarks,     setLandmarks]     = useState(null);
   const [multiHandData, setMultiHandData] = useState(null);
   const [faceLandmarks, setFaceLandmarks] = useState(null);
@@ -390,7 +412,32 @@ export default function useMediaPipeTracking(videoRef, canvasRef, enabled = true
         setCalibrationStatus('Calibrating...');
       }
 
-      const first = results.multiHandLandmarks[0];
+      /* WHICH hand drives the cursor. Without the lock this was
+         `multiHandLandmarks[0]` — whichever hand MediaPipe listed first, which
+         changes from frame to frame and is very often the hand that is NOT
+         playing. With it, the first hand seen keeps the round. */
+      const picked = handSideLockRef.current
+        ? handSelectorRef.current.select(
+            results.multiHandLandmarks, results.multiHandedness || [], performance.now())
+        : null;
+      const first = handSideLockRef.current ? picked?.landmarks : results.multiHandLandmarks[0];
+
+      /* The locked hand is not in this frame (it left, or it blinked out).
+         Hand nothing to the game rather than the other hand, and let the same
+         400ms grace below cover a blip. */
+      if (!first) {
+        if (!trackingLossTimer.current) {
+          trackingLossTimer.current = setTimeout(() => {
+            setLandmarks(null);
+            setMultiHandData(null);
+            setIsTracking(false);
+            setTrackingConfidence(0);
+            setHandCount(0);
+          }, 400);
+        }
+        return;
+      }
+
       setLandmarks(first);
       setIsTracking(true);
       setHandCount(results.multiHandLandmarks.length);
