@@ -44,3 +44,26 @@
 @media (prefers-reduced-motion: reduce) {
   .cam-lm-badge.is-live .cam-lm-dot { animation: none; }
 }
+
+/* ── Touch-mode variant ────────────────────────────────────────────────────
+   TouchModePose (the background posture recorder used during touch-mode
+   rounds) renders this widget as a sibling of <main>, not inside the game's
+   own play field like the camera-mode games do — it is one shared component
+   used by five different games, and it does not know each one's field DOM.
+   So `.cam-lm-widget`'s normal absolute positioning (relative to the play
+   field) would resolve against the page instead and could land under the
+   header. Fixed-to-viewport, bottom-right, keeps it clear of every game's
+   header controls and out of the play field's touch-input area.
+   NOTE: verify placement in each of the 5 games this runs in (Pinch the
+   Coin, Trace → Find → Type, Follow the Ladybug, Finger Piano, Pop the
+   Bubble) — a bottom score/progress bar may sit in the same corner on some
+   screen sizes and this may need a per-game nudge. */
+.touch-mode-pose-frame {
+  position: fixed;
+  top: auto; left: auto;
+  bottom: 14px; right: 14px;
+  z-index: 300;
+}
+@media (max-width: 560px) {
+  .touch-mode-pose-frame { bottom: 8px; right: 8px; }
+}

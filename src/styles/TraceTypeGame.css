@@ -581,6 +581,23 @@
   transform: scale(0.95);
 }
 
+/* ── Touch-mode camera frame ──────────────────────────────────────────────
+   This game has no camera-mode preview to match (see TouchModePose's call
+   site above), so the frame keeps the shared fixed-corner fallback rather
+   than being portaled into `.tt-trace-area` — but the shared fallback's
+   default corner (bottom-right) sits under the right sidebar's cards here
+   (How To Play / Your Progress / Metrics). Top-left, same corner Follow the
+   Ladybug and the other camera-mode games use, is empty space in this
+   layout at every step (trace/find/type) once nudged below `.tt-header`
+   (which is in normal flow here, not an overlay, so a plain top:14px would
+   sit under/behind it instead of below it). */
+.tt-page .touch-mode-pose-frame {
+  top: 78px;
+  left: 14px;
+  bottom: auto;
+  right: auto;
+}
+
 /* ── Tracing Canvas ────────────────────────────────────────────────────────── */
 .tt-trace-area {
   position: relative;

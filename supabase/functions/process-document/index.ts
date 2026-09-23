@@ -300,10 +300,47 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // De-identification for outbound AI requests (added 2026-09-22, privacy
+    // review finding: the extracted document text used to be sent to Groq
+    // as-is, including any name/DOB the clinician wrote — unlike the
+    // Anthropic call in calculate-atlas-profile/index.ts, which already
+    // scrubs the child's name. Same pattern here: we know the child's real
+    // name from public.children, so this substitution is exact rather than
+    // probabilistic. What we PERSIST to documents.extracted_text above stays
+    // the full, unscrubbed text (that's our own storage, already covered by
+    // the consent copy) — only what leaves this function toward Groq below
+    // is de-identified, and restored again once each response is back in
+    // our hands.
+    // ─────────────────────────────────────────────────────────────────────────
+    const CHILD_TOKEN = "[CHILD]";
+    const escapeRegExp = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    let restoreChildName = (v: string) => v;
+    if (child_id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(child_id)) {
+      const { data: childRow } = await supabase
+        .from("children")
+        .select("first_name, last_name, name")
+        .eq("id", child_id)
+        .maybeSingle();
+      const childName = childRow?.first_name || childRow?.name || "Child";
+      const identifiers = [childRow?.first_name, childRow?.last_name, childRow?.name]
+        .filter((n: string | null | undefined): n is string => typeof n === "string" && n.trim().length > 1)
+        .map((n: string) => n.trim());
+      if (identifiers.length > 0) {
+        const scrubbed = identifiers.reduce(
+          (acc, id) => acc.replace(new RegExp(`\\b${escapeRegExp(id)}\\b`, "gi"), CHILD_TOKEN),
+          extractedText,
+        );
+        extractedText = scrubbed;
+        restoreChildName = (v: string) => v.split(CHILD_TOKEN).join(childName);
+        console.log(`[De-identify] Scrubbed child identifiers from text sent to Groq (${identifiers.length} name(s)).`);
+      }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // AGENT 1 — Document Eligibility Engine (Trust & Safety)
     // ─────────────────────────────────────────────────────────────────────────
     console.log("\n[Agent 1] 🤖 Document Eligibility Engine running...");
-    const agent1Raw = await callGroq(
+    let agent1Raw = await callGroq(
       `You are the Principal AI Validation Architect, Clinical AI Reliability Engineer, and Decision Engine Auditor.
       Your job is to act as an Evidence and Signal Extractor for pediatric clinical documents.
       
@@ -360,6 +397,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
       }`,
       opType,
     );
+    agent1Raw = restoreChildName(agent1Raw);
 
     const rawMetrics = safeParse(agent1Raw, {
       confidence_metrics: {
@@ -595,7 +633,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
     // AGENT 2 — Developmental Profiler: Strengths & Challenges
     // ─────────────────────────────────────────────────────────────────────────
     console.log("\n[Agent 2] 🤖 Developmental Profiler running...");
-    const agent2Raw = await callGroq(
+    let agent2Raw = await callGroq(
       `You are a clinical data synthesizer. Extract ALL findings, strengths, challenges, and neutral facts from the text.
       CRITICAL INSTRUCTION: You MUST evaluate the text for EVERY SINGLE ONE of these domains:
       1. Cognitive
@@ -626,6 +664,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
       }`,
       opType,
     );
+    agent2Raw = restoreChildName(agent2Raw);
     const agent2 = safeParse(agent2Raw, { strengths: [], challenges: [] });
     console.log(`[Agent 2] ✅ Found ${agent2.strengths?.length || 0} strengths, ${agent2.challenges?.length || 0} challenges.`);
 
@@ -633,7 +672,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
     // AGENT 3 — Sensory Profiler: Sensory processing patterns
     // ─────────────────────────────────────────────────────────────────────────
     console.log("\n[Agent 3] 🤖 Sensory Profiler running...");
-    const agent3Raw = await callGroq(
+    let agent3Raw = await callGroq(
       `You are a sensory processing specialist.
       CRITICAL INSTRUCTION: If a sensory domain (Auditory, Tactile, Proprioceptive, etc.) is mentioned IN ANY WAY in the text, you MUST classify it as 'hypersensitive', 'hyposensitive', or 'typical'. 
       Even if the text speaks in general terms (e.g., "Common indicators: covering ears", "Some individuals..."), you MUST ASSUME it applies to the patient and extract it!
@@ -663,6 +702,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
       }`,
       opType,
     );
+    agent3Raw = restoreChildName(agent3Raw);
     const agent3 = safeParse(agent3Raw, { sensory_profile: {}, communication_profile: {} });
     console.log(`[Agent 3] ✅ Sensory profile mapped. Auditory: ${agent3.sensory_profile?.auditory || "unknown"}`);
 
@@ -670,7 +710,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
     // AGENT 4 — Motor & Reflex Analyzer
     // ─────────────────────────────────────────────────────────────────────────
     console.log("\n[Agent 4] 🤖 Motor & Reflex Analyzer running...");
-    const agent4Raw = await callGroq(
+    let agent4Raw = await callGroq(
       `You are a motor development specialist. Analyze motor patterns and primitive reflex retention.
       IMPORTANT: Return ONLY valid JSON. Educational purposes only.
       Score reflexes 0-4: 0=integrated, 1=minimal, 2=emerging, 3=moderate, 4=severe retention.`,
@@ -691,6 +731,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
       }`,
       opType,
     );
+    agent4Raw = restoreChildName(agent4Raw);
     const agent4 = safeParse(agent4Raw, { motor_reflexes: [] });
     console.log(`[Agent 4] ✅ Analyzed ${agent4.motor_reflexes?.length || 0} reflexes.`);
 
@@ -698,7 +739,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
     // AGENT 5 — Cross-Report Synthesizer: Functional wellness
     // ─────────────────────────────────────────────────────────────────────────
     console.log("\n[Agent 5] 🤖 Cross-Report Synthesizer running...");
-    const agent5Raw = await callGroq(
+    let agent5Raw = await callGroq(
       `You are a multi-disciplinary clinical synthesizer. Connect patterns across domains.
       IMPORTANT: Return ONLY valid JSON. Educational purposes only.`,
       `Based on this clinical profile summary:
@@ -719,6 +760,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
       }`,
       opType,
     );
+    agent5Raw = restoreChildName(agent5Raw);
     const agent5 = safeParse(agent5Raw, { functional_wellness: [], cross_report_insights: [] });
     console.log(`[Agent 5] ✅ Generated ${agent5.functional_wellness?.length || 0} functional wellness insights.`);
 
@@ -726,7 +768,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
     // AGENT 6 — Strategy Recommender: Home Plan & Game Calibration
     // ─────────────────────────────────────────────────────────────────────────
     console.log("\n[Agent 6] 🤖 Strategy Recommender running...");
-    const agent6Raw = await callGroq(
+    let agent6Raw = await callGroq(
       `You are a therapeutic strategy specialist. Create actionable home plans and game calibration settings.
       IMPORTANT: Return ONLY valid JSON. All recommendations are educational only.`,
       `Create strategies based on:
@@ -759,6 +801,7 @@ Recommendations: Daily proprioceptive activities, weighted blanket during work s
       }`,
       opType,
     );
+    agent6Raw = restoreChildName(agent6Raw);
     const agent6 = safeParse(agent6Raw, { home_plan: {}, calibration_parameters: {}, care_navigator: {} });
     console.log(`[Agent 6] ✅ Home plan and calibration generated.`);
 

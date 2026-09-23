@@ -67,6 +67,7 @@ export default function SignUpPage() {
   const [password,   setPassword]   = useState('');
   const [confirm,    setConfirm]    = useState('');
   const [agreed,     setAgreed]     = useState(false);
+  const [parentAttestation, setParentAttestation] = useState(false);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -255,22 +256,27 @@ export default function SignUpPage() {
   };
 
   const handleSignUp = async () => {
-    if (!agreed) { 
-      toast.error('Please agree to all terms to continue.'); 
-      return; 
+    if (!agreed) {
+      toast.error('Please agree to all terms to continue.');
+      return;
+    }
+    if (!parentAttestation) {
+      toast.error('Please confirm the parent/legal guardian attestation to continue.');
+      return;
     }
     setLoading(true);
     setError('');
-    
+
     try {
       const { signup } = useAuthStore.getState();
       await signup({
-        email: email.trim(), 
-        password: password.trim(), 
-        firstName: firstName.trim(), 
-        lastName: lastName.trim(), 
-        role: 'parent', 
+        email: email.trim(),
+        password: password.trim(),
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        role: 'parent',
         consentAccepted: true,
+        attestationAgreed: true,
       });
 
       // Verification is mandatory. Supabase will not log user in automatically.
@@ -297,6 +303,15 @@ export default function SignUpPage() {
         }
 
         setAuth({ user: session.user, profile });
+
+        // Record the parental attestation now that we have a real session
+        // (email verification disabled / dev env). When verification is
+        // mandatory, AuthCallbackPage records it instead, right after the
+        // user confirms their email and gets their first real session.
+        supabase.functions.invoke('record-consent-attestation', {
+          body: { agreementVersion: 'v1.1-attestation' },
+        }).catch((err) => console.warn('[SignUpPage] Attestation recording failed:', err.message));
+
         toast.success(`Welcome to NestureAI Beta, ${firstName}! 🎉`);
         navigate(getRouteForRole(profile.role));
       } else {
@@ -457,9 +472,17 @@ export default function SignUpPage() {
                 <span style={s.checkboxLabel}>I have read and agree to all of the above</span>
               </label>
 
+              <label style={s.checkboxRow}>
+                <input type="checkbox" checked={parentAttestation} onChange={(e) => setParentAttestation(e.target.checked)} style={{ accentColor: '#0D5E6B', width: 16, height: 16 }} />
+                <span style={s.checkboxLabel}>
+                  I certify that I am the parent or legal guardian of the child/children
+                  I will register on NestureAI, and that I am at least 18 years old.
+                </span>
+              </label>
+
               {error && <p style={s.errorMsg}>{error}</p>}
 
-              <button onClick={handleSignUp} disabled={!agreed || loading} style={{ ...s.primaryBtn, opacity: (!agreed || loading) ? 0.5 : 1 }}>
+              <button onClick={handleSignUp} disabled={!agreed || !parentAttestation || loading} style={{ ...s.primaryBtn, opacity: (!agreed || !parentAttestation || loading) ? 0.5 : 1 }}>
                 {loading ? 'Creating account…' : 'Create Account'}
               </button>
               <button onClick={() => setStep(1)} style={s.secondaryBtn}>← Back</button>

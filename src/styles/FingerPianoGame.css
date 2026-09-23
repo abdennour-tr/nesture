@@ -36,43 +36,71 @@
 .fp-self-paced { font-size: 0.76rem; color: var(--gs-ink-soft); }
 
 /* Only playable keys are drawn. Their entire surface is a touch target. */
+/* ── Acoustic treatment ───────────────────────────────────────────────────
+   Warm cabinet, felt strip, ivory keys. The finger colour moved OUT of the key
+   face and into a bar at its foot: tinting the whole surface of every key made
+   eight loud keys compete, and the one the child must actually play stopped
+   standing out. The face is now quiet so the lit key can shout.
+   No black keys: this instrument is one key per finger (5 or 10), not a
+   chromatic octave, so they would be ornament a child would press in vain. */
 .fpp-piano {
   flex: 0 0 clamp(138px, 23vh, 205px); display: flex; flex-direction: column;
-  padding: 0 12px; border-radius: 16px;
-  background: linear-gradient(180deg, #283341, #0B101A);
-  border: 1px solid #344254;
-  box-shadow: 0 12px 28px #0004, inset 0 1px 0 #FFFFFF12;
+  padding: 0 14px 12px; border-radius: 14px;
+  background: linear-gradient(180deg, #2C2118 0%, #14100C 100%);
+  border: 1px solid #3E3126;
+  box-shadow: 0 16px 34px #00000077, inset 0 1px 0 #FFFFFF14;
 }
-.fpp-piano-lid { height: 13px; flex-shrink: 0; }
-.fpp-piano-foot { height: 10px; flex-shrink: 0; }
-.fpp-keyboard { display: grid; grid-template-columns: repeat(var(--key-count), minmax(0, 1fr)); gap: 5px; flex: 1; min-height: 0; }
+/* The lid is the felt strip the keys rest against. */
+.fpp-piano-lid {
+  height: 7px; flex-shrink: 0; margin: 12px 0 8px; border-radius: 4px;
+  background: linear-gradient(180deg, #8C2F39, #5E1F27);
+  box-shadow: inset 0 -1px 0 #00000055;
+}
+.fpp-piano-foot { height: 2px; flex-shrink: 0; }
+.fpp-keyboard { display: grid; grid-template-columns: repeat(var(--key-count), minmax(0, 1fr)); gap: 2px; flex: 1; min-height: 0; }
 .fpp-key {
   position: relative; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
-  padding: 10px 3px 8px; gap: 5px; border-radius: 5px 5px 9px 9px;
-  border: 1px solid color-mix(in srgb, var(--fc) 60%, white);
-  background: linear-gradient(180deg, #FFFFFF 0%, color-mix(in srgb, var(--fc) 18%, #FFFFFF) 40%, color-mix(in srgb, var(--fc) 68%, #FFFFFF) 100%);
-  box-shadow: inset 0 -5px 0 color-mix(in srgb, var(--fc) 65%, #64748B), 0 4px 5px #0004;
-  color: #0B1729; font-family: inherit; cursor: pointer; touch-action: manipulation;
+  padding: 10px 3px 24px; gap: 5px; border-radius: 3px 3px 7px 7px;
+  border: none;
+  background: linear-gradient(180deg, #FDFCF8 0%, #F4F2EA 72%, #E4E1D7 100%);
+  box-shadow: inset -1px 0 0 #CFCCC2, inset 0 -7px 0 #D5D2C8, 0 5px 7px #00000055;
+  color: #171412; font-family: inherit; cursor: pointer; touch-action: manipulation;
   transition: transform 100ms ease, filter 150ms ease, box-shadow 150ms ease;
 }
+/* The finger colour, as a bar at the foot of the key. */
+.fpp-key::after {
+  content: ''; position: absolute; bottom: 10px; left: 21%; width: 58%; height: 6px;
+  border-radius: 3px; background: var(--fc);
+  transition: width 150ms ease, height 150ms ease, bottom 150ms ease;
+}
+.fpp-key:last-child { box-shadow: inset 0 -7px 0 #D5D2C8, 0 5px 7px #00000055; }
 .fpp-key:disabled { opacity: 1; cursor: default; }
 .fpp-key:focus-visible { outline: 3px solid #FFFFFF; outline-offset: -5px; }
 .fpp-key:not(:disabled):hover { filter: brightness(1.06); }
 .fpp-key-white:active:not(:disabled), .fpp-key-hit { transform: translateY(4px); }
 .fpp-key-num {
-  display: grid; place-items: center; width: clamp(30px, 4.4vh, 43px); height: clamp(30px, 4.4vh, 43px);
-  border-radius: 10px; background: var(--fc); border: 1px solid #00000018; color: #101828;
-  font-size: clamp(1rem, 2.5vh, 1.4rem); font-weight: 900; font-variant-numeric: tabular-nums;
+  display: grid; place-items: center; width: clamp(28px, 4.1vh, 38px); height: clamp(28px, 4.1vh, 38px);
+  border-radius: 50%; background: #1C1917; border: none; color: #FAFAF9;
+  font-size: clamp(0.9rem, 2.2vh, 1.15rem); font-weight: 800; font-variant-numeric: tabular-nums;
+  transition: background 150ms ease, box-shadow 150ms ease, color 150ms ease;
 }
-.fp-key-hand { position: absolute; top: 9px; left: 10px; font-size: 0.6rem; font-weight: 900; color: #475569; }
-.fp-key-cue { min-height: 13px; font-size: 0.6rem; font-weight: 900; letter-spacing: 0.16em; color: #0F172A; }
-.fp-key-finger { font-size: clamp(0.58rem, 0.85vw, 0.75rem); font-weight: 800; }
-.fpp-key-name { font-size: 0.57rem; font-weight: 700; color: #334155; }
-.fpp-key-lit { outline: 2px solid var(--fc); outline-offset: 1px; box-shadow: inset 0 -5px 0 var(--fc), 0 0 23px color-mix(in srgb, var(--fc) 48%, transparent); }
-.fpp-key-lit .fpp-key-num { box-shadow: 0 0 0 3px #FFFFFFB0; }
+.fp-key-hand { position: absolute; top: 9px; left: 10px; font-size: 0.6rem; font-weight: 800; color: #A8A29E; }
+.fp-key-cue { min-height: 13px; font-size: 0.6rem; font-weight: 900; letter-spacing: 0.16em; color: #57534E; }
+.fp-key-finger { font-size: clamp(0.58rem, 0.85vw, 0.75rem); font-weight: 700; color: #44403C; }
+.fpp-key-name { font-size: 0.6rem; font-weight: 800; color: #78716C; }
+/* The one key to play: the only warm, bright, colour-filled surface on the
+   keyboard, so it reads instantly against seven quiet ivory keys. */
+.fpp-key-lit {
+  background: linear-gradient(180deg, #FFFFFF 0%, color-mix(in srgb, var(--fc) 12%, #FFFFFF) 74%, color-mix(in srgb, var(--fc) 30%, #FFFFFF) 100%);
+  box-shadow: inset -1px 0 0 #CFCCC2, inset 0 -7px 0 var(--fc), 0 5px 7px #00000055,
+              0 0 26px color-mix(in srgb, var(--fc) 55%, transparent);
+}
+.fpp-key-lit::after { width: 72%; height: 7px; }
+.fpp-key-lit .fpp-key-num { background: var(--fc); color: #1C1917; box-shadow: 0 0 0 4px #FFFFFFCC; }
+.fpp-key-lit .fp-key-cue { color: #1C1917; }
 .fp-second-hand { margin-left: 7px; }
-.fpp-key-hit { box-shadow: inset 0 -2px 0 var(--fc), 0 0 28px color-mix(in srgb, var(--fc) 65%, transparent); }
-.fp-key-hit-mark { display: none; position: absolute; right: 7px; top: 6px; font-size: 1rem; font-weight: 900; color: #0F172A; }
+.fpp-key-hit { box-shadow: inset -1px 0 0 #CFCCC2, inset 0 -2px 0 var(--fc), 0 0 28px color-mix(in srgb, var(--fc) 65%, transparent); }
+.fp-key-hit-mark { display: none; position: absolute; right: 7px; top: 6px; font-size: 1rem; font-weight: 900; color: #15803D; }
 .fpp-key-hit .fp-key-hit-mark { display: block; }
 .fpp-key-wrong { animation: fpKeyNudge 200ms ease; }
 @keyframes fpKeyNudge { 35% { transform: translateX(-2px); } 70% { transform: translateX(2px); } }

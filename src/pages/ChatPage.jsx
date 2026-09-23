@@ -115,163 +115,32 @@ export default function ChatPage() {
     const isUUID = (str) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
     const targetId = isUUID(childId) ? childId : '00000000-0000-0000-0000-000000000010';
 
-    // Insert user message to DB
-    const { data: insertedUserMsg, error: userMsgErr } = await supabase
-      .from('ask_ai_messages')
-      .insert([{
-        user_id: authProfile.id,
-        user_role: authProfile.role,
-        child_id: targetId,
-        sender: 'user',
-        text: userMsg
-      }])
-      .select()
-      .single();
-
-    if (userMsgErr) {
-      console.error("Failed to save user message", userMsgErr);
-      toast.error("Failed to send message");
-      return;
-    }
-
-    const newUserMsgObj = { id: insertedUserMsg.id, sender: 'user', text: userMsg };
-    setMessages(prev => [...prev, newUserMsgObj]);
+    // Optimistic local bubble — the edge function below is the one that
+    // actually persists the user message and the AI reply to ask_ai_messages.
+    const tempId = `local-${Date.now()}`;
+    setMessages(prev => [...prev, { id: tempId, sender: 'user', text: userMsg }]);
     setInputValue('');
     setIsTyping(true);
 
-    const hasValidatedDocs = documents && documents.length > 0;
-    const friendlyFallback = "I do not have enough validated information. Please upload the child's clinical evaluation reports (such as Occupational Therapy, Speech-Language Pathology, or IEP reports) in the Atlas Profile tab so that I can construct a complete developmental profile and answer your specific questions.";
-
-    // Relaxed check: child_id mandatory, and child must have either a profile OR validated documents
-    if (!isUUID(targetId) || (!profile && !hasValidatedDocs)) {
-      const { data: insertedAiMsg } = await supabase
-        .from('ask_ai_messages')
-        .insert([{
-          user_id: authProfile.id,
-          user_role: authProfile.role,
-          child_id: targetId,
-          sender: 'ai',
-          text: friendlyFallback
-        }])
-        .select()
-        .single();
-      
-      setMessages(prev => [...prev, { id: insertedAiMsg?.id || Date.now(), sender: 'ai', text: friendlyFallback }]);
-      setIsTyping(false);
-      return;
-    }
-
-    // Verify all document IDs are present
-    const validDocs = documents.filter(d => d.id);
-    if (profile && validDocs.length === 0 && !hasValidatedDocs) {
-      const { data: insertedAiMsg } = await supabase
-        .from('ask_ai_messages')
-        .insert([{
-          user_id: authProfile.id,
-          user_role: authProfile.role,
-          child_id: targetId,
-          sender: 'ai',
-          text: friendlyFallback
-        }])
-        .select()
-        .single();
-      
-      setMessages(prev => [...prev, { id: insertedAiMsg?.id || Date.now(), sender: 'ai', text: friendlyFallback }]);
-      setIsTyping(false);
-      return;
-    }
-
-    // Prepare profile context for prompt
-    const profileContext = `
-- Strengths: ${Array.isArray(profile.strengths) ? profile.strengths.map(s => s.label).join(', ') : 'Not assessed'}
-- Challenges: ${Array.isArray(profile.challenges) ? profile.challenges.map(c => c.label).join(', ') : 'Not assessed'}
-- Functional Wellness: ${Array.isArray(profile.functional_wellness) ? profile.functional_wellness.map(fw => fw.title).join(', ') : 'Not assessed'}
-- Level: ${profile.recommended_level || 'Medium'}
-- Completeness: ${profile.completeness_percentage || 0}%
-`;
-
-    const docsContext = validDocs.map(d => `Document ID: ${d.id}, Filename: ${d.file_name}, Status: ${d.status}`).join('\n');
-    const childName = child?.first_name || child?.name || 'your child';
-
-    const systemPrompt = `You are the Nesture AI assistant, a strictly grounded clinical child assistant. 
-You are answering questions about a child named ${childName}.
-
-Strict Context Isolation (Do not reference any other child or session):
-- Child ID (Mandatory): ${targetId}
-- Validated Documents on File (Mandatory):
-${docsContext}
-
-Current Atlas Profile Context:
-${profileContext}
-
-Guidelines for your response:
-1. You MUST ONLY respond using the provided Child Profile and Validated Documents context above.
-2. If the context is empty, or if the information required to answer the question is not explicitly contained in the provided context, you MUST reply exactly: "I do not have enough validated information. Please upload the child's clinical evaluation reports (such as Occupational Therapy, Speech-Language Pathology, or IEP reports) in the Atlas Profile tab so that I can construct a complete developmental profile and answer your specific questions."
-3. Do NOT make assumptions, extrapolate, or hallucinate. Do NOT invent recommendations or patterns.
-4. Keep your answers professional, supportive, and concise (2-3 short paragraphs max).
-5. Absolutely forbid referencing other kids, historical caches, user email, IP, or names not in the context.`;
-
-    const apiMessages = [
-      { role: 'system', content: systemPrompt }
-    ];
-
-    // Memory cleanup: filter greetings, connection errors, and limit to last 10 messages
-    const validHistory = messages.filter(msg => 
-      msg.id !== 'greeting' && (
-        msg.sender !== 'ai' || 
-        (!msg.text.startsWith('Hi! I\'m the Nesture') && !msg.text.startsWith('Connection Error:'))
-      )
-    );
-    const recentHistory = validHistory.slice(-10);
-
-    recentHistory.forEach(msg => {
-      apiMessages.push({ role: msg.sender === 'ai' ? 'assistant' : 'user', content: msg.text });
-    });
-
-    apiMessages.push({ role: 'user', content: userMsg });
-
+    // The prompt, the Groq call (with the Groq key) and the de-identification
+    // of the child's name now all happen server-side in the ask-ai-chat edge
+    // function — the browser never sees the AI provider's API key.
     try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.REACT_APP_GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'openai/gpt-oss-20b',
-          messages: apiMessages,
-          temperature: 0.0, // enforce strict deterministic answers
-          max_tokens: 500,
-        })
+      const { data, error } = await supabase.functions.invoke('ask-ai-chat', {
+        body: { childId: targetId, message: userMsg },
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`API Error: ${response.status} - ${errorText}`);
-      }
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'The AI assistant could not answer that.');
 
-      const data = await response.json();
-      const aiText = data.choices[0].message.content;
-
-      // Save AI response to DB
-      const { data: insertedAiMsg, error: aiMsgErr } = await supabase
-        .from('ask_ai_messages')
-        .insert([{
-          user_id: authProfile.id,
-          user_role: authProfile.role,
-          child_id: targetId,
-          sender: 'ai',
-          text: aiText
-        }])
-        .select()
-        .single();
-
-      if (aiMsgErr) throw aiMsgErr;
-
-      setMessages(prev => [...prev, { id: insertedAiMsg.id, sender: 'ai', text: aiText }]);
+      setMessages(prev => [
+        ...prev.filter(m => m.id !== tempId),
+        { id: data.userMessageId || tempId, sender: 'user', text: userMsg },
+        { id: data.aiMessageId || Date.now(), sender: 'ai', text: data.aiText },
+      ]);
     } catch (error) {
-      console.error("Groq API Error:", error);
-      setMessages(prev => [...prev, { id: Date.now(), sender: 'ai', text: `Connection Error: ${error.message}. Please check console.` }]);
+      console.error("ask-ai-chat error:", error);
+      setMessages(prev => [...prev, { id: Date.now(), sender: 'ai', text: `Connection Error: ${error.message}. Please try again.` }]);
     } finally {
       setIsTyping(false);
     }

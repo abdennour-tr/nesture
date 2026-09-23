@@ -1,64 +1,44 @@
 /**
- * HandGate.jsx
- * "Show one of your hands to start playing" — the camera-mode start gate.
+ * PosturePrepCard.jsx
+ * "Getting ready…" — the touch-mode preparation card.
  *
- * Client feedback: "trace -> find -> type -> why is it shown here but not in
- * others". Only Trace → Find → Type waited for a hand before starting; every
- * other one-hand camera game ran its 3-2-1 and started the round (and the
- * clock) whether or not the camera could see the child. A child who was still
- * settling in lost the first seconds of every round, and those seconds were
- * scored.
+ * The camera-mode games show HandGate ("Show one of your hands to start
+ * playing") while they wait for a hand. Touch mode has nothing playable to
+ * wait for — the round can start the instant the child is ready — but it
+ * still opens the camera in the background to record posture (see
+ * TouchModePose.jsx), and a camera turning on with nothing on screen saying
+ * so is exactly the gap TouchModePose's own doc comment calls out. This card
+ * is that on-screen tell for the moment right before a touch round starts:
+ * same full-screen card language as HandGate, same dark overlay, but built
+ * around the upper-body tracking illustration instead of the hand one, and
+ * with copy that matches what is actually happening (posture tracking runs
+ * automatically, nothing for the child to hold up to a camera).
  *
- * The card was extracted from TraceTypeGame so every one-hand camera game
- * shows the same screen. The game decides when to open it (a 'waiting' phase)
- * and closes it itself as soon as a hand is detected — see
- * `useHandGate` below for the shared rule.
- *
- * Used by: Trace → Find → Type, Pop the Bubble, Follow the Ladybug,
- * Pinch the Coin, Magic Finger Copy.
- * Not used by: Finger Piano (some levels need BOTH hands), Trace the Shape
- * (already waits for the finger on its green start dot), LetterQuest (has
- * its own calibration screen, which includes a hand check).
+ * This component only renders the card — a game decides when `visible` is
+ * true (typically a brief "preparing" phase right before 'playing'/'waiting'
+ * begins) and what happens on `onContinue`.
  */
-import React, { useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-/* Same check as CalibrationScreen: the pulsing background and dots stop for
-   children who have asked the system to reduce motion. */
 const prefersReducedMotion = () =>
   typeof window !== 'undefined' &&
   !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 /**
- * The shared gate rule. While `phase === 'waiting'`:
- *   - a detected hand (≥ 9 landmarks: thumb + index are what every game reads)
- *     opens the gate → `onHand()`;
- *   - a camera that could not start (simulation mode) must not strand the
- *     child behind a card that can never close → `onHand()` too;
- *   - `bypass` (e.g. the child switched to touch while the card was up)
- *     opens it as well: touch play needs no hand in front of the camera.
- */
-export function useHandGate({ phase, landmarks, isSimulationMode = false, bypass = false, onHand }) {
-  useEffect(() => {
-    if (phase !== 'waiting') return;
-    if ((landmarks && landmarks.length >= 9) || isSimulationMode || bypass) onHand();
-  }, [phase, landmarks, isSimulationMode, bypass, onHand]);
-}
-
-/** The phase a round starts in: camera rounds wait for a hand first, touch
-    rounds show the posture-prep card first (see PosturePrepCard.jsx). */
-export const firstPhaseFor = (mode) => (mode === 'camera' ? 'waiting' : 'prep');
-
-/**
- * @param {boolean}  visible     show the card (the game's 'waiting' phase)
- * @param {boolean}  isTracking  camera/tracker running — drives the badge
- * @param {function} [onUseTouch] offered as "Play with touch instead" when the
- *   game has a touch mode. The card covers the whole screen, header included,
- *   so without these a child whose hand is not picked up had no way off it
- *   except the browser's Back button.
+ * @param {boolean}  visible     show the card
+ * @param {boolean}  isTracking  posture capture running — drives the badge
+ * @param {function} [onContinue] "Start playing" — dismisses the card and
+ *   begins the round. The child taps it themselves; the card does not
+ *   close on its own.
+ * @param {function} [onSkip]    "Play without posture tracking" — falls back
+ *   to touch mode with no camera at all, for a device with no camera or a
+ *   parent who wants that off for this round.
  * @param {function} [onExit]    "Back" — leaves the game.
  */
-export default function HandGate({ visible, isTracking = false, onUseTouch, onExit }) {
+export default function PosturePrepCard({
+  visible, isTracking = false, onContinue, onSkip, onExit,
+}) {
   const reduced = useMemo(prefersReducedMotion, []);
   const linkBtn = {
     background: 'transparent',
@@ -68,16 +48,28 @@ export default function HandGate({ visible, isTracking = false, onUseTouch, onEx
     fontSize: '0.9rem',
     fontWeight: 600,
     padding: '10px 18px',
-    minHeight: 44,            // touch-target size
+    minHeight: 44,
     cursor: 'pointer',
+  };
+  const primaryBtn = {
+    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+    border: 'none',
+    borderRadius: 999,
+    color: '#fff',
+    fontSize: '0.95rem',
+    fontWeight: 700,
+    padding: '12px 28px',
+    minHeight: 46,
+    cursor: 'pointer',
+    boxShadow: '0 8px 20px rgba(99, 102, 241, 0.35)',
   };
 
   return (
     <AnimatePresence>
       {visible && (
         <motion.div
-          key="hand-gate"
-          className="tt-hand-detect-overlay hand-gate-overlay"
+          key="posture-prep"
+          className="tt-hand-detect-overlay posture-prep-overlay"
           role="status"
           aria-live="polite"
           initial={{ opacity: 0 }}
@@ -118,20 +110,27 @@ export default function HandGate({ visible, isTracking = false, onUseTouch, onEx
             <div style={{ textAlign: 'center' }}>
               <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#fff', marginBottom: 4 }}>
                 <span aria-hidden="true" style={{ color: 'rgba(255,255,255,0.4)' }}>«</span>
-                {' '}Show one of your hands{' '}
+                {' '}Getting ready{' '}
               </div>
               <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#fff' }}>
-                to start playing{' '}
+                to play{' '}
                 <span aria-hidden="true" style={{ color: 'rgba(255,255,255,0.4)' }}>»</span>
               </div>
+              <p style={{
+                margin: '10px 0 0 0', fontSize: '0.9rem', lineHeight: 1.5,
+                color: 'rgba(255,255,255,0.6)',
+              }}>
+                We'll gently track your posture in the background while you play with touch.
+                No pose to hold — just sit comfortably.
+              </p>
             </div>
 
-            {/* Hand illustration */}
+            {/* Upper-body illustration */}
             <div
               style={{
                 position: 'relative',
-                width: 180,
-                height: 220,
+                width: 200,
+                height: 175,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -149,20 +148,21 @@ export default function HandGate({ visible, isTracking = false, onUseTouch, onEx
                 }}
               />
               <img
-                src="/hand-wireframe.png"
-                alt="An open hand held up to the camera"
+                src="/upper-body-wireframe.png"
+                alt="A holographic tracking outline of a person's head, shoulders and chest"
                 style={{
                   width: '100%',
                   height: '100%',
                   objectFit: 'contain',
                   position: 'relative',
                   zIndex: 2,
+                  borderRadius: 16,
                 }}
               />
             </div>
 
             {/* Loading dots */}
-            <div aria-hidden="true" style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+            <div aria-hidden="true" style={{ display: 'flex', gap: 6, marginTop: -12 }}>
               {[0, 1, 2].map((i) => (
                 <motion.div
                   key={i}
@@ -190,21 +190,28 @@ export default function HandGate({ visible, isTracking = false, onUseTouch, onEx
                 height: 8,
                 borderRadius: '50%',
                 background: isTracking ? '#10B981' : '#F59E0B',
-              }} />
+              }}
+              />
               <span style={{ fontSize: '0.8rem', color: 'rgba(255, 255, 255, 0.7)', fontWeight: 500 }}>
-                {isTracking ? 'MediaPipe™ Active' : 'Initializing Tracking...'}
+                {isTracking ? 'Posture tracking active' : 'Preparing camera…'}
               </span>
             </div>
 
-            {(onUseTouch || onExit) && (
+            {onContinue && (
+              <button type="button" className="posture-prep-continue" style={primaryBtn} onClick={onContinue}>
+                Start playing
+              </button>
+            )}
+
+            {(onSkip || onExit) && (
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
-                {onUseTouch && (
-                  <button type="button" className="hand-gate-touch" style={linkBtn} onClick={onUseTouch}>
-                    Play with touch instead
+                {onSkip && (
+                  <button type="button" className="posture-prep-skip" style={linkBtn} onClick={onSkip}>
+                    Play without posture tracking
                   </button>
                 )}
                 {onExit && (
-                  <button type="button" className="hand-gate-exit" style={linkBtn} onClick={onExit}>
+                  <button type="button" className="posture-prep-exit" style={linkBtn} onClick={onExit}>
                     Back
                   </button>
                 )}

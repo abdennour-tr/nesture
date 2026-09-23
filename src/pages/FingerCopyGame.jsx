@@ -11,8 +11,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {LogOut, Volume2, VolumeX, Clock, HelpCircle} from 'lucide-react';
+import {Pause, Play, Home, RotateCcw, Volume2, VolumeX, Clock, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
+import useHandCapture from '../hooks/useHandCapture';
 import useGestureDetection, {
   LEVELS,
   GESTURE_INFO,
@@ -200,9 +201,34 @@ export default function FingerCopyGame() {
      Client feedback: "there should be an optional provision for user to see
      [the instructions] again if they wish to." */
   const [showHelp, setShowHelp] = useState(false);
+  /* Pause, same shape as every other camera game (see Ladybug): a card with
+     Resume / Restart / End game / Home, reachable from one button in the
+     header. Replaces what used to be a bare "Exit" button here — one tap,
+     nothing saved, no way back. `endAsking` mirrors the pattern the shared
+     EndGameControl documents: its own confirm dialog freezes the round too,
+     and without this flag the pause card would render underneath it. */
+  const [isPaused, setIsPaused] = useState(false);
+  const [endAsking, setEndAsking] = useState(false);
+  const togglePause = useCallback(() => {
+    setIsPaused((p) => !p);
+  }, []);
   const [gamePhase, setGamePhase]       = useState(
     () => (sessionStorage.getItem(RULES_FLAG) ? firstPhaseFor('camera') : 'rules')
   ); // rules | waiting | countdown | playing | success | results
+
+  /* Records this round's hand trajectory. One shared hook for every game —
+     see hooks/useHandCapture.js for why the per-game versions were replaced.
+     Writes nothing until a session and a learner are both known. */
+  useHandCapture({
+    /* Explicitly camera-mode only: in touch mode the hand camera is off and
+       landmarks go stale rather than empty, so relying on them being absent
+       would leave one stale sample recordable per toggle. */
+    enabled: gamePhase === 'playing' && trackingEnabled,
+    sessionId: currentSessionId,
+    childId: profile?.learner_id || user?.id || null,
+    gameId: 'finger-copy',
+    landmarks,
+  });
 
   /* Whenever the round is not actually running, the camera must be off.
      This is the safety net that catches every exit path — finishing the last
@@ -230,6 +256,20 @@ export default function FingerCopyGame() {
   const [holdStartTime, setHoldStartTime]           = useState(null);
   const [holdProgress, setHoldProgress]             = useState(0);
   const [elapsedTime, setElapsedTime]               = useState(0);
+
+  /* Pausing mid-hold cancels the hold rather than freezing it in place: the
+     timer below reads `Date.now() - holdStartTime`, so if the hold survived a
+     pause it would come back having "held" through the whole time the child
+     was away and could complete instantly on resume. Losing a part-finished
+     hold to a pause is the honest trade — this is not scored as a break
+     (otRef.holdBreaks is untouched), since choosing to pause isn't the same
+     failure as the gesture slipping. */
+  useEffect(() => {
+    if (isPaused) {
+      setHoldStartTime(null);
+      setHoldProgress(0);
+    }
+  }, [isPaused]);
 
   // ── Session-level stats ─────────────────────────────────────────────────
   const [sessionStats, setSessionStats] = useState({
@@ -416,25 +456,15 @@ export default function FingerCopyGame() {
   useHandGate({ phase: gamePhase, landmarks, isSimulationMode, onHand: openHandGate });
 
   // ── Countdown phase ─────────────────────────────────────────────────────
+  /* The 3-2-1 countdown was removed (client feedback): the round now starts
+     the instant the 'countdown' phase is entered (hand detected), instead of
+     making the child wait through a ticking overlay. */
   useEffect(() => {
     if (gamePhase !== 'countdown') return;
-
-    if (countdown <= 0) {
-      // Go!
-      if (soundEnabled) soundManager.playCountdownGo();
-      setGamePhase('playing');
-      setTrackingEnabled(true);
-      setChallengeStartTime(Date.now());
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      if (soundEnabled) soundManager.playCountdown();
-      setCountdown((c) => c - 1);
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [gamePhase, countdown, soundEnabled]);
+    setGamePhase('playing');
+    setTrackingEnabled(true);
+    setChallengeStartTime(Date.now());
+  }, [gamePhase]);
 
   /* Opening "How to play" mid-challenge must not cost the learner time: the
      ticker stops while the modal is up, and on close the challenge start time
@@ -455,7 +485,7 @@ export default function FingerCopyGame() {
 
   // ── Elapsed time ticker ─────────────────────────────────────────────────
   useEffect(() => {
-    if (gamePhase !== 'playing' || showHelp) {
+    if (gamePhase !== 'playing' || showHelp || isPaused) {
       clearInterval(elapsedRef.current);
       return;
     }
@@ -467,7 +497,7 @@ export default function FingerCopyGame() {
     }, 100);
 
     return () => clearInterval(elapsedRef.current);
-  }, [gamePhase, challengeStartTime, showHelp]);
+  }, [gamePhase, challengeStartTime, showHelp, isPaused]);
 
   // ── Track handedness stats ──────────────────────────────────────────────
   useEffect(() => {
@@ -484,7 +514,7 @@ export default function FingerCopyGame() {
 
   // ── Gesture match & hold logic ──────────────────────────────────────────
   useEffect(() => {
-    if (gamePhase !== 'playing' || showHelp || !currentTargetGesture) return;
+    if (gamePhase !== 'playing' || showHelp || isPaused || !currentTargetGesture) return;
 
     /* Start needs a clean match; a hold already running only needs to stay
        "holdable" (slightly lower bar, still no clearly-wrong finger), so one
@@ -507,7 +537,7 @@ export default function FingerCopyGame() {
         setHoldProgress(0);
       }
     }
-  }, [isMatch, isHoldable, gamePhase, showHelp, currentTargetGesture, holdStartTime]);
+  }, [isMatch, isHoldable, gamePhase, showHelp, isPaused, currentTargetGesture, holdStartTime]);
 
   // ── Handle successful gesture match ─────────────────────────────────────
   const handleSuccess = useCallback(() => {
@@ -592,7 +622,7 @@ export default function FingerCopyGame() {
   // ── Smooth Hold Progress Timer ───────────────────────────────────────────
   useEffect(() => {
     let interval;
-    if (holdStartTime) {
+    if (holdStartTime && !isPaused) {
       interval = setInterval(() => {
         const elapsed = Date.now() - holdStartTime;
         const progress = Math.min(1, elapsed / HOLD_DURATION_MS);
@@ -615,7 +645,7 @@ export default function FingerCopyGame() {
     setSoundEnabled(newState);
   };
 
-  // ── Play again ──────────────────────────────────────────────────────────
+  // ── Play again (also used as "Restart" from the pause card) ─────────────
   const handlePlayAgain = () => {
     const builtChallenges = buildChallenges(level);
     setChallenges(builtChallenges);
@@ -630,6 +660,7 @@ export default function FingerCopyGame() {
     setEncourageMsg('');
     setCurrentSessionId(null);
     setSessionSaved(false);
+    setIsPaused(false);
     otRef.current = { holdBreaks: 0, holdsStarted: 0 };
     setOtResults(null);
     setSessionStats({
@@ -716,30 +747,9 @@ export default function FingerCopyGame() {
           key="hand-gate"
           visible={gamePhase === 'waiting'}
           isTracking={isTracking}
-          onExit={() => navigate('/play')}
+          onExit={() => { releaseCamera(); navigate('/play'); }}
         />
 
-        {gamePhase === 'countdown' && (
-          <motion.div
-            className="fc-countdown-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              key={countdown}
-              initial={{ scale: 0.3, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 2, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 15 }}
-            >
-              <div className="fc-countdown-number">
-                {countdown > 0 ? countdown : 'Go!'}
-              </div>
-            </motion.div>
-            <div className="fc-countdown-label">Get your hand ready!</div>
-          </motion.div>
-        )}
       </AnimatePresence>
 
       {/* ── Success Overlay ──────────────────────────────────────────── */}
@@ -792,9 +802,55 @@ export default function FingerCopyGame() {
               notMeasuredReason={
                 'The round ended before any shape was held long enough to score.'}
               onPlayAgain={handlePlayAgain}
-              onExit={() => navigate('/play')}
+              onExit={() => { releaseCamera(); navigate('/play'); }}
               exitLabel="Back to games"
             />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Pause Overlay ──────────────────────────────────────────────
+          `!endAsking`: the end-game dialog pauses the round too, and without
+          this the pause card rendered underneath it — two cards at once. */}
+      <AnimatePresence>
+        {isPaused && !endAsking && gamePhase === 'playing' && (
+          <motion.div
+            className="fc-pause-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <motion.div className="fc-pause-card"
+              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}>
+              <div className="fc-pause-ico"><Pause size={38} /></div>
+              <h2>Paused</h2>
+              <p>Take a breath — the shapes are waiting 🖐️</p>
+              <div className="fc-pause-actions">
+                <button className="fc-btn-primary" onClick={togglePause}>
+                  <Play size={18} /> Resume
+                </button>
+                <button className="fc-btn-secondary" onClick={handlePlayAgain}>
+                  <RotateCcw size={18} /> Restart
+                </button>
+                {/* Client feedback: "il faut que end game existe lorsque
+                    l'user click sur pause". The header's End game button is
+                    behind this overlay, so the same control is offered here.
+                    This one does NOT report `onAskingChange`: the button is
+                    inside the pause card, so hiding the card would unmount
+                    the control and take its confirm dialog with it. The
+                    dialog is portalled above everything instead, and the
+                    round is already frozen, so "Keep playing" simply
+                    returns to this card. */}
+                <EndGameControl
+                  className="fc-btn-secondary gs-end-btn gs-end-btn--pause"
+                  label="End game"
+                  onConfirm={() => { setTrackingEnabled(false); setIsPaused(false); setGamePhase('results'); }}
+                />
+                <button className="fc-btn-secondary" onClick={() => { releaseCamera(); navigate('/play'); }}>
+                  <Home size={18} /> Home
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -820,7 +876,8 @@ export default function FingerCopyGame() {
             className="fc-sound-btn gs-end-btn"
             compact
             disabled={gamePhase !== 'playing'}
-            onConfirm={() => { setTrackingEnabled(false); setGamePhase('results'); }}
+            onAskingChange={(asking) => { setEndAsking(asking); setIsPaused(asking); }}
+            onConfirm={() => { setTrackingEnabled(false); setIsPaused(false); setGamePhase('results'); }}
           />
           <button
             className="fc-sound-btn"
@@ -837,9 +894,18 @@ export default function FingerCopyGame() {
           <button className="fc-sound-btn" onClick={toggleSound} title="Toggle sound">
             {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
           </button>
-          <button className="fc-exit-btn" onClick={() => navigate('/play')}>
-            <LogOut size={16} />
-            Exit
+          {/* No separate "Exit" button next to this one on purpose — that let a
+              child leave with one tap and nothing saved. Leaving now goes
+              through the pause card's own Home button, same as every other
+              camera game here. */}
+          <button
+            className="fc-sound-btn"
+            onClick={togglePause}
+            disabled={gamePhase !== 'playing'}
+            title={isPaused ? 'Resume' : 'Pause'}
+            aria-label={isPaused ? 'Resume' : 'Pause'}
+          >
+            {isPaused ? <Play size={18} /> : <Pause size={18} />}
           </button>
         </div>
       </div>

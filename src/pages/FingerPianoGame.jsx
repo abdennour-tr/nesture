@@ -21,6 +21,7 @@ import { useAuthStore, useSessionStore } from '../store';
 import api from '../services/api';
 import GameResults from '../components/game/GameResults';
 import TouchModePose from '../components/game/TouchModePose';
+import PosturePrepCard from '../components/game/PosturePrepCard';
 import '../styles/FingerPianoGame.css';
 /* NOTE: GameShell.css is NOT imported here on purpose. It is already pulled in
    by GameRules / EndGameControl above, and an ES module is evaluated once at
@@ -250,19 +251,26 @@ export default function FingerPianoGame() {
   const [soundEnabled, setSoundEnabled] = useSoundEnabled();
 
   const [gamePhase, setGamePhase] = useState(() =>
-    sessionStorage.getItem(RULES_FLAG) ? 'countdown' : 'rules'
+    sessionStorage.getItem(RULES_FLAG) ? (mode === 'touch' ? 'prep' : 'countdown') : 'rules'
   );
+  const poseRef = useRef(null);
+  const [postureTracking, setPostureTracking] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   /* Which physical hand feeds each on-screen side. Keys 1–5 are the LEFT hand
-     (screen-left) and 6–10 the RIGHT hand (screen-right); with the default
-     mapping each side reads its own tracked hand, so the real left hand plays
-     1–5 and the real right hand plays 6–10. The correct value can still depend
-     on an unusual camera / mirror setup, so it stays a remembered, one-click
-     choice — the "Swap hands" button flips it if the sides ever feel reversed. */
+     (screen-left) and 6–10 the RIGHT hand (screen-right); with `handInvert`
+     off, each side would read its own tracked hand (real left plays 1–5, real
+     right plays 6–10) — but the single-hand stages (≤5 keys, most of Easy and
+     all of Medium) only ever read the screen-left slot, so that default asked
+     every child to lead with their LEFT hand. Defaulting `handInvert` to
+     true instead means the screen-left slot reads the child's RIGHT hand out
+     of the box — a right-handed start — while the "Swap hands" button still
+     flips it back for a child (or camera / mirror setup) that needs the
+     other hand. The stored choice, once a child has ever pressed the button,
+     always wins over this default. */
   const [handInvert, setHandInvert] = useState(() => {
     try {
       const stored = localStorage.getItem('fingerpiano_hand_invert');
-      return stored === null ? false : stored === '1';
+      return stored === null ? true : stored === '1';
     } catch { return false; }
   });
   /* True while the end-game confirmation is on screen. The round is paused
@@ -758,27 +766,17 @@ export default function FingerPianoGame() {
     setLitKey(null);
   }, [buildQueue]);
 
+  /* The 3-2-1 countdown was removed (client feedback): the round now starts
+     the instant the 'countdown' phase is entered (rules dismissed / mount),
+     instead of making the child wait through a ticking overlay. */
   useEffect(() => {
     if (gamePhase !== 'countdown') return;
-    setCountdown(COUNTDOWN_SECONDS);
-    let n = COUNTDOWN_SECONDS;
     if (!synthRef.current) synthRef.current = new PianoSynth();
     synthRef.current.enabled = soundEnabled;
-    if (soundEnabled) { soundManager.init(); synthRef.current.init(); soundManager.playCountdown(); }
-    const id = setInterval(() => {
-      n -= 1;
-      if (n <= 0) {
-        clearInterval(id);
-        if (soundEnabled) soundManager.playCountdownGo();
-        resetRun();
-        setUiScore(0); setUiHit(0); setUiElapsed(0);
-        setGamePhase('playing');
-      } else {
-        setCountdown(n);
-        if (soundEnabled) soundManager.playCountdown();
-      }
-    }, 1000);
-    return () => clearInterval(id);
+    if (soundEnabled) { soundManager.init(); synthRef.current.init(); }
+    resetRun();
+    setUiScore(0); setUiHit(0); setUiElapsed(0);
+    setGamePhase('playing');
   }, [gamePhase, soundEnabled, resetRun]);
 
   useEffect(() => {
@@ -862,8 +860,9 @@ export default function FingerPianoGame() {
     sessionStorage.setItem(RULES_FLAG, '1');
     if (!synthRef.current) synthRef.current = new PianoSynth();
     if (soundEnabled) { soundManager.init(); synthRef.current.init(); soundManager.playClick(); }
-    setGamePhase('countdown');
-  }, [soundEnabled]);
+    setGamePhase(mode === 'touch' ? 'prep' : 'countdown');
+  }, [soundEnabled, mode]);
+
 
   /* ── "How to play", available DURING the game ───────────────────────────
      Client feedback: "there should be an optional provision for user to see
@@ -924,13 +923,14 @@ export default function FingerPianoGame() {
     setStageIndex(0);
     stageIndexRef.current = 0;
     setShowHelp(false);
-    setGamePhase('countdown');
-  }, []);
+    setGamePhase(mode === 'touch' ? 'prep' : 'countdown');
+  }, [mode]);
 
   const goHome = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
+    releaseCamera();
     navigate('/play');
-  }, [navigate]);
+  }, [navigate, releaseCamera]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -952,10 +952,16 @@ export default function FingerPianoGame() {
   const stageStart = cfg.stages.slice(0, stageIndex).reduce((total, item) => total + item.notes, 0);
   const stageHits = Math.max(0, uiHit - stageStart);
   const cameraReady = handReady.left && (activeKeyCount <= 5 || handReady.right);
+  /* Single-hand stages only ever read the screen-left slot, so the hand this
+     message asks for is whichever one `handInvert` currently routes into it —
+     NOT always "left". Before this, the instruction kept saying "left hand"
+     even after the child (or the default above) swapped to the right, which
+     is what made "Swap hands" look like it did nothing. */
+  const primaryHand = handInvert ? 'right' : 'left';
   const handMessage = cameraError
     ? 'Camera unavailable. Check camera access, or use Touch / Mouse.'
-    : cameraReady ? (activeKeyCount > 5 ? 'Both hands detected' : 'Left hand detected')
-      : activeKeyCount > 5 ? 'Open both hands in front of the camera' : 'Open your left hand in front of the camera';
+    : cameraReady ? (activeKeyCount > 5 ? 'Both hands detected' : `${primaryHand === 'right' ? 'Right' : 'Left'} hand detected`)
+      : activeKeyCount > 5 ? 'Open both hands in front of the camera' : `Open your ${primaryHand} hand in front of the camera`;
 
   return (
     <div className="fpp-page">
@@ -1050,10 +1056,16 @@ export default function FingerPianoGame() {
           <div className={'fp-hands' + (activeKeyCount > 5 ? ' fp-hands-both' : '')}>
             {/* Left hand (keys 1–5) is always shown and sits on the left; the
                 right hand (keys 6–10) joins only in the two-hand stages, on the
-                right — so each panel is on the same side as its keys. */}
-            <PianoHand ref={leftHandRef} hand="left" keyCount={activeKeyCount} mode={mode}
+                right — so each panel is on the same side as its keys.
+                `hand` stays fixed (it selects the 1–5 / 6–10 key set); only
+                `physicalHand` — the label and mirrored artwork — follows
+                `handInvert`, so a swapped mapping shows correctly as the
+                hand it now actually reads instead of always saying "Left". */}
+            <PianoHand ref={leftHandRef} hand="left" physicalHand={handInvert ? 'right' : 'left'}
+              keyCount={activeKeyCount} mode={mode}
               detected={handReady.left} wanted={litKey?.id} />
             {activeKeyCount > 5 && <PianoHand ref={rightHandRef} hand="right"
+              physicalHand={handInvert ? 'left' : 'right'}
               keyCount={activeKeyCount} mode={mode} detected={handReady.right} wanted={litKey?.id} />}
           </div>
           <canvas className="fpp-fx-canvas" ref={fxCanvasRef} aria-hidden="true" />
@@ -1099,15 +1111,19 @@ export default function FingerPianoGame() {
       </main>
 
       {/* Touch-mode upper-body observation. Nothing starts until the child is
-          asked; the webcam is released the moment the round ends. Renders its
-          own hidden <video> and consent overlay — see TouchModePose. */}
+          asked; the webcam is released the moment the round ends. Now shows
+          the same camera frame (video + LIVE badge), in the same top-left
+          corner of the field, as camera-mode games — see TouchModePose. */}
       <TouchModePose
+        ref={poseRef}
         gameId="finger-piano"
-        active={mode === 'touch' && ['countdown', 'playing', 'stage'].includes(gamePhase)}
+        active={mode === 'touch' && ['prep', 'countdown', 'playing', 'stage'].includes(gamePhase)}
         finished={gamePhase === 'results'}
         sessionId={sessionId}
         childId={profile?.learner_id || user?.id || null}
         learnerName={profile?.first_name}
+        fieldRef={fieldRef}
+        onTrackingChange={setPostureTracking}
       />
 
       {/* ═══ OVERLAYS ═══════════════════════════════════════════════════ */}
@@ -1120,6 +1136,14 @@ export default function FingerPianoGame() {
         {showHelp && gamePhase !== 'rules' && (
           <RulesModal key="help" cfg={cfg} mode={mode} onStart={closeHelp} resume />
         )}
+
+        <PosturePrepCard
+          key="posture-prep"
+          visible={gamePhase === 'prep'}
+          isTracking={postureTracking}
+          onContinue={() => setGamePhase('countdown')}
+          onExit={goHome}
+        />
 
         {gamePhase === 'stage' && (
           <motion.div key="stage" className="fpp-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -1140,19 +1164,6 @@ export default function FingerPianoGame() {
                 setGamePhase('playing');
               }}>Continue with {stage.keys} keys <Play size={17} /></button>
             </section>
-          </motion.div>
-        )}
-
-        {gamePhase === 'countdown' && (
-          <motion.div key="cd" className="fpp-overlay fpp-overlay-soft"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div key={countdown} className="fpp-countdown"
-              initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 1.8, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 18 }}>
-              {countdown}
-            </motion.div>
-            <p className="fpp-countdown-hint">Get your fingers ready…</p>
           </motion.div>
         )}
 
@@ -1182,7 +1193,7 @@ export default function FingerPianoGame() {
                     portalled above everything instead, and the round is already
                     frozen, so "Keep playing" simply returns to this card. */}
                 <EndGameControl
-                  className="fpp-btn fpp-btn-ghost gs-end-btn"
+                  className="fpp-btn fpp-btn-ghost gs-end-btn gs-end-btn--pause"
                   label="End game"
                   onConfirm={() => { setIsPaused(false); finishRef.current?.(FINISH.ENDED); }}
                 />

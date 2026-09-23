@@ -30,6 +30,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {Home, Pause, Play, RotateCcw, Clock, Hand, MousePointer2, Volume2, VolumeX, Info, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
+import useHandCapture from '../hooks/useHandCapture';
 import { soundManager } from '../utils/soundManager';
 import useSoundEnabled from '../hooks/useSoundEnabled';
 import GameRules from '../components/game/GameRules';
@@ -42,6 +43,7 @@ import piggyImg from '../assets/pinch-coin/piggy.png';
 import tutorialHandImg from '../assets/pinch-coin/tutorial-pinch-hand-v2.png';
 import GameResults from '../components/game/GameResults';
 import TouchModePose from '../components/game/TouchModePose';
+import PosturePrepCard from '../components/game/PosturePrepCard';
 import CameraLandmarks from '../components/game/CameraLandmarks';
 import HandGate, { useHandGate, firstPhaseFor } from '../components/game/HandGate';
 /* NOTE: GameShell.css is NOT imported here on purpose. It is already pulled in
@@ -291,6 +293,8 @@ export default function PinchCoinGame() {
   const [gamePhase, setGamePhase] = useState(() =>
     sessionStorage.getItem(RULES_FLAG) ? firstPhaseFor(mode) : 'rules'
   );
+  const poseRef = useRef(null);
+  const [postureTracking, setPostureTracking] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   /* True while the end-game confirmation is on screen. The round is paused
      then, but the PAUSE CARD must stay hidden so only one card shows. */
@@ -371,6 +375,20 @@ export default function PinchCoinGame() {
     videoRef, canvasRef, trackingEnabled, false, 2,
     { handSideLock: true, drawOnlyActiveHand: true }
   );
+
+  /* Records this round's hand trajectory. One shared hook for every game —
+     see hooks/useHandCapture.js for why the per-game versions were replaced.
+     Writes nothing until a session and a learner are both known. */
+  useHandCapture({
+    /* Explicitly camera-mode only: in touch mode the hand camera is off and
+       landmarks go stale rather than empty, so relying on them being absent
+       would leave one stale sample recordable per toggle. */
+    enabled: isPlaying && trackingEnabled,
+    sessionId: sessionId,
+    childId: profile?.learner_id || user?.id || null,
+    gameId: 'pinch-coin',
+    landmarks,
+  });
 
   /* ── Turn the camera off when the round ends ────────────────────────────
      Client feedback: "when the game finish the camera need to turn off."
@@ -899,25 +917,15 @@ export default function PinchCoinGame() {
     paintCoin();
   }, [placeCoin, paintCoin]);
 
+  /* The 3-2-1 countdown was removed (client feedback): the round now starts
+     the instant the 'countdown' phase is entered (hand detected / rules
+     dismissed), instead of making the child wait through a ticking overlay. */
   useEffect(() => {
     if (gamePhase !== 'countdown') return;
-    setCountdown(COUNTDOWN_SECONDS);
-    let n = COUNTDOWN_SECONDS;
-    if (soundEnabled) { soundManager.init(); soundManager.playCountdown(); }
-    const id = setInterval(() => {
-      n -= 1;
-      if (n <= 0) {
-        clearInterval(id);
-        if (soundEnabled) soundManager.playCountdownGo();
-        resetRun(performance.now());
-        setUiCollected(0); setUiElapsed(0); setUiStep('pinch');
-        setGamePhase('playing');
-      } else {
-        setCountdown(n);
-        if (soundEnabled) soundManager.playCountdown();
-      }
-    }, 1000);
-    return () => clearInterval(id);
+    if (soundEnabled) soundManager.init();
+    resetRun(performance.now());
+    setUiCollected(0); setUiElapsed(0); setUiStep('pinch');
+    setGamePhase('playing');
   }, [gamePhase, soundEnabled, resetRun]);
 
   useEffect(() => { paintCoin(); }, [paintCoin]);
@@ -995,6 +1003,7 @@ export default function PinchCoinGame() {
     bypass: mode !== 'camera', onHand: openHandGate,
   });
 
+
   const startFromRules = useCallback(() => {
     sessionStorage.setItem(RULES_FLAG, '1');
     if (soundEnabled) { soundManager.init(); soundManager.playClick(); }
@@ -1048,8 +1057,9 @@ export default function PinchCoinGame() {
 
   const goHome = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
+    releaseCamera();
     navigate('/play');
-  }, [navigate]);
+  }, [navigate, releaseCamera]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -1262,15 +1272,19 @@ export default function PinchCoinGame() {
       </main>
 
       {/* Touch-mode upper-body observation: asks first, records only with a
-          yes, releases the webcam the moment the round ends. Renders its own
-          hidden <video> and its own consent overlay — see TouchModePose. */}
+          yes, releases the webcam the moment the round ends. Now shows the
+          same camera frame (video + LIVE badge), in the same top-left corner
+          of the field, as camera-mode games — see TouchModePose. */}
       <TouchModePose
+        ref={poseRef}
         gameId="pinch-coin"
-        active={mode === 'touch' && (gamePhase === 'countdown' || gamePhase === 'playing')}
+        active={mode === 'touch' && (gamePhase === 'prep' || gamePhase === 'countdown' || gamePhase === 'playing')}
         finished={gamePhase === 'results'}
         sessionId={sessionId}
         childId={profile?.learner_id || user?.id || null}
         learnerName={profile?.first_name}
+        fieldRef={fieldRef}
+        onTrackingChange={setPostureTracking}
       />
 
       {/* ═══ OVERLAYS ═══════════════════════════════════════════════════ */}
@@ -1292,18 +1306,13 @@ export default function PinchCoinGame() {
           onExit={goHome}
         />
 
-        {gamePhase === 'countdown' && (
-          <motion.div key="cd" className="pcg-overlay pcg-overlay-soft"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div key={countdown} className="pcg-countdown"
-              initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 1.8, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 18 }}>
-              {countdown}
-            </motion.div>
-            <p className="pcg-countdown-hint">Get your fingers ready…</p>
-          </motion.div>
-        )}
+        <PosturePrepCard
+          key="posture-prep"
+          visible={gamePhase === 'prep'}
+          isTracking={postureTracking}
+          onContinue={() => setGamePhase('countdown')}
+          onExit={goHome}
+        />
 
         {/* `!endAsking`: the end-game dialog pauses the round too, and without
             this the pause card rendered underneath it — two cards at once. */}
@@ -1331,7 +1340,7 @@ export default function PinchCoinGame() {
                     portalled above everything instead, and the round is already
                     frozen, so "Keep playing" simply returns to this card. */}
                 <EndGameControl
-                  className="pcg-btn pcg-btn-ghost gs-end-btn"
+                  className="pcg-btn pcg-btn-ghost gs-end-btn gs-end-btn--pause"
                   label="End game"
                   onConfirm={() => { setIsPaused(false); finishRef.current?.('ended'); }}
                 />

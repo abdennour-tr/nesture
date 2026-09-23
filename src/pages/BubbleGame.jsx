@@ -29,6 +29,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {Home, Pause, Play, RotateCcw, Clock, Star, Hand, MousePointer2, Volume2, VolumeX, Crosshair, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
+import useHandCapture from '../hooks/useHandCapture';
 import { soundManager } from '../utils/soundManager';
 import useSoundEnabled from '../hooks/useSoundEnabled';
 import GameRules from '../components/game/GameRules';
@@ -47,6 +48,7 @@ import { HandDefs, HandArt, followHand, makeHandState } from '../components/game
 import { createHandPointerFilter, handDepthScale, STABLE_POINTER_OPTIONS } from '../utils/handPointerFilter';
 import GameResults from '../components/game/GameResults';
 import TouchModePose from '../components/game/TouchModePose';
+import PosturePrepCard from '../components/game/PosturePrepCard';
 import CameraLandmarks from '../components/game/CameraLandmarks';
 import HandGate, { useHandGate, firstPhaseFor } from '../components/game/HandGate';
 import useGraspMeasure from '../hooks/useGraspMeasure';
@@ -180,6 +182,8 @@ export default function BubbleGame() {
   const [gamePhase, setGamePhase] = useState(() =>
     sessionStorage.getItem(RULES_FLAG) ? firstPhaseFor(mode) : 'rules'
   );
+  const poseRef = useRef(null);
+  const [postureTracking, setPostureTracking] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   /* True while the end-game confirmation is on screen. The round is paused
      then, but the PAUSE CARD must stay hidden so only one card shows. */
@@ -289,6 +293,20 @@ export default function BubbleGame() {
        see utils/activeHandSelector.js. */
     { stableSelection: true, handSideLock: true, drawOnlyActiveHand: true }
   );
+
+  /* Records this round's hand trajectory. One shared hook for every game —
+     see hooks/useHandCapture.js for why the per-game versions were replaced.
+     Writes nothing until a session and a learner are both known. */
+  useHandCapture({
+    /* Explicitly camera-mode only: in touch mode the hand camera is off and
+       landmarks go stale rather than empty, so relying on them being absent
+       would leave one stale sample recordable per toggle. */
+    enabled: isPlaying && trackingEnabled,
+    sessionId: sessionId,
+    childId: profile?.learner_id || user?.id || null,
+    gameId: 'bubble',
+    landmarks,
+  });
 
   /* Palmar grasp is the one reflex this game's sensors can honestly measure:
      the task needs a sustained pointing finger, so a hand pulling closed is
@@ -1037,45 +1055,13 @@ export default function BubbleGame() {
     setGamePhase('playing');
   };
 
+  /* The 3-2-1 countdown was removed (client feedback): the round now starts
+     the instant the 'countdown' phase is entered (hand detected / rules
+     dismissed), instead of making the child wait through a ticking overlay. */
   useEffect(() => {
     if (gamePhase !== 'countdown') return;
-
-    setCountdown(COUNTDOWN_SECONDS);
-    if (soundEnabledRef.current) { soundManager.init(); soundManager.playCountdown(); }
-
-    const deadline = Date.now() + COUNTDOWN_SECONDS * 1000;
-    let shown = COUNTDOWN_SECONDS;
-    let finished = false;
-    let raf = 0;
-
-    const finish = () => {
-      if (finished) return;
-      finished = true;
-      beginRunRef.current?.();
-    };
-
-    const tick = () => {
-      if (finished) return;
-      const left = Math.ceil((deadline - Date.now()) / 1000);
-      if (left <= 0) { finish(); return; }
-      if (left !== shown) {
-        shown = left;
-        setCountdown(left);
-        if (soundEnabledRef.current) soundManager.playCountdown();
-      }
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-
-    /* rAF is paused entirely while the tab is hidden. This timer still fires
-       on return and ends the countdown, so it can never strand the learner. */
-    const safety = setTimeout(finish, COUNTDOWN_SECONDS * 1000 + 1500);
-
-    return () => {
-      finished = true;
-      cancelAnimationFrame(raf);
-      clearTimeout(safety);
-    };
+    if (soundEnabledRef.current) soundManager.init();
+    beginRunRef.current?.();
   }, [gamePhase]);
 
   /* ═════════════════════════════════════════════════════════════════════════
@@ -1149,6 +1135,7 @@ export default function BubbleGame() {
     bypass: mode !== 'camera', onHand: openHandGate,
   });
 
+
   const startFromRules = useCallback(() => {
     sessionStorage.setItem(RULES_FLAG, '1');
     if (soundEnabled) { soundManager.init(); soundManager.playClick(); }
@@ -1200,8 +1187,9 @@ export default function BubbleGame() {
 
   const goHome = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
+    releaseCamera();
     navigate('/play');
-  }, [navigate]);
+  }, [navigate, releaseCamera]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -1369,15 +1357,19 @@ export default function BubbleGame() {
       </main>
 
       {/* Touch-mode upper-body observation. Nothing starts until the child is
-          asked; the webcam is released the moment the round ends. Renders its
-          own hidden <video> and consent overlay — see TouchModePose. */}
+          asked; the webcam is released the moment the round ends. Now shows
+          the same camera frame (video + LIVE badge), in the same top-left
+          corner of the field, as camera-mode games — see TouchModePose. */}
       <TouchModePose
+        ref={poseRef}
         gameId="bubble"
-        active={mode === 'touch' && (gamePhase === 'countdown' || gamePhase === 'playing')}
+        active={mode === 'touch' && (gamePhase === 'prep' || gamePhase === 'countdown' || gamePhase === 'playing')}
         finished={gamePhase === 'results'}
         sessionId={sessionId}
         childId={profile?.learner_id || user?.id || null}
         learnerName={profile?.first_name}
+        fieldRef={fieldRef}
+        onTrackingChange={setPostureTracking}
       />
 
       {/* ═══ OVERLAYS ═══════════════════════════════════════════════════ */}
@@ -1399,18 +1391,13 @@ export default function BubbleGame() {
           onExit={goHome}
         />
 
-        {gamePhase === 'countdown' && (
-          <motion.div key="cd" className="bg-overlay bg-overlay-soft bg-overlay-center"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div key={countdown} className="bg-countdown"
-              initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 1.8, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 18 }}>
-              {countdown}
-            </motion.div>
-            <p className="bg-countdown-hint">Get your finger ready…</p>
-          </motion.div>
-        )}
+        <PosturePrepCard
+          key="posture-prep"
+          visible={gamePhase === 'prep'}
+          isTracking={postureTracking}
+          onContinue={() => setGamePhase('countdown')}
+          onExit={goHome}
+        />
 
         {/* `!endAsking`: the end-game dialog pauses the round too, and without
             this the pause card rendered underneath it — two cards at once. */}
@@ -1438,7 +1425,7 @@ export default function BubbleGame() {
                     portalled above everything instead, and the round is already
                     frozen, so "Keep playing" simply returns to this card. */}
                 <EndGameControl
-                  className="bg-btn bg-btn-ghost gs-end-btn"
+                  className="bg-btn bg-btn-ghost gs-end-btn gs-end-btn--pause"
                   label="End game"
                   onConfirm={() => { setIsPaused(false); finishRef.current?.('ended'); }}
                 />

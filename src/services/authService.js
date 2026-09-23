@@ -105,9 +105,12 @@ export async function ensureUserProfileFallback(user, expectedRole = null) {
 }
 
 // ── signUp ─────────────────────────────────────────────────────────────────────
-export async function signUp({ email, password, firstName, lastName, role = 'parent', consentAccepted }) {
+export async function signUp({ email, password, firstName, lastName, role = 'parent', consentAccepted, attestationAgreed }) {
   if (!consentAccepted) {
     throw new Error('Consent is required to create an account.');
+  }
+  if (role === 'parent' && !attestationAgreed) {
+    throw new Error('Please confirm the parent/legal guardian attestation to continue.');
   }
 
   // Run strict validations
@@ -128,6 +131,11 @@ export async function signUp({ email, password, firstName, lastName, role = 'par
         first_name: firstName,
         last_name:  lastName,
         role:       role,
+        // Read by AuthCallbackPage once the account is confirmed, so it can
+        // record the parental attestation (public.consent) via the
+        // record-consent-attestation edge function. Not proof by itself —
+        // just a flag saying the checkbox was agreed at sign-up time.
+        attestation_agreed: !!attestationAgreed,
       },
       emailRedirectTo: `${window.location.origin}/auth/callback`,
     },

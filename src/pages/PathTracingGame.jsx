@@ -63,12 +63,15 @@ export default function PathTracingGame() {
   const activeSessionRef  = useRef(null);
   const capturedPositions = useRef([]);
   const trackingSaved     = useRef(false);
+  // Turned off the moment the round ends or the player leaves, so the
+  // webcam light goes off instead of staying lit until unmount.
+  const [cameraEnabled, setCameraEnabled] = useState(true);
   const {
     landmarks, multiHandData, isTracking, error: cameraError,
     positionBuffer, faceLandmarks, headPose, faceCanvasRef,
     /* One finger traces the shape, so one hand owns the round — the other
        hand, however much it moves, is ignored. */
-  } = useMediaPipeTracking(videoRef, canvasRef, true, { handSideLock: true });
+  } = useMediaPipeTracking(videoRef, canvasRef, cameraEnabled, { handSideLock: true });
 
   // ── Reflex Engine ────────────────────────────────────────────────
   const { startTracking, stopTracking, pushFrame } = useReflexEngine({ analyzeEveryMs: 4000 });
@@ -194,32 +197,20 @@ export default function PathTracingGame() {
   };
 
   // ── Countdown ───────────────────────────────────────────────────
+  /* The 3-2-1 countdown was removed (client feedback): the round now starts
+     the instant the session is ready, instead of making the child wait
+     through a ticking overlay. */
   const runCountdown = () => {
-    setPhase('countdown');
-    phaseRef.current = 'countdown';
-    let count = COUNTDOWN_SECS;
-    setCountdownVal(count);
-
-    const interval = setInterval(() => {
-      count--;
-      if (count > 0) {
-        setCountdownVal(count);
-        soundManager.playCountdown();
-      } else {
-        clearInterval(interval);
-        soundManager.playCountdownGo();
-        // Load first path
-        loadPath(0);
-        setPhase('waiting');
-        phaseRef.current = 'waiting';
-        startTimer();
-        // Start ambient sound
-        if (!ambientStarted.current) {
-          soundManager.startAmbient();
-          ambientStarted.current = true;
-        }
-      }
-    }, 1000);
+    // Load first path
+    loadPath(0);
+    setPhase('waiting');
+    phaseRef.current = 'waiting';
+    startTimer();
+    // Start ambient sound
+    if (!ambientStarted.current) {
+      soundManager.startAmbient();
+      ambientStarted.current = true;
+    }
   };
 
   // ── Load a path ─────────────────────────────────────────────────
@@ -468,6 +459,7 @@ export default function PathTracingGame() {
     cancelAnimationFrame(rafRef.current);
     soundManager.playCelebration();
     soundManager.stopAmbient();
+    setCameraEnabled(false);
 
     // Stop camera
     if (videoRef.current?.srcObject) {
@@ -523,6 +515,7 @@ export default function PathTracingGame() {
     clearInterval(timerRef.current);
     cancelAnimationFrame(rafRef.current);
     soundManager.stopAmbient();
+    setCameraEnabled(false);
     if (videoRef.current?.srcObject) videoRef.current.srcObject.getTracks().forEach(t => t.stop());
     logout();
     toast.success('See you next time! 👋');
@@ -775,7 +768,11 @@ export default function PathTracingGame() {
         {/* Top bar */}
         <div className="ptg-topbar">
           <div className="ptg-topbar-left">
-            <button className="ptg-back-btn" onClick={() => navigate('/play')}>
+            <button className="ptg-back-btn" onClick={() => {
+              setCameraEnabled(false);
+              if (videoRef.current?.srcObject) videoRef.current.srcObject.getTracks().forEach(t => t.stop());
+              navigate('/play');
+            }}>
               <ArrowLeft size={14} />
               Back
             </button>
@@ -889,28 +886,6 @@ export default function PathTracingGame() {
             height={CANVAS_SIZE * 2}
             style={{ width: '100%', height: '100%' }}
           />
-
-          {/* Countdown overlay */}
-          <AnimatePresence>
-            {phase === 'countdown' && (
-              <motion.div
-                className="ptg-countdown-overlay"
-                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              >
-                <motion.div
-                  key={countdownVal}
-                  className="ptg-countdown-number"
-                  initial={{ scale: 0.5, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 1.5, opacity: 0 }}
-                  transition={{ type: 'spring', damping: 12 }}
-                >
-                  {countdownVal}
-                </motion.div>
-                <div className="ptg-countdown-text">Get ready...</div>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
           {/* Waiting phase hint */}
           {phase === 'waiting' && (

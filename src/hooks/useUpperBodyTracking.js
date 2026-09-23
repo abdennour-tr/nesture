@@ -31,7 +31,7 @@
  * a steady frame rate.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RECORDED_LANDMARKS } from '../services/pose/poseLandmarks';
+import { POSE, RECORDED_LANDMARKS, MIN_VISIBILITY } from '../services/pose/poseLandmarks';
 
 /** Bump this if the frame encoding changes; the export reads it to decode. */
 export const SCHEMA = 'nesture.pose.v1';
@@ -44,14 +44,42 @@ const r4 = (v) => Math.round((v || 0) * 1e4) / 1e4;
 const r3 = (v) => Math.round((v || 0) * 1e3) / 1e3;
 const r2 = (v) => Math.round((v || 0) * 1e2) / 1e2;
 
+/* Bones drawn between the points this platform actually records (see
+   poseLandmarks.js) — nothing hip-down, since nothing hip-down is recorded
+   either. Same idea as useHandTracking's skeleton: show exactly what is
+   being kept, not the model's full 33-point output. */
+const SKELETON_CONNECTIONS = [
+  [POSE.LEFT_SHOULDER, POSE.RIGHT_SHOULDER],
+  [POSE.LEFT_SHOULDER, POSE.LEFT_ELBOW], [POSE.LEFT_ELBOW, POSE.LEFT_WRIST],
+  [POSE.RIGHT_SHOULDER, POSE.RIGHT_ELBOW], [POSE.RIGHT_ELBOW, POSE.RIGHT_WRIST],
+  [POSE.LEFT_SHOULDER, POSE.LEFT_HIP], [POSE.RIGHT_SHOULDER, POSE.RIGHT_HIP],
+  [POSE.LEFT_HIP, POSE.RIGHT_HIP],
+  [POSE.LEFT_WRIST, POSE.LEFT_INDEX], [POSE.LEFT_WRIST, POSE.LEFT_THUMB],
+  [POSE.LEFT_WRIST, POSE.LEFT_PINKY],
+  [POSE.RIGHT_WRIST, POSE.RIGHT_INDEX], [POSE.RIGHT_WRIST, POSE.RIGHT_THUMB],
+  [POSE.RIGHT_WRIST, POSE.RIGHT_PINKY],
+];
+
+/** Bigger, highlighted dots — the joints the ATNR/STNR features are built
+    from — vs. small dots for the rest of the recorded set (face, fingers). */
+const KEY_LANDMARKS = new Set([
+  POSE.LEFT_SHOULDER, POSE.RIGHT_SHOULDER,
+  POSE.LEFT_ELBOW, POSE.RIGHT_ELBOW,
+  POSE.LEFT_WRIST, POSE.RIGHT_WRIST,
+]);
+
 /**
  * @param {React.RefObject} videoRef  a <video> element to attach the camera to
+ * @param {React.RefObject} [canvasRef] optional — when given, the same
+ *   skeleton every camera-mode game draws (dots + bones) is drawn on it every
+ *   frame, so the touch-mode camera frame shows exactly what is being read,
+ *   not just a badge saying it's on.
  * @param {Object} options
  * @param {boolean} options.enabled   consent given AND the round is running
  * @param {number}  options.sampleHz
  * @param {string}  options.gameId    recorded with the session, for the dataset
  */
-export default function useUpperBodyTracking(videoRef, {
+export default function useUpperBodyTracking(videoRef, canvasRef, {
   enabled = false,
   sampleHz = DEFAULT_HZ,
   gameId = null,
@@ -93,10 +121,6 @@ export default function useUpperBodyTracking(videoRef, {
       try { cameraRef.current.stop(); } catch { /* already stopped */ }
       cameraRef.current = null;
     }
-    if (poseRef.current) {
-      try { poseRef.current.close(); } catch { /* already closed */ }
-      poseRef.current = null;
-    }
     const video = videoRef?.current;
     const stream = video?.srcObject;
     if (stream && typeof stream.getTracks === 'function') {
@@ -110,12 +134,64 @@ export default function useUpperBodyTracking(videoRef, {
         video.load();
       } catch { /* detached */ }
     }
+    /* Otherwise the last frame's skeleton sits there, over a frozen or blank
+       video, looking like tracking that is still running after it isn't. */
+    const canvas = canvasRef?.current;
+    if (canvas) {
+      try { canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height); }
+      catch { /* detached */ }
+    }
     setIsTracking(false);
-  }, [videoRef]);
+  }, [videoRef, canvasRef]);
+
+  /* ── Draw the skeleton on canvas ──────────────────────────────────────────
+     Same technique as useHandTracking's drawLandmarks: cleared and redrawn
+     every frame, coordinates used as-is (fractions of the canvas' own
+     width/height) — mirroring is handled once, in CSS, on the <video> and
+     <canvas> together, same as every camera-mode game already does. */
+  const drawSkeleton = useCallback((lm) => {
+    const canvas = canvasRef?.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (!lm) return;
+
+    const visible = (i) => {
+      const p = lm[i];
+      return p && (p.visibility == null || p.visibility >= MIN_VISIBILITY);
+    };
+
+    ctx.strokeStyle = 'rgba(13,94,107,0.6)';
+    ctx.lineWidth = 2;
+    for (const [a, b] of SKELETON_CONNECTIONS) {
+      if (!visible(a) || !visible(b)) continue;
+      ctx.beginPath();
+      ctx.moveTo(lm[a].x * canvas.width, lm[a].y * canvas.height);
+      ctx.lineTo(lm[b].x * canvas.width, lm[b].y * canvas.height);
+      ctx.stroke();
+    }
+
+    for (const i of RECORDED_LANDMARKS) {
+      if (!visible(i)) continue;
+      const p = lm[i];
+      const isKey = KEY_LANDMARKS.has(i);
+      ctx.beginPath();
+      ctx.arc(p.x * canvas.width, p.y * canvas.height, isKey ? 5 : 2, 0, 2 * Math.PI);
+      ctx.fillStyle = isKey ? '#E8841A' : 'rgba(200,232,237,0.6)';
+      ctx.fill();
+    }
+  }, [canvasRef]);
 
   const onResults = useCallback((results) => {
-    if (!enabledRef.current) return;
     const lm = results?.poseLandmarks;
+    /* Drawn regardless of `enabledRef` staleness below — the frame is a live
+       view of what the camera sees right now, not part of the recording, so
+       it has nothing to gain from waiting on the same guard the capture
+       logic uses. If the round has actually ended the camera is already
+       being released (see releaseCamera) and onResults stops firing. */
+    drawSkeleton(lm);
+
+    if (!enabledRef.current) return;
     if (!lm) return;
 
     const now = performance.now();
@@ -152,7 +228,7 @@ export default function useUpperBodyTracking(videoRef, {
       lastPublishRef.current = now;
       setFrameCount(framesRef.current.length);
     }
-  }, [minIntervalMs]);
+  }, [minIntervalMs, drawSkeleton]);
 
   // ── Start / stop with `enabled` ──────────────────────────────────────────
   useEffect(() => {
@@ -166,22 +242,30 @@ export default function useUpperBodyTracking(videoRef, {
         const { Camera } = await import('@mediapipe/camera_utils');
         if (cancelled) return;
 
-        const pose = new Pose({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
-        });
-        /* modelComplexity 1: the lite model loses elbow precision, and elbow
-           angle is the single most important input to the ATNR and STNR
-           features. This runs at 15Hz on one camera, so the extra cost is
-           affordable in a way it would not be for a 30Hz pointer. */
-        pose.setOptions({
-          modelComplexity: 1,
-          smoothLandmarks: true,
-          enableSegmentation: false,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5,
-        });
-        pose.onResults(onResults);
-        poseRef.current = pose;
+        /* Built once and kept for the life of the hook. Constructing a Pose per
+           round and close()-ing it between rounds races its own asset loader:
+           close() frees the state that the packed-assets XHR then writes into,
+           which surfaces as "Cannot set properties of undefined (setting
+           'loaded')". Rounds now reuse one instance; only the camera stops. */
+        if (!poseRef.current) {
+          const pose = new Pose({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+          });
+          /* modelComplexity 1: the lite model loses elbow precision, and elbow
+             angle is the single most important input to the ATNR and STNR
+             features. This runs at 15Hz on one camera, so the extra cost is
+             affordable in a way it would not be for a 30Hz pointer. */
+          pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            enableSegmentation: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5,
+          });
+          poseRef.current = pose;
+        }
+        /* Rebound every run: onResults changes identity with its deps. */
+        poseRef.current.onResults(onResults);
 
         if (!videoRef?.current) return;
         const camera = new Camera(videoRef.current, {
@@ -216,8 +300,16 @@ export default function useUpperBodyTracking(videoRef, {
     };
   }, [enabled, onResults, releaseCamera, videoRef]);
 
-  // Belt and braces: the webcam goes off when this component does.
-  useEffect(() => releaseCamera, [releaseCamera]);
+  /* Belt and braces: the webcam goes off when this component does — and this is
+     the one place the Pose instance is actually destroyed, since the component
+     is going away and nothing will write into it afterwards. */
+  useEffect(() => () => {
+    releaseCamera();
+    if (poseRef.current) {
+      try { poseRef.current.close(); } catch { /* already closed */ }
+      poseRef.current = null;
+    }
+  }, [releaseCamera]);
 
   /**
    * The finished recording, in the compact self-describing format the export

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, X, Lock, CheckCircle, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { supabase } from '../../services/supabaseClient';
 
 export default function ConsentSettingsModal({ isOpen, onClose }) {
   const [showConfirm, setShowConfirm] = useState(false);
@@ -11,11 +12,25 @@ export default function ConsentSettingsModal({ isOpen, onClose }) {
 
   const handleRevoke = async () => {
     setRevoking(true);
-    // Simulate API call for revocation
-    await new Promise(r => setTimeout(r, 1500));
-    setRevoking(false);
-    toast.success('Consent revoked. All AI data will be securely deleted within 24 hours.');
-    onClose();
+    try {
+      const { data, error } = await supabase.functions.invoke('revoke-ai-consent', { body: {} });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Revocation failed');
+
+      if (data.documents_deleted > 0 || data.children_affected > 0) {
+        toast.success(
+          `Done. Deleted ${data.documents_deleted} document(s) and all AI-generated data for ${data.children_affected} child(ren).`
+        );
+      } else {
+        toast.success('Done. There was no AI-generated data on file to delete.');
+      }
+      onClose();
+    } catch (err) {
+      console.error('[ConsentSettingsModal] Revoke failed:', err.message);
+      toast.error(`Could not complete the deletion: ${err.message}. Please try again or contact support.`);
+    } finally {
+      setRevoking(false);
+    }
   };
 
   const points = [

@@ -9,6 +9,7 @@ import useMediaPipeTracking, { LANDMARKS, calculateSmoothness } from '../hooks/u
 import { useReflexEngine } from '../hooks/useReflexEngine';
 import CalibrationScreen from './CalibrationScreen';
 import TouchModePose from '../components/game/TouchModePose';
+import PosturePrepCard from '../components/game/PosturePrepCard';
 import { soundManager } from '../utils/soundManager';
 import api from '../services/api';
 import { supabase } from '../services/supabaseClient';
@@ -384,6 +385,9 @@ export default function GamePage() {
     (searchParams.get('mode') || 'camera').toLowerCase() === 'touch' ? 'touch' : 'camera'
   );
   const isTouchMode = inputMode === 'touch';
+  // Turned off the moment the round ends or the player leaves, so the
+  // webcam light goes off instead of staying lit until unmount.
+  const [cameraEnabled, setCameraEnabled] = useState(true);
   const inputModeRef = useRef(inputMode);
   useEffect(() => { inputModeRef.current = inputMode; }, [inputMode]);
   /* What produced the pending selection — set by the key handler, read when
@@ -400,6 +404,9 @@ export default function GamePage() {
   // ── Tracking unifié : 1 seule caméra → mains + visage ─────────────────────
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  /* The .camera-box panel itself — passed to TouchModePose so its inline
+     video/canvas portal into the exact same panel camera mode fills. */
+  const cameraBoxRef = useRef(null);
 
   const {
     landmarks,
@@ -434,7 +441,7 @@ export default function GamePage() {
      device that simply has no camera. */
     /* LetterQuest is pointed at with ONE hand: the first hand seen keeps the
        cursor for the round, so a second (often shaking) hand cannot steal it. */
-  } = useMediaPipeTracking(videoRef, canvasRef, !isTouchMode, { handSideLock: true });
+  } = useMediaPipeTracking(videoRef, canvasRef, !isTouchMode && cameraEnabled, { handSideLock: true });
 
   // ── Reflex Engine (temps réel) ─────────────────────────────────────────────
   const { startTracking, stopTracking, pushFrame, setInputMode: setEngineInputMode } =
@@ -505,7 +512,7 @@ export default function GamePage() {
      provisional mapping selected in those seconds was scored as a real attempt
      against a child who had not been told the game had begun. */
   const [phase, setPhase] = useState(
-    (searchParams.get('mode') || 'camera').toLowerCase() === 'touch' ? 'playing' : 'calibration'
+    (searchParams.get('mode') || 'camera').toLowerCase() === 'touch' ? 'touchPrep' : 'calibration'
   );
   const [currentWord, setCurrentWord] = useState('');
   const [slots, setSlots] = useState([]);
@@ -613,6 +620,7 @@ export default function GamePage() {
      phase, so the pose upload cannot wait on an effect that fires after the
      unmount. This handle lets handleEndSession start it explicitly. */
   const poseRef = useRef(null);
+  const [postureTracking, setPostureTracking] = useState(false);
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { showSuperAnimRef.current = showSuperAnim; }, [showSuperAnim]);
@@ -701,6 +709,7 @@ export default function GamePage() {
   useEffect(() => {
     if (isTouchMode && phase === 'playing' && !initRan.current) initSession();
   }, [isTouchMode, phase]);
+
 
   /* ── Switching input mode mid-session ───────────────────────────────────
      Not behind the parent lock: a child whose arm is tired, or whose camera
@@ -1451,6 +1460,7 @@ export default function GamePage() {
     setPhase('ending');
     clearInterval(timerRef.current);
     cancelAnimationFrame(dwellRAF.current);
+    setCameraEnabled(false);
     if (videoRef.current?.srcObject) videoRef.current.srcObject.getTracks().forEach(t => t.stop());
 
     // Flush whatever is still buffered. Unlike before, capture ran for the
@@ -1600,15 +1610,33 @@ export default function GamePage() {
       {/* Touch-mode upper-body observation. In camera mode the hand/face
           tracker already owns the webcam, so `active` is gated on touch mode;
           nothing starts until the consent prompt is answered with a yes.
-          See components/game/TouchModePose. */}
+          `inline` + `fieldRef`: this game has no small floating camera
+          widget — camera mode fills the whole `.camera-box` panel on the
+          left with a plain video, so the touch-mode feed is portaled into
+          that same panel, full-size, instead of the small picture-in-picture
+          frame other games use. See components/game/TouchModePose. */}
       <TouchModePose
         ref={poseRef}
         gameId="letterquest"
-        active={isTouchMode && phase === 'playing'}
+        active={isTouchMode && (phase === 'touchPrep' || phase === 'playing')}
         finished={phase === 'ending'}
         sessionId={activeSession?.id || null}
         childId={learnerId}
         learnerName={profile?.first_name}
+        fieldRef={cameraBoxRef}
+        inline
+        onTrackingChange={setPostureTracking}
+      />
+
+      {/* ── Touch-mode posture prep gate ─────────────────────────────────
+          Mirrors the calibration gate below, for touch mode: the round
+          doesn't start (and initSession isn't called, see the effect above)
+          until the child continues past this card. */}
+      <PosturePrepCard
+        visible={isTouchMode && phase === 'touchPrep'}
+        isTracking={postureTracking}
+        onContinue={() => setPhase('playing')}
+        onExit={() => navigate('/play')}
       />
 
       {/* ── Calibration gate ─────────────────────────────────────────────
@@ -1637,7 +1665,7 @@ export default function GamePage() {
           recalibrate={recalibrate}
           finalizeCalibration={finalizeCalibration}
           onReady={handleCalibrated}
-          onExit={() => navigate('/play')}
+          onExit={() => { setCameraEnabled(false); navigate('/play'); }}
           learnerName={profile?.first_name || profile?.full_name}
           difficultyLabel={DIFFICULTY_LABELS[difficulty]}
           savedCalibration={savedCalibration}
@@ -1690,7 +1718,7 @@ export default function GamePage() {
                 <button onClick={handlePause} style={styles.pausePrimary}>
                   <Play size={15} /> Resume
                 </button>
-                <button onClick={() => navigate('/play')} style={styles.pauseGhost}>
+                <button onClick={() => { setCameraEnabled(false); navigate('/play'); }} style={styles.pauseGhost}>
                   <Home size={15} /> Leave
                 </button>
               </div>
@@ -1888,21 +1916,29 @@ export default function GamePage() {
 
       {/* ── LEFT PANEL ───────────────────────────────────────────────── */}
       <div style={styles.leftPanel} className="gp-left">
-        <div style={styles.cameraBox} className="camera-box">
-          {/* Touch mode never opened a camera, so there is nothing to show —
-              and a black rectangle where a webcam feed used to be reads as a
-              fault. The panel says what the mode is instead. */}
+        <div style={styles.cameraBox} className="camera-box" ref={cameraBoxRef}>
+          {/* Touch mode doesn't use the camera to PLAY — that part is true,
+              and stays true. But TouchModePose reads the camera in the
+              background during a round for posture research, and while that
+              is running this panel now shows it live (TouchModePose portals
+              its <video>+<canvas> in here — see the fieldRef/inline props
+              below) instead of saying "the camera is off" over a camera that
+              is, in fact, on. Outside a round (no round running yet, between
+              rounds) nothing is capturing, so the explanatory panel is the
+              accurate thing to show. */}
           {isTouchMode ? (
+            phase === 'playing' ? null : (
             <div style={styles.touchPanel}>
               <Hand size={30} style={{ opacity: 0.85, color: '#8B5CF6' }} />
               <div style={{ fontWeight: 800, marginTop: 10, color: '#E0F2FE' }}>Touch mode</div>
               <div style={{ fontSize: '0.76rem', color: '#9CA3AF', marginTop: 4, lineHeight: 1.45 }}>
-                Tap the keys directly.<br />The camera is off.
+                Tap the keys directly.<br />The camera is off between rounds.
               </div>
               <button onClick={handleSwitchInputMode} style={styles.modeSwitchBtn}>
                 <Video size={13} /> Switch to hand in air
               </button>
             </div>
+            )
           ) : cameraError ? (
             <div style={styles.cameraError}>
               <div style={{ fontSize: '2rem', marginBottom: 8 }}>📷</div>

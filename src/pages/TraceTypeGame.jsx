@@ -15,8 +15,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import {LogOut, Volume2, VolumeX, Clock, Pause, Play, Home, ChevronRight, CheckCircle, Info, Sun, Moon, Hand, MousePointer2, HelpCircle} from 'lucide-react';
+import {Volume2, VolumeX, Clock, Pause, Play, Home, ChevronRight, CheckCircle, Info, Sun, Moon, Hand, MousePointer2, HelpCircle} from 'lucide-react';
 import useHandTracking from '../hooks/useHandTracking';
+import useFaceMesh from '../hooks/useFaceMesh';
+import { drawFaceLandmarks } from '../utils/drawFaceLandmarks';
+import useHandCapture from '../hooks/useHandCapture';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
 import { soundManager } from '../utils/soundManager';
 import useSoundEnabled from '../hooks/useSoundEnabled';
@@ -34,6 +37,8 @@ import GameRules from '../components/game/GameRules';
 import { getGameTheme, toggleGameTheme, subscribeGameTheme } from '../components/game/gameShell';
 import GameResults from '../components/game/GameResults';
 import TouchModePose from '../components/game/TouchModePose';
+import PosturePrepCard from '../components/game/PosturePrepCard';
+import CameraLandmarks from '../components/game/CameraLandmarks';
 import HandGate from '../components/game/HandGate';
 import useGraspMeasure from '../hooks/useGraspMeasure';
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -76,6 +81,17 @@ function distToSegment(px, py, a, b) {
   return Math.hypot(px - (a.x + t * vx), py - (a.y + t * vy));
 }
 
+/** Pearson correlation from running sums, so no sample array has to be kept.
+ *  Same formula as GamePage's array-based `pearson()`, just fed accumulators
+ *  instead of two parallel lists. Returns null under 6 samples — a coupling
+ *  reading from a handful of frames is noise, not a measurement. */
+function pearsonFromSums(n, sumA, sumB, sumAB, sumA2, sumB2) {
+  if (n < 6) return null;
+  const num = n * sumAB - sumA * sumB;
+  const den = Math.sqrt((n * sumA2 - sumA * sumA) * (n * sumB2 - sumB * sumB));
+  return den === 0 ? null : num / den;
+}
+
 /** Fresh OT accumulator. One per session. */
 function makeOTAccumulator() {
   return {
@@ -90,6 +106,16 @@ function makeOTAccumulator() {
     // Smoothness (jerk)
     lastPos: null, lastVel: null, lastAcc: null, lastT: null,
     jerkSum: 0, jerkCount: 0,
+    /* Head-hand coupling — same question as GamePage's head_hand_coupling,
+       computed the cheap way: running sums for an online Pearson correlation
+       (fingertip x/y vs. head yaw/pitch) instead of buffering a full sample
+       array like GamePage's `reach`, since this game already tracks OT stats
+       as running totals rather than logs. Only accumulated on frames where a
+       face was actually seen (see recordTraceSample). */
+    headHandN: 0,
+    sumHX: 0, sumHY: 0, sumYaw: 0, sumPitch: 0,
+    sumHXYaw: 0, sumHYPitch: 0,
+    sumHX2: 0, sumHY2: 0, sumYaw2: 0, sumPitch2: 0,
     // Find / Type keyboard
     findTaps: 0, findWrong: 0,
     typeTaps: 0, typeWrong: 0,
@@ -336,6 +362,8 @@ export default function TraceTypeGame() {
     () => (sessionStorage.getItem(RULES_FLAG) ? 'inputSelection' : 'rules')
   ); // rules | inputSelection | waiting | playing | letterSuccess | results
   const [inputMethod, setInputMethod]   = useState(null); // 'camera' | 'touch' | null
+  const poseRef = useRef(null);
+  const [postureTracking, setPostureTracking] = useState(false);
   const [countdown, setCountdown]       = useState(0);
   const [currentLetterIdx, setCurrentLetterIdx] = useState(0);
   const [step, setStep]                 = useState('trace'); // trace | find | type
@@ -399,6 +427,60 @@ export default function TraceTypeGame() {
        animation frame (see consumeCameraSample). A game that drives itself from
        the `landmarks` state must leave this at 0. */
     publishIntervalMs: 120,
+  });
+
+  /* Head pose, for the same clinical question LetterQuest already asks: how
+     much the head moves WITH the hand while tracing (see head_hand_coupling
+     in GamePage.jsx). Its own hook rather than a rewrite of useHandTracking —
+     this game's single-hand-lock pointer logic is unlike LetterQuest's dwell
+     cursor and isn't worth risking to merge the two into one camera loop.
+
+     NOT started at the same instant as the hand model, on purpose. Hands and
+     FaceMesh are two separate MediaPipe "solutions", each loading its own
+     wasm binary from the CDN; constructing both at once races two Emscripten
+     module loaders against each other and — confirmed live — can abort with
+     "Module.arguments has been replaced…" and cross-loaded asset URLs (Hands'
+     file name requested under the FaceMesh path). Waiting for the hand model
+     to report a first successful detection before ever constructing FaceMesh
+     means its wasm load only ever starts once Hands' has already finished,
+     so there is nothing left for it to collide with. `handEverTracked` latches
+     true and stays there for the rest of the round — once FaceMesh is up,
+     Hands blinking out for a frame must not tear it back down and re-open the
+     same race in reverse. */
+  const [handEverTracked, setHandEverTracked] = useState(false);
+  useEffect(() => { if (isTracking) setHandEverTracked(true); }, [isTracking]);
+  useEffect(() => { if (!trackingEnabled) setHandEverTracked(false); }, [trackingEnabled]);
+  const faceMeshEnabled = trackingEnabled && handEverTracked;
+
+  const { headPose, faceLandmarks } = useFaceMesh(videoRef, faceMeshEnabled);
+  const headPoseRef = useRef({ pitch: 0, yaw: 0 });
+  const hasFaceRef = useRef(false);
+  useEffect(() => { headPoseRef.current = headPose; }, [headPose]);
+  useEffect(() => { hasFaceRef.current = !!faceLandmarks; }, [faceLandmarks]);
+
+  /* Its own canvas, stacked on top of the hand-landmark one (see
+     CameraLandmarks' `faceCanvasRef`) — useHandTracking clears ITS canvas
+     every frame, so drawing face dots there would have each model erase the
+     other's. Redrawn on every `faceLandmarks` update (a fresh array each
+     MediaPipe frame), and explicitly cleared when it goes null so a face
+     that steps out of frame doesn't leave stale dots hanging in the air. */
+  const faceCanvasRef = useRef(null);
+  useEffect(() => {
+    drawFaceLandmarks(faceLandmarks, faceCanvasRef.current);
+  }, [faceLandmarks]);
+
+  /* Records this round's hand trajectory. One shared hook for every game —
+     see hooks/useHandCapture.js for why the per-game versions were replaced.
+     Writes nothing until a session and a learner are both known. */
+  useHandCapture({
+    /* Explicitly camera-mode only: in touch mode the hand camera is off and
+       landmarks go stale rather than empty, so relying on them being absent
+       would leave one stale sample recordable per toggle. */
+    enabled: gamePhase === 'playing' && trackingEnabled,
+    sessionId: currentSessionId,
+    childId: profile?.learner_id || user?.id || null,
+    gameId: 'trace-type',
+    landmarks,
   });
 
   /* The trace step needs one finger extended for a long, continuous line, so a
@@ -666,6 +748,7 @@ export default function TraceTypeGame() {
           typingAccuracy: otResults.typingAccuracy,
           speedScore: otResults.speedScore,
           meanDeviation: otResults.meanDeviation,
+          headHandCoupling: otResults.headHandCoupling,
           wrongKeys: otResults.wrongKeys,
           reactionMs: otResults.reactionMs,
           pauses: otResults.pauses,
@@ -931,6 +1014,18 @@ export default function TraceTypeGame() {
       ? clamp01(((LEVEL_REF_SEC[level] || 20) * 1000 * lettersDone) / activeMs) * 100
       : null;
 
+    /* 6. Head-hand coupling — informational, not scored. Left out of the
+       composite on purpose, same as GamePage: whether the head follows the
+       hand is a pattern for a therapist to look at, not a pass/fail axis, so
+       it never enters the weighted mean above. Averaged over both axes, same
+       as GamePage's rx/ry average. */
+    const rHX  = pearsonFromSums(ot.headHandN, ot.sumHX, ot.sumYaw,   ot.sumHXYaw,   ot.sumHX2, ot.sumYaw2);
+    const rHY  = pearsonFromSums(ot.headHandN, ot.sumHY, ot.sumPitch, ot.sumHYPitch, ot.sumHY2, ot.sumPitch2);
+    const couplingParts = [rHX, rHY].filter((v) => v !== null).map(Math.abs);
+    const headHandCoupling = couplingParts.length
+      ? Math.round((couplingParts.reduce((a, b) => a + b, 0) / couplingParts.length) * 100) / 100
+      : null;
+
     /* Weighted mean over the measured components only. */
     const parts = [
       [traceAccuracy,  0.30],
@@ -955,6 +1050,7 @@ export default function TraceTypeGame() {
       typingAccuracy: round(typingAccuracy),
       speedScore:     round(speedScore),
       meanDeviation:  round(meanDist),
+      headHandCoupling,
       lettersScored:  lettersDone,
       wrongKeys:      ot.findWrong + ot.typeWrong,
       reactionMs: (ot.firstMoveAt && ot.startedAt) ? ot.firstMoveAt - ot.startedAt : null,
@@ -1066,6 +1162,21 @@ export default function TraceTypeGame() {
     const ot = otRef.current;
     const now = performance.now();
     if (ot.firstMoveAt == null) ot.firstMoveAt = Date.now();
+
+    /* Head-hand coupling accumulators. Skipped whenever no face is in frame
+       (a child leaning out, poor lighting) rather than treating a momentary
+       loss as "head perfectly still" — that would manufacture a coupling
+       reading out of an absence of data, the same mistake GamePage's own
+       comment warns about. */
+    if (hasFaceRef.current) {
+      const { yaw, pitch } = headPoseRef.current;
+      ot.headHandN  += 1;
+      ot.sumHX      += sx;       ot.sumHY      += sy;
+      ot.sumYaw     += yaw;      ot.sumPitch   += pitch;
+      ot.sumHXYaw   += sx * yaw; ot.sumHYPitch += sy * pitch;
+      ot.sumHX2     += sx * sx;  ot.sumHY2     += sy * sy;
+      ot.sumYaw2    += yaw * yaw; ot.sumPitch2 += pitch * pitch;
+    }
 
     /* Path error. Waypoints that begin a new stroke are pen LIFTS (the crossbar
        of A, the tail of Q): the child is *supposed* to travel off the letter
@@ -1384,11 +1495,18 @@ export default function TraceTypeGame() {
       setInputMethod('camera');
       setGamePhase('waiting');
     } else {
-      if (soundEnabled) soundManager.playCountdownGo();
       setInputMethod('touch');
-      setGamePhase('playing');
-      letterStartTimeRef.current = Date.now();
+      setGamePhase('prep');
     }
+  }, [soundEnabled]);
+
+  /* The posture-prep card's "Start playing" — the touch round actually
+     begins here, once the child has seen it, instead of the instant the
+     input method was picked. */
+  const startTouchPlaying = useCallback(() => {
+    if (soundEnabled) soundManager.playCountdownGo();
+    setGamePhase('playing');
+    letterStartTimeRef.current = Date.now();
   }, [soundEnabled]);
 
   /* Mode chosen on the level screen → skip the popup entirely. */
@@ -1515,6 +1633,16 @@ export default function TraceTypeGame() {
       visible={gamePhase === 'waiting'}
       isTracking={isTracking}
       onUseTouch={switchMode}
+      onExit={() => { releaseCamera(); navigate('/play'); }}
+    />
+  );
+
+  // ── Touch-mode Posture Prep Overlay ──
+  const renderPosturePrep = () => (
+    <PosturePrepCard
+      visible={gamePhase === 'prep'}
+      isTracking={postureTracking}
+      onContinue={startTouchPlaying}
       onExit={() => navigate('/play')}
     />
   );
@@ -1623,12 +1751,17 @@ export default function TraceTypeGame() {
                 { icon: '❌', label: 'Wrong keys', value: otResults?.wrongKeys ?? '—' },
                 { icon: '⚡', label: 'Reaction', value: otResults?.reactionMs == null ? '—' : `${(otResults.reactionMs / 1000).toFixed(2)}s` },
                 { icon: '⏸️', label: 'Pauses', value: otResults ? `${otResults.pauses} · ${(otResults.pauseMs / 1000).toFixed(0)}s` : '—' },
+                /* Informational only — same reason it's left out of the OT
+                   composite above: whether the head follows the hand isn't a
+                   pass/fail number, so no unit is attached to it. */
+                { icon: '🧠', label: 'Head-hand link',
+                  value: otResults?.headHandCoupling == null ? '—' : otResults.headHandCoupling.toFixed(2) },
               ]}
               notMeasuredReason={inputMethod === 'camera'
                 ? undefined
                 : 'This round was played by touch, so the camera never ran.'}
               onPlayAgain={() => {
-                setGamePhase(inputMethod === 'touch' ? 'playing' : 'waiting');
+                setGamePhase(inputMethod === 'touch' ? 'prep' : 'waiting');
                 setCountdown(0);
                 setCurrentLetterIdx(0);
                 setStep('trace');
@@ -1651,7 +1784,7 @@ export default function TraceTypeGame() {
                 setGraspResult(null);
                 graspRef.current.reset();
               }}
-              onExit={() => navigate('/play')}
+              onExit={() => { releaseCamera(); navigate('/play'); }}
               exitLabel="Back to games"
             />
           </div>
@@ -1668,15 +1801,27 @@ export default function TraceTypeGame() {
       {/* Touch-mode upper-body observation. `inputMethod` is null until the
           child picks a mode, so nothing here can run before that choice — and
           then only after the consent prompt is answered with a yes. The webcam
-          is released the moment the round ends. See TouchModePose. */}
+          is released the moment the round ends.
+          No `fieldRef` here on purpose: `.tt-trace-area` is small, precious,
+          interactive space — a top-left picture-in-picture there would sit on
+          top of the trace path itself (this game's own hand-tracking <video>
+          stays hidden there for the same reason, see the camera-mode frame
+          below; only the SVG hand pointer is shown on top of the trace path).
+          So this one keeps the plain fixed-corner frame (see TouchModePose's
+          fallback, `.touch-mode-pose-frame`) instead of being portaled into
+          the trace box — the same fixed corner the camera-mode frame below
+          uses, so the child sees the camera in the same spot whichever mode
+          is active. */}
       <TouchModePose
+        ref={poseRef}
         gameId="trace-type"
         active={inputMethod === 'touch'
-          && ['countdown', 'waiting', 'playing', 'letterSuccess'].includes(gamePhase)}
+          && ['prep', 'countdown', 'waiting', 'playing', 'letterSuccess'].includes(gamePhase)}
         finished={gamePhase === 'results'}
         sessionId={currentSessionId}
         childId={profile?.learner_id || user?.id || null}
         learnerName={profile?.first_name}
+        onTrackingChange={setPostureTracking}
       />
 
       {/* ── Screens & Overlays ── */}
@@ -1698,6 +1843,7 @@ export default function TraceTypeGame() {
       {renderInputSelection()}
       {renderCountdown()}
       {renderHandDetection()}
+      {renderPosturePrep()}
       {renderLetterSuccess()}
       {renderResults()}
 
@@ -1728,7 +1874,7 @@ export default function TraceTypeGame() {
                   click sur pause". Quit leaves with nothing saved; this ends
                   the round properly and shows the report. */}
               <EndGameControl
-                className="tt-results-btn secondary gs-end-btn"
+                className="tt-results-btn secondary gs-end-btn gs-end-btn--pause"
                 label="End game"
                 onConfirm={endGameNow}
               />
@@ -1736,7 +1882,7 @@ export default function TraceTypeGame() {
                 className="tt-results-btn secondary"
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
-                onClick={() => navigate('/play')}
+                onClick={() => { releaseCamera(); navigate('/play'); }}
               >
                 <Home size={18} />
                 Quit
@@ -1818,19 +1964,16 @@ export default function TraceTypeGame() {
           >
             {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
           </button>
+          {/* No separate "Exit" button next to this one on purpose — that let a
+              child leave with one stray tap and nothing saved. Leaving now
+              goes through the pause card's own Home button (or End game),
+              same as every other camera game here. */}
           <button
             className="tt-icon-btn"
             onClick={() => setIsPaused(true)}
             title="Pause"
           >
             <Pause size={18} />
-          </button>
-          <button
-            className="tt-icon-btn"
-            onClick={() => navigate('/play')}
-            title="Exit"
-          >
-            <LogOut size={18} />
           </button>
         </div>
       </header>
@@ -2057,10 +2200,36 @@ export default function TraceTypeGame() {
                   <HandArt />
                 </g>
               </svg>
-              <div className="tt-camera-container" style={{ visibility: 'hidden', opacity: 0, position: 'absolute', pointerEvents: 'none' }}>
-                <video ref={videoRef} playsInline autoPlay muted />
-                <canvas ref={canvasRef} />
-              </div>
+              {/* Hand mode's own camera preview. The <video>/<canvas> here are
+                  the ones useHandTracking actually reads frames from and
+                  draws the tracked hand onto (the SVG pointer above is driven
+                  by the same landmarks, for the responsive on-path pointer) —
+                  they used to stay permanently hidden, on the theory that the
+                  hand-shaped SVG pointer already showed the hand was tracked.
+                  That left the camera itself invisible even though it was
+                  live, so it now shows through the same compact preview
+                  (video + LIVE badge) every other camera-mode game uses,
+                  pinned to the same fixed corner as the touch-mode frame
+                  above (`.touch-mode-pose-frame` — `.tt-trace-area` is too
+                  small/precious for a top-left picture-in-picture, same
+                  reason as touch mode). In touch mode the elements stay
+                  mounted but hidden, exactly as before, since no camera runs
+                  there and TouchModePose shows its own separate frame. */}
+              {inputMethod === 'camera' ? (
+                <CameraLandmarks
+                  videoRef={videoRef}
+                  canvasRef={canvasRef}
+                  faceCanvasRef={faceCanvasRef}
+                  detected={isTracking}
+                  error={trackingError}
+                  className="touch-mode-pose-frame"
+                />
+              ) : (
+                <div className="tt-camera-container" style={{ visibility: 'hidden', opacity: 0, position: 'absolute', pointerEvents: 'none' }}>
+                  <video ref={videoRef} playsInline autoPlay muted />
+                  <canvas ref={canvasRef} />
+                </div>
+              )}
             </div>
             </div>
             <div className={`tt-trace-feedback ${traceProgress > 0 ? 'on-path' : ''}`} style={{ textCombineUpright: 'none' }}>

@@ -42,8 +42,21 @@ function fingerSurface({ points, width }) {
 const SURFACES = Object.fromEntries(Object.entries(DIGITS).map(([key, shape]) => [key, fingerSurface(shape)]));
 
 const PianoHand = forwardRef(function PianoHand(
-  { hand = 'right', keyCount, wanted, mode, detected = false }, ref
+  {
+    hand = 'right', keyCount, wanted, mode, detected = false,
+    /* Which hand this widget is LABELLED and DRAWN as (heading, aria-label,
+       mirrored artwork). Defaults to `hand`. Kept separate from `hand` (which
+       still picks the PIANO_KEYS subset — the actual finger/colour/note
+       mapping) because "Swap hands" only changes which of the child's two
+       physical hands is read for a given on-screen key set; it does not
+       renumber the keys. Without this split, swapping hands for a
+       single-hand stage would have silently swapped in the OTHER five keys
+       (a different stage's notes) instead of just relabelling the same ones —
+       see FingerPianoGame.jsx's own note on `handInvert`. */
+    physicalHand,
+  }, ref
 ) {
+  const shownAs = physicalHand || hand;
   const uid = useId().replace(/:/g, '');
   const groups = useRef({});
   const root = useRef(null);
@@ -66,11 +79,11 @@ const PianoHand = forwardRef(function PianoHand(
   return (
     <div ref={root} className={'fp-hand-figure' + (detected ? ' is-detected' : '') + (mode === 'touch' ? ' is-guide' : '')}>
       <div className="fp-hand-heading">
-        <span>{hand === 'right' ? 'Right hand' : 'Left hand'}</span>
+        <span>{shownAs === 'right' ? 'Right hand' : 'Left hand'}</span>
         {mode === 'camera' && <span className="fp-hand-signal" aria-hidden="true">LIVE</span>}
       </div>
       <svg viewBox="0 0 215 330" className="fp-hand-art" role="img"
-        aria-label={(hand === 'right' ? 'Right' : 'Left') + ' hand' + (requested ? ': bend your ' + requested.fingerLabel.toLowerCase() : '')}>
+        aria-label={(shownAs === 'right' ? 'Right' : 'Left') + ' hand' + (requested ? ': bend your ' + requested.fingerLabel.toLowerCase() : '')}>
         <defs>
           <clipPath id={clip}><path d={PALM} /></clipPath>
           <filter id={glow} x="-50%" y="-50%" width="200%" height="200%">
@@ -78,7 +91,7 @@ const PianoHand = forwardRef(function PianoHand(
             <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
           </filter>
         </defs>
-        <g transform={hand === 'left' ? 'translate(215 0) scale(-1 1)' : undefined} className="fp-hand-model">
+        <g transform={shownAs === 'left' ? 'translate(215 0) scale(-1 1)' : undefined} className="fp-hand-model">
           <path d={PALM} className="fp-palm-surface" />
           <g clipPath={'url(#' + clip + ')'} className="fp-palm-mesh">
             {Array.from({ length: 15 }, (_, i) => (

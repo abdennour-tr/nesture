@@ -52,7 +52,17 @@ export default function AuthCallbackPage() {
 
         if (session) {
           setAuth({ user: session.user, profile: session.profile });
-          
+
+          // First real session after email confirmation: this is where a
+          // parent's attestation (checked at sign-up, see SignUpPage.jsx)
+          // actually gets recorded, since email verification is mandatory
+          // and no session existed at sign-up time to authenticate the call.
+          if (session.profile?.role === 'parent' && session.user?.user_metadata?.attestation_agreed) {
+            supabase.functions.invoke('record-consent-attestation', {
+              body: { agreementVersion: 'v1.1-attestation' },
+            }).catch((err) => console.warn('[AuthCallback] Attestation recording failed:', err.message));
+          }
+
           if (type === 'invitation') {
             toast.success(`Welcome ${session.profile.first_name || 'User'}! Please set your password.`);
             navigate('/reset-password?forced=true', { replace: true });

@@ -99,6 +99,12 @@ const METRIC_DEFS = {
   directionChanges: { label: 'Direction changes',  count: true, raw: true },
   pauses:           { label: 'Pauses',             count: true, raw: true },
   meanDeviation:    { label: 'Mean deviation from path', unit: 'px', good: 12, warn: 25, higherIsBetter: false },
+  /* Correlation coefficient (0-1, absolute value averaged over both axes),
+     not a pass/fail score — deliberately `raw` so it prints with no
+     good/warn colour coding. Whether the head follows the hand while
+     tracing is a pattern for the reader (therapist/parent) to interpret,
+     the same framing GamePage's own head_hand_coupling uses. */
+  headHandCoupling: { label: 'Head-hand coupling', unit: '', raw: true, decimals: 2 },
   bubblesPopped:    { label: 'Bubbles popped',     count: true, raw: true },
   bubblesSpawned:   { label: 'Bubbles shown',      count: true, raw: true },
   bubblesMissed:    { label: 'Bubbles missed',     count: true, raw: true },

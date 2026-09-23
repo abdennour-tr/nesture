@@ -51,10 +51,10 @@ export const useAuthStore = create(
       },
 
       /** Sign up new account */
-      signup: async ({ email, password, firstName, lastName, role, consentAccepted }) => {
+      signup: async ({ email, password, firstName, lastName, role, consentAccepted, attestationAgreed }) => {
         set({ error: null, isLoading: true });
         try {
-          const { user } = await signUp({ email, password, firstName, lastName, role, consentAccepted });
+          const { user } = await signUp({ email, password, firstName, lastName, role, consentAccepted, attestationAgreed });
           set({ user, profile: null, isLoading: false });
           return user;
         } catch (err) {

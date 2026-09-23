@@ -945,6 +945,27 @@
 .gs-end-btn.gs-end-btn { color: #FCA5A5; border-color: rgba(239, 68, 68, 0.45); }
 .gs-end-btn.gs-end-btn:hover { background: rgba(239, 68, 68, 0.18); color: #FEE2E2; }
 
+/* The SAME "End game" control, a second time, inside a game's pause card
+   (see e.g. Ladybug's `lb-pause-card`) — a solid red fill rather than the
+   subtle tint above. In the header it sits shoulder to shoulder with plain
+   icon buttons and a shout would be out of place; inside the pause card it is
+   next to "Resume" as a real fork in the road (keep playing vs. end for
+   good), so it gets the same solid red every other destructive confirm in
+   this app uses (`.gs-btn-danger`). One rule, added to every game's
+   pause-card `EndGameControl` via the `gs-end-btn--pause` class, rather than
+   restyled per game — so a game added later gets this for free by using the
+   same class, instead of one more place to remember. */
+.gs-end-btn--pause.gs-end-btn--pause {
+  background: linear-gradient(135deg, #EF4444, #DC2626);
+  color: #FFFFFF;
+  border-color: transparent;
+}
+.gs-end-btn--pause.gs-end-btn--pause:hover {
+  background: linear-gradient(135deg, #F87171, #EF4444);
+  color: #FFFFFF;
+  filter: brightness(1.05);
+}
+
 /* ── Level chip and stat pills in the game headers ─────────────────────── */
 .bg-level-chip.bg-level-chip,
 .lb-level-chip.lb-level-chip,

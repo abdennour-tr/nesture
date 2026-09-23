@@ -521,7 +521,11 @@ export async function endSession(sessionId, gestures, reflexEngineOutput = null,
       narrative: 'Session completed successfully.',
       lpi_score: clientLpi,
       scenario: 'Completed Session',
-      reflex_scores: [], recommendations: [], metrics: {},
+      reflex_scores: [], recommendations: [],
+      /* SessionResults.jsx reads `metrics.duration_seconds` ("Time played"
+         tile) — it lived nowhere in this branch's metrics before, so the
+         report always showed "0:00" for a round with no scored gestures. */
+      metrics: { duration_seconds: updatePayload.duration_seconds },
     };
   }
 
@@ -547,6 +551,12 @@ export async function endSession(sessionId, gestures, reflexEngineOutput = null,
     fatigue_index: String(avgFatigue.toFixed(4)),
     midline_crossings: String(midline),
     head_hand_coupling: String(avgHhc.toFixed(4)),
+    /* `session` was fetched before the round ended, so its own duration_seconds
+       is still whatever it was when the row was created (null/0 — the report
+       showed "0:00" for every LetterQuest round because of this). The real
+       elapsed time was already computed above as `duration`; override it here
+       so _calculateMetrics() picks up the real value instead of the stale one. */
+    duration_seconds: String(duration),
   };
 
   // Passer la sortie temps réel pour fusion 60/40 dans aiEngine v2.0
@@ -618,7 +628,7 @@ export async function endSession(sessionId, gestures, reflexEngineOutput = null,
     scenario:   analysis.scenario,
     reflex_scores:   analysis.reflex_scores,
     recommendations: analysis.recommendations,
-    metrics:         analysis.metrics,
+    metrics:         analysis.metrics, // includes duration_seconds via sessionForEngine above
   };
 }
 

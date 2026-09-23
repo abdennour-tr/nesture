@@ -204,7 +204,7 @@ function ImpersonationBanner() {
           Impersonation Mode: You are viewing the dashboard of <strong>{profile ? `${profile.first_name || ''} ${profile.last_name || ''}` : 'User'}</strong> ({profile?.role === 'practitioner' ? 'Specialist' : profile?.role})
         </span>
         <span style={{ color: '#FCD34D', fontSize: '0.75rem', marginLeft: '10px', background: 'rgba(0,0,0,0.2)', padding: '2px 8px', borderRadius: '4px' }}>
-          Original Admin: {user?.email || originalProfile?.email || 'nesture.admin.secure.2026@gmail.com'}
+          Original Admin: {user?.email || originalProfile?.email || 'Administrator'}
         </span>
       </div>
       <button 
